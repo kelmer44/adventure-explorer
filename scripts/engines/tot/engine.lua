@@ -5,19 +5,25 @@
 -- CONVERSA.TXT
 --
 -- Image format: uint16le width-1, uint16le height-1, then raw 8-bit pixels
--- Palette: 768 bytes (256 x RGB), 6-bit VGA values (shift left 2)
+-- Palette: 768 bytes (256 x RGB), 6-bit VGA values (x4 for 8-bit)
 -- Room record: 10856 bytes per room in PANTALLA.DAT (8 save variants; use 1st)
 -- Object record: 279 bytes per object in OBJETOS.DAT
+--
+-- PANTALLA.DAT room record offsets (from ScummVM engines/tot/resources.cpp):
+--   +0:    room code (u16le)
+--   +2:    roomImagePointer (u32le) -- byte offset into BITMAPS.DAT
+--   +6:    roomImageSize (u16le)
+--   +9052: palettePointer (u16le)   -- DIRECT byte offset into PALETAS.DAT
 -- ============================================================================
 
 local engine = {}
 
-engine.name = "Trick or Treat"
-engine.id = "tot"
+engine.name        = "Trick or Treat"
+engine.id          = "tot"
 engine.description = "Trick or Treat (1997, DOS point-and-click adventure)"
-engine.version = "1.0"
+engine.version     = "1.1"
 
--- ── Binary helpers ──────────────────────────────────────────────
+-- ── Binary helpers ───────────────────────────────────────────────
 
 local function u8(data, pos)
     return data:byte(pos)
@@ -48,17 +54,16 @@ local function pascal_string(data, pos, max_len)
     return table.concat(chars)
 end
 
--- ── Constants ───────────────────────────────────────────────────
+-- ── Constants ────────────────────────────────────────────────────
 
-local ROOM_RECORD_SIZE = 10856     -- bytes per room in PANTALLA.DAT
-local ROOM_VARIANTS = 8           -- save-game variants per room
+local ROOM_RECORD_SIZE  = 10856   -- bytes per room in PANTALLA.DAT
+local ROOM_VARIANTS     = 8       -- save-game variants per room (use 1st)
 local OBJECT_RECORD_SIZE = 279    -- bytes per object in OBJETOS.DAT
-local PALETTE_SIZE = 768          -- 256 colors x 3 bytes
+local PALETTE_SIZE      = 768     -- 256 colors x 3 bytes
 
--- ── Detection ───────────────────────────────────────────────────
+-- ── Detection ────────────────────────────────────────────────────
 
 function engine.detect(game_path)
-    -- Trick or Treat requires BITMAPS.DAT and PANTALLA.DAT at minimum
     return file_exists(game_path .. "/BITMAPS.DAT")
        and file_exists(game_path .. "/PANTALLA.DAT")
        and file_exists(game_path .. "/PALETAS.DAT")
@@ -67,114 +72,100 @@ function engine.detect(game_path)
             or file_exists(game_path .. "/OBJETOS.DAT"))
 end
 
--- ── Resource tree ───────────────────────────────────────────────
+-- ── Resource tree ─────────────────────────────────────────────────
+-- Room-centric: each room gets Background + Palette children.
+-- Objects and Conversation are separate top-level categories.
 
 function engine.get_resources(game_path)
     local resources = {}
 
-    -- Count rooms from PANTALLA.DAT file size
-    local f = file_open(game_path .. "/PANTALLA.DAT")
-    local total_size = file_size(f)
-    local total_rooms = math.floor(total_size / ROOM_RECORD_SIZE)
-    file_close(f)
+    -- Count rooms
+    local f_pant = file_open(game_path .. "/PANTALLA.DAT")
+    local total_file_size = file_size(f_pant)
+    local total_rooms = math.floor(total_file_size / ROOM_RECORD_SIZE)
 
-    -- Count objects from OBJETOS.DAT
+    -- Count objects
     local num_objects = 0
     if file_exists(game_path .. "/OBJETOS.DAT") then
         local fo = file_open(game_path .. "/OBJETOS.DAT")
-        local obj_size = file_size(fo)
-        num_objects = math.floor(obj_size / OBJECT_RECORD_SIZE)
+        num_objects = math.floor(file_size(fo) / OBJECT_RECORD_SIZE)
         file_close(fo)
     end
 
-    log_info(string.format("TOT: Found %d rooms, %d objects", total_rooms, num_objects))
+    log_info(string.format("TOT: %d rooms, %d objects", total_rooms, num_objects))
 
-    -- ── Room Backgrounds category ──
-    local backgrounds = {
-        id = "backgrounds",
-        name = "Room Backgrounds",
-        type = "category",
+    -- ── Rooms (room-centric tree) ──────────────────────────────────
+    local rooms_cat = {
+        id       = "rooms",
+        name     = string.format("Rooms (%d)", total_rooms),
+        type     = "category",
         children = {}
     }
 
-    -- Scan all rooms for valid backgrounds
-    local f_pant = file_open(game_path .. "/PANTALLA.DAT")
     for room = 0, total_rooms - 1 do
         local room_offset = room * ROOM_RECORD_SIZE
-        local header = file_read(f_pant, room_offset, 10)
-        if header and #header >= 8 then
-            local room_code = u16le(header, 1)
-            local img_ptr = u32le(header, 3)
-            local img_size = u16le(header, 7)
 
-            if img_ptr > 0 and img_size > 4 then
-                backgrounds.children[#backgrounds.children + 1] = {
-                    id = "bg_" .. room,
-                    name = string.format("Room %02d (code %d)", room, room_code),
-                    type = "image"
-                }
-            end
+        -- Read room header (10 bytes covers code + image pointer + image size)
+        local header = file_read(f_pant, room_offset, 10)
+        if not header or #header < 8 then goto continue end
+
+        local room_code = u16le(header, 1)
+        local img_ptr   = u32le(header, 3)
+        local img_size  = u16le(header, 7)
+
+        -- Read palettePointer at offset +9052 (direct byte offset into PALETAS.DAT)
+        local pal_area  = file_read(f_pant, room_offset + 9052, 2)
+        local pal_ptr   = pal_area and u16le(pal_area, 1) or 0
+
+        local room_node = {
+            id       = "room_" .. room,
+            name     = string.format("Room %02d (code %d)", room, room_code),
+            type     = "category",
+            children = {}
+        }
+
+        -- Background child (only if bitmap exists)
+        if img_ptr > 0 and img_size > 4 then
+            room_node.children[#room_node.children + 1] = {
+                id   = "bg_" .. room,
+                name = "Background",
+                type = "image"
+            }
         end
+
+        -- Palette child (always present)
+        room_node.children[#room_node.children + 1] = {
+            id   = "pal_" .. room,
+            name = string.format("Palette (offset 0x%X)", pal_ptr),
+            type = "image"
+        }
+
+        rooms_cat.children[#rooms_cat.children + 1] = room_node
+        ::continue::
     end
     file_close(f_pant)
+    resources[#resources + 1] = rooms_cat
 
-    -- ── Room Palettes category ──
-    local palettes = {
-        id = "palettes",
-        name = "Room Palettes",
-        type = "category",
-        children = {}
-    }
-
-    local f_pant2 = file_open(game_path .. "/PANTALLA.DAT")
-    local seen_pals = {}
-    for room = 0, total_rooms - 1 do
-        local room_offset = room * ROOM_RECORD_SIZE
-        -- palettePointer is at offset +9022 within each room record
-        local pal_area = file_read(f_pant2, room_offset + 9022, 2)
-        if pal_area and #pal_area >= 2 then
-            local pal_idx = u16le(pal_area, 1)
-            local key = tostring(pal_idx)
-            if not seen_pals[key] then
-                seen_pals[key] = true
-                palettes.children[#palettes.children + 1] = {
-                    id = "pal_" .. room,
-                    name = string.format("Room %02d Palette (index %d)", room, pal_idx),
-                    type = "image"
-                }
-            else
-                palettes.children[#palettes.children + 1] = {
-                    id = "pal_" .. room,
-                    name = string.format("Room %02d Palette (index %d, shared)", room, pal_idx),
-                    type = "image"
-                }
-            end
-        end
-    end
-    file_close(f_pant2)
-
-    -- ── Objects category ──
+    -- ── Objects ───────────────────────────────────────────────────
     local objects = {
-        id = "objects",
-        name = "Objects",
-        type = "category",
+        id       = "objects",
+        name     = string.format("Objects (%d)", num_objects),
+        type     = "category",
         children = {}
     }
 
     if num_objects > 0 then
         local fo = file_open(game_path .. "/OBJETOS.DAT")
         for obj = 0, num_objects - 1 do
-            local obj_offset = obj * OBJECT_RECORD_SIZE
-            local obj_data = file_read(fo, obj_offset, 57)
+            local obj_data = file_read(fo, obj * OBJECT_RECORD_SIZE, 57)
             if obj_data and #obj_data >= 57 then
-                local code = u16le(obj_data, 1)
-                local name = pascal_string(obj_data, 4, 20)
+                local code    = u16le(obj_data, 1)
+                local name    = pascal_string(obj_data, 4, 20)
                 local bmp_ptr = u32le(obj_data, 52)
-                local bmp_size = u16le(obj_data, 56)
-
-                if bmp_ptr > 0 and bmp_size > 4 and #name > 0 then
+                local bmp_sz  = u16le(obj_data, 56)
+                if bmp_ptr > 0 and bmp_sz > 4 and #name > 0 then
                     objects.children[#objects.children + 1] = {
-                        id = "obj_" .. obj,
+                        id   = "obj_" .. obj,
                         name = string.format("%s (code %d)", name, code),
                         type = "image"
                     }
@@ -183,194 +174,73 @@ function engine.get_resources(game_path)
         end
         file_close(fo)
     end
+    resources[#resources + 1] = objects
 
-    -- ── Conversation Text category ──
+    -- ── Conversation Text ─────────────────────────────────────────
     local texts = {
-        id = "texts",
-        name = "Conversation Text",
-        type = "category",
+        id       = "texts",
+        name     = "Conversation Text",
+        type     = "category",
         children = {}
     }
 
     if file_exists(game_path .. "/CONVERSA.TXT") then
         local ft = file_open(game_path .. "/CONVERSA.TXT")
-        local txt_total = file_size(ft)
-        local num_entries = math.floor(txt_total / 263)
+        local num_entries = math.floor(file_size(ft) / 263)
         file_close(ft)
 
-        -- Group text in batches of 50
         local batch_size = 50
         for batch_start = 0, num_entries - 1, batch_size do
             local batch_end = math.min(batch_start + batch_size - 1, num_entries - 1)
             texts.children[#texts.children + 1] = {
-                id = "txt_" .. batch_start .. "_" .. batch_end,
-                name = string.format("Text entries %d-%d", batch_start, batch_end),
+                id   = string.format("txt_%d_%d", batch_start, batch_end),
+                name = string.format("Entries %d-%d", batch_start, batch_end),
                 type = "text"
             }
         end
-
-        log_info(string.format("TOT: Found %d conversation entries", num_entries))
+        log_info(string.format("TOT: %d conversation entries", num_entries))
     end
-
-    resources[#resources + 1] = backgrounds
-    resources[#resources + 1] = palettes
-    resources[#resources + 1] = objects
     resources[#resources + 1] = texts
 
     return resources
 end
 
--- ── Resource loading ────────────────────────────────────────────
+-- ── Resource dispatcher ──────────────────────────────────────────
 
 function engine.load_resource(game_path, resource_id)
-    -- Parse resource ID
-    local prefix, arg1, arg2 = resource_id:match("^(%a+)_(.+)$")
+    local prefix, arg = resource_id:match("^(%a+)_(.+)$")
 
-    if prefix == "bg" then
-        return load_room_background(game_path, tonumber(arg1))
-    elseif prefix == "pal" then
-        return load_room_palette(game_path, tonumber(arg1))
-    elseif prefix == "obj" then
-        return load_object_image(game_path, tonumber(arg1))
-    elseif prefix == "txt" then
-        local start, finish = arg1:match("^(%d+)_(%d+)$")
-        if start and finish then
-            return load_conversation_text(game_path, tonumber(start), tonumber(finish))
+    if prefix == "bg"  then return load_room_background(game_path, tonumber(arg))
+    elseif prefix == "pal"  then return load_room_palette(game_path, tonumber(arg))
+    elseif prefix == "obj"  then return load_object_image(game_path, tonumber(arg))
+    elseif prefix == "txt"  then
+        local s, e = arg:match("^(%d+)_(%d+)$")
+        if s and e then
+            return load_conversation_text(game_path, tonumber(s), tonumber(e))
         end
     end
-
     return nil
 end
 
--- ── Load room background ────────────────────────────────────────
+-- ── Load room background ─────────────────────────────────────────
 
 function load_room_background(game_path, room_num)
-    -- Read room record from PANTALLA.DAT
     local f_pant = file_open(game_path .. "/PANTALLA.DAT")
     local room_offset = room_num * ROOM_RECORD_SIZE
     local header = file_read(f_pant, room_offset, 10)
 
     local room_code = u16le(header, 1)
-    local img_ptr = u32le(header, 3)
-    local img_size = u16le(header, 7)
+    local img_ptr   = u32le(header, 3)
+    local img_size  = u16le(header, 7)
 
-    -- Read palette index
-    local pal_area = file_read(f_pant, room_offset + 9022, 2)
-    local pal_idx = u16le(pal_area, 1)
+    -- palettePointer at +9052: direct byte offset into PALETAS.DAT
+    local pal_area = file_read(f_pant, room_offset + 9052, 2)
+    local pal_ptr  = u16le(pal_area, 1)
     file_close(f_pant)
-
-    -- Read bitmap from BITMAPS.DAT
-    local f_bmp = file_open(game_path .. "/BITMAPS.DAT")
-    local bmp_data = file_read(f_bmp, img_ptr, img_size)
-    file_close(f_bmp)
-
-    if not bmp_data or #bmp_data < 5 then
-        return nil
-    end
-
-    -- Decode image: width-1, height-1, then pixels
-    local w = u16le(bmp_data, 1) + 1
-    local h = u16le(bmp_data, 3) + 1
-
-    local pixels = {}
-    local pixel_count = 0
-    for i = 5, math.min(#bmp_data, 4 + w * h) do
-        pixel_count = pixel_count + 1
-        pixels[pixel_count] = bmp_data:byte(i)
-    end
-
-    -- Pad if needed
-    while pixel_count < w * h do
-        pixel_count = pixel_count + 1
-        pixels[pixel_count] = 0
-    end
-
-    -- Read palette from PALETAS.DAT
-    local palette = load_vga_palette(game_path, pal_idx)
-    if not palette then
-        -- Fallback: greyscale palette
-        palette = {}
-        for i = 0, 255 do
-            palette[i * 3 + 1] = i
-            palette[i * 3 + 2] = i
-            palette[i * 3 + 3] = i
-        end
-    end
-
-    local img = image_create_indexed(w, h, pixels, palette)
-
-    return {
-        type = "image",
-        image = img,
-        width = w,
-        height = h,
-        description = string.format(
-            "Room %d (code %d) — %dx%d, palette index %d",
-            room_num, room_code, w, h, pal_idx
-        )
-    }
-end
-
--- ── Load room palette as swatch ─────────────────────────────────
-
-function load_room_palette(game_path, room_num)
-    local f_pant = file_open(game_path .. "/PANTALLA.DAT")
-    local pal_area = file_read(f_pant, room_num * ROOM_RECORD_SIZE + 9022, 2)
-    local pal_idx = u16le(pal_area, 1)
-    file_close(f_pant)
-
-    local palette = load_vga_palette(game_path, pal_idx)
-    if not palette then return nil end
-
-    -- Render 16x16 swatch grid (256 colors), 16px per cell = 256x256
-    local CELL = 16
-    local GRID = 16
-    local SIZE = CELL * GRID
-
-    local rgb = {}
-    local n = 0
-    for py = 0, SIZE - 1 do
-        for px = 0, SIZE - 1 do
-            local cx = math.floor(px / CELL)
-            local cy = math.floor(py / CELL)
-            local ci = cy * GRID + cx
-
-            n = n + 1; rgb[n] = palette[ci * 3 + 1]
-            n = n + 1; rgb[n] = palette[ci * 3 + 2]
-            n = n + 1; rgb[n] = palette[ci * 3 + 3]
-        end
-    end
-
-    local img = image_create_rgb(SIZE, SIZE, rgb)
-
-    return {
-        type = "image",
-        image = img,
-        width = SIZE,
-        height = SIZE,
-        description = string.format("Room %d palette (index %d) — 256 colors, VGA 6-bit", room_num, pal_idx)
-    }
-end
-
--- ── Load object image ───────────────────────────────────────────
-
-function load_object_image(game_path, obj_num)
-    local fo = file_open(game_path .. "/OBJETOS.DAT")
-    local obj_data = file_read(fo, obj_num * OBJECT_RECORD_SIZE, 279)
-    file_close(fo)
-
-    if not obj_data or #obj_data < 57 then return nil end
-
-    local code = u16le(obj_data, 1)
-    local name = pascal_string(obj_data, 4, 20)
-    local bmp_ptr = u32le(obj_data, 52)
-    local bmp_size = u16le(obj_data, 56)
-
-    if bmp_ptr == 0 or bmp_size <= 4 then return nil end
 
     -- Read bitmap
-    local f_bmp = file_open(game_path .. "/BITMAPS.DAT")
-    local bmp_data = file_read(f_bmp, bmp_ptr, bmp_size)
+    local f_bmp  = file_open(game_path .. "/BITMAPS.DAT")
+    local bmp_data = file_read(f_bmp, img_ptr, img_size)
     file_close(f_bmp)
 
     if not bmp_data or #bmp_data < 5 then return nil end
@@ -385,37 +255,108 @@ function load_object_image(game_path, obj_num)
         pixels[pixel_count] = bmp_data:byte(i)
     end
     while pixel_count < w * h do
-        pixel_count = pixel_count + 1
-        pixels[pixel_count] = 0
+        pixel_count = pixel_count + 1; pixels[pixel_count] = 0
     end
 
-    -- For objects, we don't know which room palette to use
-    -- Use a default palette (greyscale) or try palette index 0
-    local palette = load_vga_palette(game_path, 0)
+    -- Palette: use pal_ptr as DIRECT byte offset into PALETAS.DAT
+    local palette = load_vga_palette_at(game_path, pal_ptr)
     if not palette then
         palette = {}
         for i = 0, 255 do
-            palette[i * 3 + 1] = i
-            palette[i * 3 + 2] = i
-            palette[i * 3 + 3] = i
+            palette[i*3+1] = i; palette[i*3+2] = i; palette[i*3+3] = i
         end
     end
 
     local img = image_create_indexed(w, h, pixels, palette)
-
     return {
-        type = "image",
-        image = img,
-        width = w,
-        height = h,
+        type = "image", image = img, width = w, height = h,
         description = string.format(
-            "%s (code %d) — %dx%d pixels, bitmap at 0x%X",
-            name, code, w, h, bmp_ptr
+            "Room %d (code %d) - %dx%d, palette @0x%X",
+            room_num, room_code, w, h, pal_ptr
         )
     }
 end
 
--- ── Load conversation text ──────────────────────────────────────
+-- ── Load room palette swatch ─────────────────────────────────────
+
+function load_room_palette(game_path, room_num)
+    local f_pant = file_open(game_path .. "/PANTALLA.DAT")
+    local pal_area = file_read(f_pant, room_num * ROOM_RECORD_SIZE + 9052, 2)
+    local pal_ptr  = u16le(pal_area, 1)
+    file_close(f_pant)
+
+    local palette = load_vga_palette_at(game_path, pal_ptr)
+    if not palette then return nil end
+
+    local CELL, GRID = 16, 16
+    local SIZE = CELL * GRID
+    local rgb = {}; local n = 0
+
+    for py = 0, SIZE - 1 do
+        for px = 0, SIZE - 1 do
+            local ci = math.floor(py / CELL) * GRID + math.floor(px / CELL)
+            n=n+1; rgb[n] = palette[ci*3+1]
+            n=n+1; rgb[n] = palette[ci*3+2]
+            n=n+1; rgb[n] = palette[ci*3+3]
+        end
+    end
+
+    local img = image_create_rgb(SIZE, SIZE, rgb)
+    return {
+        type = "image", image = img, width = SIZE, height = SIZE,
+        description = string.format(
+            "Room %d palette - 256 colors, PALETAS.DAT @0x%X", room_num, pal_ptr
+        )
+    }
+end
+
+-- ── Load object image ────────────────────────────────────────────
+
+function load_object_image(game_path, obj_num)
+    local fo = file_open(game_path .. "/OBJETOS.DAT")
+    local obj_data = file_read(fo, obj_num * OBJECT_RECORD_SIZE, 279)
+    file_close(fo)
+    if not obj_data or #obj_data < 57 then return nil end
+
+    local code    = u16le(obj_data, 1)
+    local name    = pascal_string(obj_data, 4, 20)
+    local bmp_ptr = u32le(obj_data, 52)
+    local bmp_sz  = u16le(obj_data, 56)
+    if bmp_ptr == 0 or bmp_sz <= 4 then return nil end
+
+    local f_bmp = file_open(game_path .. "/BITMAPS.DAT")
+    local bmp_data = file_read(f_bmp, bmp_ptr, bmp_sz)
+    file_close(f_bmp)
+    if not bmp_data or #bmp_data < 5 then return nil end
+
+    local w = u16le(bmp_data, 1) + 1
+    local h = u16le(bmp_data, 3) + 1
+    local pixels = {}; local pixel_count = 0
+    for i = 5, math.min(#bmp_data, 4 + w * h) do
+        pixel_count = pixel_count + 1; pixels[pixel_count] = bmp_data:byte(i)
+    end
+    while pixel_count < w * h do
+        pixel_count = pixel_count + 1; pixels[pixel_count] = 0
+    end
+
+    local palette = load_vga_palette_at(game_path, 0)
+    if not palette then
+        palette = {}
+        for i = 0, 255 do
+            palette[i*3+1] = i; palette[i*3+2] = i; palette[i*3+3] = i
+        end
+    end
+
+    local img = image_create_indexed(w, h, pixels, palette)
+    return {
+        type = "image", image = img, width = w, height = h,
+        description = string.format(
+            "%s (code %d) - %dx%d, bitmap @0x%X", name, code, w, h, bmp_ptr
+        )
+    }
+end
+
+-- ── Load conversation text ───────────────────────────────────────
 
 function load_conversation_text(game_path, start_idx, end_idx)
     local ft = file_open(game_path .. "/CONVERSA.TXT")
@@ -424,15 +365,12 @@ function load_conversation_text(game_path, start_idx, end_idx)
     for entry = start_idx, end_idx do
         local entry_data = file_read(ft, entry * 263, 263)
         if entry_data and #entry_data >= 256 then
-            -- Pascal string: byte[0] = length, then up to 255 chars
             local len = u8(entry_data, 1)
             if len > 255 then len = 255 end
             local chars = {}
             for i = 1, len do
                 local b = entry_data:byte(1 + i)
-                if b and b >= 0x20 then
-                    chars[#chars + 1] = string.char(b)
-                end
+                if b and b >= 0x20 then chars[#chars + 1] = string.char(b) end
             end
             local text = table.concat(chars)
             if #text > 0 then
@@ -440,40 +378,33 @@ function load_conversation_text(game_path, start_idx, end_idx)
             end
         end
     end
-
     file_close(ft)
 
     return {
         type = "text",
         text = table.concat(lines, "\n"),
         description = string.format(
-            "Conversation entries %d-%d (%d entries)",
-            start_idx, end_idx, #lines
+            "Entries %d-%d (%d lines)", start_idx, end_idx, #lines
         )
     }
 end
 
--- ── Palette helper ──────────────────────────────────────────────
+-- ── VGA palette loader (DIRECT byte offset) ──────────────────────
+-- pal_byte_offset is the RAW byte offset into PALETAS.DAT (not index x768)
 
-function load_vga_palette(game_path, pal_index)
+function load_vga_palette_at(game_path, pal_byte_offset)
     if not file_exists(game_path .. "/PALETAS.DAT") then return nil end
-
-    local fp = file_open(game_path .. "/PALETAS.DAT")
-    local pal_raw = file_read(fp, pal_index * PALETTE_SIZE, PALETTE_SIZE)
+    local fp  = file_open(game_path .. "/PALETAS.DAT")
+    local raw = file_read(fp, pal_byte_offset, PALETTE_SIZE)
     file_close(fp)
-
-    if not pal_raw or #pal_raw < PALETTE_SIZE then return nil end
+    if not raw or #raw < PALETTE_SIZE then return nil end
 
     local palette = {}
     for i = 0, 255 do
-        local r = math.min(pal_raw:byte(i * 3 + 1) * 4, 255)
-        local g = math.min(pal_raw:byte(i * 3 + 2) * 4, 255)
-        local b = math.min(pal_raw:byte(i * 3 + 3) * 4, 255)
-        palette[i * 3 + 1] = r
-        palette[i * 3 + 2] = g
-        palette[i * 3 + 3] = b
+        palette[i*3+1] = math.min(raw:byte(i*3+1) * 4, 255)
+        palette[i*3+2] = math.min(raw:byte(i*3+2) * 4, 255)
+        palette[i*3+3] = math.min(raw:byte(i*3+3) * 4, 255)
     end
-
     return palette
 end
 
