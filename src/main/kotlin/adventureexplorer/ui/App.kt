@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.app.AppState
 import java.io.File
+import java.awt.FileDialog
+import java.awt.Frame
 import javax.swing.JFileChooser
 import javax.swing.UIManager
 
@@ -188,11 +190,29 @@ fun App() {
 // ── File dialogs (Swing) ──────────────────────────────────────
 
 private fun showOpenFolderDialog(appState: AppState) {
-    val chooser = JFileChooser()
-    chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-    chooser.dialogTitle = "Open Game Folder"
-    if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-        appState.openGameFolder(chooser.selectedFile.absolutePath)
+    // On macOS use the native NSOpenPanel which can access CD drives,
+    // /Volumes, iCloud Drive and will trigger sandbox permission prompts.
+    val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
+    if (isMac) {
+        System.setProperty("apple.awt.fileDialogForDirectories", "true")
+        val dialog = FileDialog(null as Frame?, "Open Game Folder", FileDialog.LOAD)
+        // Start at /Volumes so CD drives are immediately visible
+        dialog.directory = "/Volumes"
+        dialog.isVisible = true
+        System.setProperty("apple.awt.fileDialogForDirectories", "false")
+        val dir = dialog.directory ?: return
+        val file = dialog.file ?: return
+        appState.openGameFolder("$dir$file")
+    } else {
+        val chooser = JFileChooser()
+        chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+        chooser.dialogTitle = "Open Game Folder"
+        // Show /Volumes (CD drives, external disks) as a shortcut
+        val volumes = java.io.File("/Volumes")
+        if (volumes.exists()) chooser.currentDirectory = volumes
+        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+            appState.openGameFolder(chooser.selectedFile.absolutePath)
+        }
     }
 }
 

@@ -47,12 +47,15 @@ class LuaEngine {
 
         globals["file_open"] = object : OneArgFunction() {
             override fun call(path: LuaValue): LuaValue {
-                val f = findFileInsensitive(path.checkjstring())
-                    ?: throw LuaError("File not found: ${path.checkjstring()}")
-                val raf = RandomAccessFile(f, "r")
-                val handle = nextFileHandle++
-                openFiles[handle] = raf
-                return valueOf(handle)
+                val f = findFileInsensitive(path.checkjstring()) ?: return NIL
+                return try {
+                    val raf = RandomAccessFile(f, "r")
+                    val handle = nextFileHandle++
+                    openFiles[handle] = raf
+                    valueOf(handle)
+                } catch (e: Exception) {
+                    NIL
+                }
             }
         }
 
