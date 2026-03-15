@@ -56,7 +56,7 @@ private fun TreeNode(
     selectedNode: ResourceNode?,
     onNodeSelected: (ResourceNode) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    var expanded by remember { mutableStateOf(false) }
     val isSelected = selectedNode?.id == node.id
     val bgColor = if (isSelected) MaterialTheme.colors.primary.copy(alpha = 0.15f)
                   else Color.Transparent

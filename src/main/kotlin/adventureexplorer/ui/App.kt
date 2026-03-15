@@ -16,6 +16,7 @@ import adventureexplorer.app.AppState
 import java.io.File
 import java.awt.FileDialog
 import java.awt.Frame
+import java.util.prefs.Preferences
 import javax.swing.JFileChooser
 import javax.swing.UIManager
 
@@ -189,29 +190,34 @@ fun App() {
 
 // ── File dialogs (Swing) ──────────────────────────────────────
 
+private val prefs: Preferences = Preferences.userRoot().node("adventureexplorer")
+
 private fun showOpenFolderDialog(appState: AppState) {
-    // On macOS use the native NSOpenPanel which can access CD drives,
-    // /Volumes, iCloud Drive and will trigger sandbox permission prompts.
+    val lastPath = prefs.get("lastGamePath", null)
     val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
     if (isMac) {
         System.setProperty("apple.awt.fileDialogForDirectories", "true")
         val dialog = FileDialog(null as Frame?, "Open Game Folder", FileDialog.LOAD)
-        // Start at /Volumes so CD drives are immediately visible
-        dialog.directory = "/Volumes"
+        // Use last path if available, otherwise start at /Volumes for CD access
+        dialog.directory = lastPath ?: "/Volumes"
         dialog.isVisible = true
         System.setProperty("apple.awt.fileDialogForDirectories", "false")
         val dir = dialog.directory ?: return
         val file = dialog.file ?: return
-        appState.openGameFolder("$dir$file")
+        val chosen = "$dir$file"
+        prefs.put("lastGamePath", chosen)
+        appState.openGameFolder(chosen)
     } else {
         val chooser = JFileChooser()
         chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         chooser.dialogTitle = "Open Game Folder"
-        // Show /Volumes (CD drives, external disks) as a shortcut
-        val volumes = java.io.File("/Volumes")
-        if (volumes.exists()) chooser.currentDirectory = volumes
+        val startDir = lastPath?.let { java.io.File(it).parentFile }
+            ?: java.io.File("/Volumes").takeIf { it.exists() }
+        if (startDir != null) chooser.currentDirectory = startDir
         if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-            appState.openGameFolder(chooser.selectedFile.absolutePath)
+            val chosen = chooser.selectedFile.absolutePath
+            prefs.put("lastGamePath", chosen)
+            appState.openGameFolder(chosen)
         }
     }
 }
