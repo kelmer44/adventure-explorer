@@ -13,7 +13,7 @@ local engine = {}
 engine.name = "Toonstruck"
 engine.id = "toonstruck"
 engine.description = "Toonstruck (1996, Burst Studios / Virgin Interactive)"
-engine.version = "1.0"
+engine.version = "2.0"
 
 -- ── Binary helpers ──────────────────────────────────────────────
 
@@ -99,9 +99,10 @@ local function parse_pak_directory(f)
 end
 
 -- ── LZSS decompression ─────────────────────────────────────────
--- Bit-flagged: byte of flags controls 8 ops
--- flag=1: back-reference (12-bit offset | 4-bit length+3)  
--- flag=0: count consecutive 0-bits for literal run length
+-- Sentinel-based bitstream: each source byte + 0x100 sentinel.
+-- bit=1 → back-reference (u16le: upper 4 bits=len-3, lower 12 bits|0xF000=signed ofs)
+-- bit=0 → literal run (count consecutive 0-bits for Elias-gamma length)
+-- Verified against ScummVM engines/toon/tools.cpp decompressLZSS
 
 local function decompress_lzss(data, expected_size)
     local result = {}
@@ -109,43 +110,70 @@ local function decompress_lzss(data, expected_size)
     local pos = 1
     local len = #data
 
-    while n < expected_size and pos <= len do
-        local flags = data:byte(pos)
-        pos = pos + 1
+    if pos > len then return result, 0 end
 
-        for bit = 0, 7 do
-            if n >= expected_size or pos > len then break end
+    -- Load first byte + sentinel
+    local bitbuf = 256 + data:byte(pos)  -- 0x100 | byte
+    pos = pos + 1
 
-            if flags % 2 == 1 then
-                -- flag bit 1: back-reference
-                if pos + 1 > len then break end
-                local b1 = data:byte(pos)
-                local b2 = data:byte(pos + 1)
-                pos = pos + 2
-
-                local copy_offset = b1 + (b2 % 16) * 256
-                local copy_len = math.floor(b2 / 16) + 3
-
-                for i = 1, copy_len do
-                    if n >= expected_size then break end
-                    local src_idx = n - copy_offset
-                    if src_idx >= 1 and src_idx <= n then
-                        n = n + 1
-                        result[n] = result[src_idx]
-                    else
-                        n = n + 1
-                        result[n] = 0
-                    end
-                end
+    -- Extract next bit (LSB-first), reload when sentinel consumed
+    local function next_bit()
+        local flag = bitbuf % 2  -- extract LSB
+        bitbuf = math.floor(bitbuf / 2)  -- shift right
+        if bitbuf == 0 then
+            -- Sentinel consumed, reload
+            if pos <= len then
+                bitbuf = 256 + data:byte(pos)
+                pos = pos + 1
             else
-                -- flag bit 0: literal byte
-                if pos > len then break end
+                bitbuf = 256  -- pad with zeros
+            end
+        end
+        return flag
+    end
+
+    while n < expected_size do
+        local flag = next_bit()
+
+        if flag == 1 then
+            -- Back-reference
+            if pos + 1 > len then break end
+            local ofs_raw = data:byte(pos) + data:byte(pos + 1) * 256  -- u16le
+            pos = pos + 2
+
+            local copy_len = math.floor(ofs_raw / 4096) + 3  -- ((ofs & 0xF000) >> 12) + 3
+            -- ofs |= 0xF000 → signed short → negative offset from current position
+            -- effective backward distance = 4096 - (ofs_raw % 4096)
+            local backward = 4096 - (ofs_raw % 4096)
+
+            for _ = 1, copy_len do
+                if n >= expected_size then break end
+                n = n + 1
+                local src_idx = n - backward
+                result[n] = (src_idx >= 1) and result[src_idx] or 0
+            end
+        else
+            -- Literal run: count consecutive 0-bits for length encoding
+            local nBits = 0
+            while true do
+                local b = next_bit()
+                if b == 1 then break end
+                nBits = nBits + 1
+            end
+
+            -- Read nBits bits to build length (Elias gamma-like)
+            local run_len = 1
+            for _ = 1, nBits do
+                run_len = run_len * 2 + next_bit()
+            end
+
+            -- Copy run_len literal bytes from source
+            for _ = 1, run_len do
+                if n >= expected_size or pos > len then break end
                 n = n + 1
                 result[n] = data:byte(pos)
                 pos = pos + 1
             end
-
-            flags = math.floor(flags / 2)
         end
     end
 
@@ -153,6 +181,7 @@ local function decompress_lzss(data, expected_size)
 end
 
 -- ── SPCN decompression ─────────────────────────────────────────
+-- Verified against ScummVM engines/toon/tools.cpp decompressSPCN
 
 local function decompress_spcn(data, expected_size)
     local result = {}
@@ -165,28 +194,23 @@ local function decompress_spcn(data, expected_size)
         pos = pos + 1
 
         if val < 0x80 then
-            -- Back-reference: length in upper nibble, offset in lower nibble + next byte
+            -- Short back-reference: len in upper nibble, offset in lower nibble + next byte
             local copy_len = math.floor(val / 16) + 3
             if pos > len then break end
             local copy_offset = (val % 16) * 256 + data:byte(pos)
             pos = pos + 1
 
-            for i = 1, copy_len do
+            for _ = 1, copy_len do
                 if n >= expected_size then break end
+                n = n + 1
                 local src_idx = n - copy_offset
-                if src_idx >= 1 then
-                    n = n + 1
-                    result[n] = result[src_idx]
-                else
-                    n = n + 1
-                    result[n] = 0
-                end
+                result[n] = (src_idx >= 1) and result[src_idx] or 0
             end
 
         elseif val < 0xC0 then
             -- Literal run: length = val & 0x3F
             local run_len = val % 64
-            for i = 1, run_len do
+            for _ = 1, run_len do
                 if n >= expected_size or pos > len then break end
                 n = n + 1
                 result[n] = data:byte(pos)
@@ -200,7 +224,7 @@ local function decompress_spcn(data, expected_size)
             pos = pos + 2
             local fill_byte = data:byte(pos)
             pos = pos + 1
-            for i = 1, fill_len do
+            for _ = 1, fill_len do
                 if n >= expected_size then break end
                 n = n + 1
                 result[n] = fill_byte
@@ -214,16 +238,11 @@ local function decompress_spcn(data, expected_size)
             local copy_offset = u16le(data, pos)
             pos = pos + 2
 
-            for i = 1, copy_len do
+            for _ = 1, copy_len do
                 if n >= expected_size then break end
+                n = n + 1
                 local src_idx = n - copy_offset
-                if src_idx >= 1 then
-                    n = n + 1
-                    result[n] = result[src_idx]
-                else
-                    n = n + 1
-                    result[n] = 0
-                end
+                result[n] = (src_idx >= 1) and result[src_idx] or 0
             end
 
         else
@@ -233,16 +252,11 @@ local function decompress_spcn(data, expected_size)
             local copy_offset = u16le(data, pos)
             pos = pos + 2
 
-            for i = 1, copy_len do
+            for _ = 1, copy_len do
                 if n >= expected_size then break end
+                n = n + 1
                 local src_idx = n - copy_offset
-                if src_idx >= 1 then
-                    n = n + 1
-                    result[n] = result[src_idx]
-                else
-                    n = n + 1
-                    result[n] = 0
-                end
+                result[n] = (src_idx >= 1) and result[src_idx] or 0
             end
         end
     end
