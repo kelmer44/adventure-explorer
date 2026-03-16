@@ -457,7 +457,7 @@ function engine.get_resources(game_path)
         room_node.children[#room_node.children + 1] = {
             id   = "pal_" .. room_num,
             name = "Palette",
-            type = "image"
+            type = "palette"
         }
 
         resources[#resources + 1] = room_node

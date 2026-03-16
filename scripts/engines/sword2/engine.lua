@@ -240,7 +240,7 @@ function engine.get_resources(game_path)
                         screen_node.children[#screen_node.children + 1] = {
                             id   = "pal_" .. clu_label .. "_" .. entry.index,
                             name = "Palette",
-                            type = "image"
+                            type = "palette"
                         }
 
                         clu_node.children[#clu_node.children + 1] = screen_node

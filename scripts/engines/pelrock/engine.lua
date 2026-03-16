@@ -189,7 +189,7 @@ function engine.get_resources(game_path)
 
         -- Palette
         room_node.children[#room_node.children + 1] = {
-            id = "pal_" .. room, name = "Palette", type = "image"
+            id = "pal_" .. room, name = "Palette", type = "palette"
         }
 
         -- Text (pair 12)
@@ -266,7 +266,7 @@ end
 
 -- ── Resource dispatcher ──────────────────────────────────────────
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     -- spr_ROOM_SPRIDX_SEQIDX
     local r, s, q = resource_id:match("^spr_(%d+)_(%d+)_(%d+)$")
     if r then
@@ -277,7 +277,15 @@ function engine.load_resource(game_path, resource_id)
     local num = tonumber(num_str)
     if not prefix or not num then return nil end
 
-    if prefix == "bg"  then return load_background(game_path, num)
+    if prefix == "bg"  then
+        -- Support palette override via palette_id
+        if palette_id then
+            local pal_prefix, pal_num = palette_id:match("^(%a+)_(%d+)$")
+            if pal_prefix == "pal" and pal_num then
+                return load_background_with_palette(game_path, num, tonumber(pal_num))
+            end
+        end
+        return load_background(game_path, num)
     elseif prefix == "pal" then return load_palette_swatch(game_path, num)
     elseif prefix == "txt" then return load_room_text(game_path, num)
     end
@@ -285,6 +293,56 @@ function engine.load_resource(game_path, resource_id)
 end
 
 -- ── Background loader ─────────────────────────────────────────────
+
+-- Load background with a palette from a different room
+function load_background_with_palette(game_path, room_num, pal_room_num)
+    local WIDTH, HEIGHT = 640, 400
+    local f = file_open(game_path .. "/ALFRED.1")
+    local dir_data = file_read(f, room_num * 104, 104)
+
+    local pixels = {}
+    local pixel_count = 0
+
+    for pair = 0, 7 do
+        local base = pair * 8 + 1
+        local off  = u32le(dir_data, base)
+        local size = u32le(dir_data, base + 4)
+        if off > 0 and size > 0 then
+            local block = file_read(f, off, size)
+            if block then
+                if size == 0x8000 or size == 0x6800 then
+                    for i = 1, #block do
+                        pixel_count = pixel_count + 1
+                        pixels[pixel_count] = block:byte(i)
+                    end
+                else
+                    local decoded, n = decompress_rle(block)
+                    for i = 1, n do
+                        pixel_count = pixel_count + 1
+                        pixels[pixel_count] = decoded[i]
+                    end
+                end
+            end
+        end
+    end
+
+    -- Read palette from the specified room
+    local pal_dir_data = file_read(f, pal_room_num * 104, 104)
+    local palette = read_room_palette(f, pal_dir_data)
+    file_close(f)
+
+    local expected = WIDTH * HEIGHT
+    while pixel_count < expected do
+        pixel_count = pixel_count + 1; pixels[pixel_count] = 0
+    end
+
+    local img = image_create_indexed(WIDTH, HEIGHT, pixels, palette)
+    return {
+        type = "image", image = img,
+        description = string.format("Room %d background (pal from room %d) - %dx%d, 256 colors",
+            room_num, pal_room_num, WIDTH, HEIGHT)
+    }
+end
 
 function load_background(game_path, room_num)
     local WIDTH, HEIGHT = 640, 400

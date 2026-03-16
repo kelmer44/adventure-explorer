@@ -83,8 +83,9 @@ class ScriptManager {
 
     /**
      * Load a specific resource by ID using the currently active engine script.
+     * @param paletteId optional palette resource ID to override the default palette when rendering
      */
-    fun loadResource(gamePath: String, resourceId: String): ResourceData? {
+    fun loadResource(gamePath: String, resourceId: String, paletteId: String? = null): ResourceData? {
         val script = currentScript ?: return null
         val lua = engine ?: return null
 
@@ -92,10 +93,18 @@ class ScriptManager {
             val loadFunc = script.get("load_resource")
             if (loadFunc.isnil()) return null
 
-            val result = loadFunc.call(
-                LuaValue.valueOf(gamePath),
-                LuaValue.valueOf(resourceId)
-            )
+            val result = if (paletteId != null) {
+                loadFunc.call(
+                    LuaValue.valueOf(gamePath),
+                    LuaValue.valueOf(resourceId),
+                    LuaValue.valueOf(paletteId)
+                )
+            } else {
+                loadFunc.call(
+                    LuaValue.valueOf(gamePath),
+                    LuaValue.valueOf(resourceId)
+                )
+            }
 
             if (result.isnil()) return null
 

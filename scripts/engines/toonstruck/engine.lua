@@ -15,6 +15,30 @@ engine.id = "toonstruck"
 engine.description = "Toonstruck (1996, Burst Studios / Virgin Interactive)"
 engine.version = "2.0"
 
+-- ── Recursive file scanning ─────────────────────────────────────
+-- list_files returns both files and dirs. We detect dirs by trying
+-- list_files on each entry; a non-empty result means it's a dir.
+
+local function scan_pak_svl_recursive(base_path, rel_prefix, results)
+    local entries = list_files(base_path)
+    for i = 1, #entries do
+        local name  = entries[i]
+        local upper = name:upper()
+        local full  = base_path .. "/" .. name
+        local rel   = (rel_prefix ~= "") and (rel_prefix .. "/" .. name) or name
+
+        if upper:match("%.PAK$") or upper:match("%.SVL$") then
+            results[#results + 1] = { rel_path = rel, full_path = full, name = name }
+        else
+            -- Try recursing: list_files returns empty table for non-dirs
+            local sub = list_files(full)
+            if #sub > 0 then
+                scan_pak_svl_recursive(full, rel, results)
+            end
+        end
+    end
+end
+
 -- ── Binary helpers ──────────────────────────────────────────────
 
 local function u8(data, pos)
@@ -99,10 +123,9 @@ local function parse_pak_directory(f)
 end
 
 -- ── LZSS decompression ─────────────────────────────────────────
--- Sentinel-based bitstream: each source byte + 0x100 sentinel.
--- bit=1 → back-reference (u16le: upper 4 bits=len-3, lower 12 bits|0xF000=signed ofs)
--- bit=0 → literal run (count consecutive 0-bits for Elias-gamma length)
--- Verified against ScummVM engines/toon/tools.cpp decompressLZSS
+-- Bit-flagged: byte of flags controls 8 ops
+-- flag=1: back-reference (12-bit offset | 4-bit length+3)  
+-- flag=0: count consecutive 0-bits for literal run length
 
 local function decompress_lzss(data, expected_size)
     local result = {}
@@ -110,70 +133,43 @@ local function decompress_lzss(data, expected_size)
     local pos = 1
     local len = #data
 
-    if pos > len then return result, 0 end
+    while n < expected_size and pos <= len do
+        local flags = data:byte(pos)
+        pos = pos + 1
 
-    -- Load first byte + sentinel
-    local bitbuf = 256 + data:byte(pos)  -- 0x100 | byte
-    pos = pos + 1
+        for bit = 0, 7 do
+            if n >= expected_size or pos > len then break end
 
-    -- Extract next bit (LSB-first), reload when sentinel consumed
-    local function next_bit()
-        local flag = bitbuf % 2  -- extract LSB
-        bitbuf = math.floor(bitbuf / 2)  -- shift right
-        if bitbuf == 0 then
-            -- Sentinel consumed, reload
-            if pos <= len then
-                bitbuf = 256 + data:byte(pos)
-                pos = pos + 1
+            if flags % 2 == 1 then
+                -- flag bit 1: back-reference
+                if pos + 1 > len then break end
+                local b1 = data:byte(pos)
+                local b2 = data:byte(pos + 1)
+                pos = pos + 2
+
+                local copy_offset = b1 + (b2 % 16) * 256
+                local copy_len = math.floor(b2 / 16) + 3
+
+                for i = 1, copy_len do
+                    if n >= expected_size then break end
+                    local src_idx = n - copy_offset
+                    if src_idx >= 1 and src_idx <= n then
+                        n = n + 1
+                        result[n] = result[src_idx]
+                    else
+                        n = n + 1
+                        result[n] = 0
+                    end
+                end
             else
-                bitbuf = 256  -- pad with zeros
-            end
-        end
-        return flag
-    end
-
-    while n < expected_size do
-        local flag = next_bit()
-
-        if flag == 1 then
-            -- Back-reference
-            if pos + 1 > len then break end
-            local ofs_raw = data:byte(pos) + data:byte(pos + 1) * 256  -- u16le
-            pos = pos + 2
-
-            local copy_len = math.floor(ofs_raw / 4096) + 3  -- ((ofs & 0xF000) >> 12) + 3
-            -- ofs |= 0xF000 → signed short → negative offset from current position
-            -- effective backward distance = 4096 - (ofs_raw % 4096)
-            local backward = 4096 - (ofs_raw % 4096)
-
-            for _ = 1, copy_len do
-                if n >= expected_size then break end
-                n = n + 1
-                local src_idx = n - backward
-                result[n] = (src_idx >= 1) and result[src_idx] or 0
-            end
-        else
-            -- Literal run: count consecutive 0-bits for length encoding
-            local nBits = 0
-            while true do
-                local b = next_bit()
-                if b == 1 then break end
-                nBits = nBits + 1
-            end
-
-            -- Read nBits bits to build length (Elias gamma-like)
-            local run_len = 1
-            for _ = 1, nBits do
-                run_len = run_len * 2 + next_bit()
-            end
-
-            -- Copy run_len literal bytes from source
-            for _ = 1, run_len do
-                if n >= expected_size or pos > len then break end
+                -- flag bit 0: literal byte
+                if pos > len then break end
                 n = n + 1
                 result[n] = data:byte(pos)
                 pos = pos + 1
             end
+
+            flags = math.floor(flags / 2)
         end
     end
 
@@ -181,7 +177,6 @@ local function decompress_lzss(data, expected_size)
 end
 
 -- ── SPCN decompression ─────────────────────────────────────────
--- Verified against ScummVM engines/toon/tools.cpp decompressSPCN
 
 local function decompress_spcn(data, expected_size)
     local result = {}
@@ -194,23 +189,28 @@ local function decompress_spcn(data, expected_size)
         pos = pos + 1
 
         if val < 0x80 then
-            -- Short back-reference: len in upper nibble, offset in lower nibble + next byte
+            -- Back-reference: length in upper nibble, offset in lower nibble + next byte
             local copy_len = math.floor(val / 16) + 3
             if pos > len then break end
             local copy_offset = (val % 16) * 256 + data:byte(pos)
             pos = pos + 1
 
-            for _ = 1, copy_len do
+            for i = 1, copy_len do
                 if n >= expected_size then break end
-                n = n + 1
                 local src_idx = n - copy_offset
-                result[n] = (src_idx >= 1) and result[src_idx] or 0
+                if src_idx >= 1 then
+                    n = n + 1
+                    result[n] = result[src_idx]
+                else
+                    n = n + 1
+                    result[n] = 0
+                end
             end
 
         elseif val < 0xC0 then
             -- Literal run: length = val & 0x3F
             local run_len = val % 64
-            for _ = 1, run_len do
+            for i = 1, run_len do
                 if n >= expected_size or pos > len then break end
                 n = n + 1
                 result[n] = data:byte(pos)
@@ -224,7 +224,7 @@ local function decompress_spcn(data, expected_size)
             pos = pos + 2
             local fill_byte = data:byte(pos)
             pos = pos + 1
-            for _ = 1, fill_len do
+            for i = 1, fill_len do
                 if n >= expected_size then break end
                 n = n + 1
                 result[n] = fill_byte
@@ -238,11 +238,16 @@ local function decompress_spcn(data, expected_size)
             local copy_offset = u16le(data, pos)
             pos = pos + 2
 
-            for _ = 1, copy_len do
+            for i = 1, copy_len do
                 if n >= expected_size then break end
-                n = n + 1
                 local src_idx = n - copy_offset
-                result[n] = (src_idx >= 1) and result[src_idx] or 0
+                if src_idx >= 1 then
+                    n = n + 1
+                    result[n] = result[src_idx]
+                else
+                    n = n + 1
+                    result[n] = 0
+                end
             end
 
         else
@@ -252,11 +257,16 @@ local function decompress_spcn(data, expected_size)
             local copy_offset = u16le(data, pos)
             pos = pos + 2
 
-            for _ = 1, copy_len do
+            for i = 1, copy_len do
                 if n >= expected_size then break end
-                n = n + 1
                 local src_idx = n - copy_offset
-                result[n] = (src_idx >= 1) and result[src_idx] or 0
+                if src_idx >= 1 then
+                    n = n + 1
+                    result[n] = result[src_idx]
+                else
+                    n = n + 1
+                    result[n] = 0
+                end
             end
         end
     end
@@ -267,21 +277,22 @@ end
 -- ── Detection ───────────────────────────────────────────────────
 
 function engine.detect(game_path)
-    -- Toonstruck always has LOCAL.PAK
+    -- Toonstruck always has LOCAL.PAK (case-insensitive via file_exists)
     if not file_exists(game_path .. "/LOCAL.PAK") then
-        -- Try case variations
-        if not file_exists(game_path .. "/local.pak") then
-            return false
+        return false
+    end
+
+    -- Must also have at least one SVL file or DREW.PAK somewhere
+    local found = {}
+    scan_pak_svl_recursive(game_path, "", found)
+    for _, entry in ipairs(found) do
+        local upper = entry.name:upper()
+        if upper:match("%.SVL$") or upper == "DREW.PAK" then
+            return true
         end
     end
 
-    -- Must also have at least one of the scene SVL files or DREW.PAK
-    return file_exists(game_path .. "/ARCADDBL.SVL")
-        or file_exists(game_path .. "/GENERIC.SVL")
-        or file_exists(game_path .. "/STUDY.SVL")
-        or file_exists(game_path .. "/DREW.PAK")
-        or file_exists(game_path .. "/arcaddbl.svl")
-        or file_exists(game_path .. "/generic.svl")
+    return false
 end
 
 -- ── Resource tree ───────────────────────────────────────────────
@@ -289,126 +300,78 @@ end
 function engine.get_resources(game_path)
     local resources = {}
 
-    -- Scan for PAK files in the game directory
-    local all_files = list_files(game_path)
-    local pak_files = {}
+    -- Recursively find all PAK/SVL files
+    local all_paks = {}
+    scan_pak_svl_recursive(game_path, "", all_paks)
 
-    for i = 1, #all_files do
-        local name = all_files[i]
-        local upper = name:upper()
-        if upper:match("%.PAK$") or upper:match("%.SVL$") then
-            pak_files[#pak_files + 1] = name
-        end
-    end
+    -- Sort by relative path for consistent ordering
+    table.sort(all_paks, function(a, b) return a.rel_path:upper() < b.rel_path:upper() end)
 
-    table.sort(pak_files)
+    for _, pak_info in ipairs(all_paks) do
+        local f = file_open(pak_info.full_path)
+        if f then
+            local entries = parse_pak_directory(f)
+            file_close(f)
 
-    -- For each PAK, list image resources (files ending in .CPS, .BMP, etc.)
-    for _, pak_name in ipairs(pak_files) do
-        local pak_path = game_path .. "/" .. pak_name
-        local f = file_open(pak_path)
-        local entries = parse_pak_directory(f)
-        file_close(f)
+            if #entries > 0 then
+                local images = {}
+                local others = {}
 
-        if #entries > 0 then
-            local images = {}
-            local others = {}
-
-            for _, entry in ipairs(entries) do
-                local upper_name = entry.name:upper()
-                -- Check if it could be an image (starts with LZSS/SPCN/RNC magic)
-                -- We'll categorize by extension heuristics
-                if upper_name:match("%.CPS$")
-                    or upper_name:match("%.BMP$")
-                    or upper_name:match("%.PIC$")
-                    or upper_name:match("%.SCR$")
-                    or upper_name:match("BACK") then
-                    images[#images + 1] = entry
-                else
-                    others[#others + 1] = entry
+                for _, entry in ipairs(entries) do
+                    local upper_name = entry.name:upper()
+                    if upper_name:match("%.CPS$")
+                        or upper_name:match("%.BMP$")
+                        or upper_name:match("%.PIC$")
+                        or upper_name:match("%.SCR$")
+                        or upper_name:match("BACK") then
+                        images[#images + 1] = entry
+                    else
+                        others[#others + 1] = entry
+                    end
                 end
-            end
 
-            -- Add all files to an "All Files" category so user can try loading any
-            local children = {}
+                local children = {}
 
-            if #images > 0 then
-                local img_children = {}
-                for _, entry in ipairs(images) do
-                    img_children[#img_children + 1] = {
-                        id = "pak:" .. pak_name .. ":" .. entry.name,
+                if #images > 0 then
+                    local img_children = {}
+                    for _, entry in ipairs(images) do
+                        img_children[#img_children + 1] = {
+                            id = "pak:" .. pak_info.rel_path .. ":" .. entry.name,
+                            name = string.format("%s (%d bytes)", entry.name, entry.size),
+                            type = "image"
+                        }
+                    end
+                    children[#children + 1] = {
+                        id = "pakcat_img_" .. pak_info.rel_path,
+                        name = "Images (" .. #images .. ")",
+                        type = "category",
+                        children = img_children
+                    }
+                end
+
+                -- List all files for browsing
+                local all_children = {}
+                for _, entry in ipairs(entries) do
+                    all_children[#all_children + 1] = {
+                        id = "pak:" .. pak_info.rel_path .. ":" .. entry.name,
                         name = string.format("%s (%d bytes)", entry.name, entry.size),
                         type = "image"
                     }
                 end
+
                 children[#children + 1] = {
-                    id = "pakcat_img_" .. pak_name,
-                    name = "Images (" .. #images .. ")",
+                    id = "pakcat_all_" .. pak_info.rel_path,
+                    name = "All Files (" .. #entries .. ")",
                     type = "category",
-                    children = img_children
+                    children = all_children
                 }
-            end
 
-            -- List all files for browsing
-            local all_children = {}
-            for _, entry in ipairs(entries) do
-                -- Try to classify type by analyzing first bytes when loaded
-                all_children[#all_children + 1] = {
-                    id = "pak:" .. pak_name .. ":" .. entry.name,
-                    name = string.format("%s (%d bytes)", entry.name, entry.size),
-                    type = "image"  -- will attempt image decode; falls back gracefully
+                resources[#resources + 1] = {
+                    id = "pak_" .. pak_info.rel_path,
+                    name = pak_info.rel_path .. " (" .. #entries .. " files)",
+                    type = "category",
+                    children = children
                 }
-            end
-
-            children[#children + 1] = {
-                id = "pakcat_all_" .. pak_name,
-                name = "All Files (" .. #entries .. ")",
-                type = "category",
-                children = all_children
-            }
-
-            resources[#resources + 1] = {
-                id = "pak_" .. pak_name,
-                name = pak_name .. " (" .. #entries .. " files)",
-                type = "category",
-                children = children
-            }
-        end
-    end
-
-    -- Also scan subdirectories commonly used by Toonstruck
-    local subdirs = {"MISC", "ACT1", "ACT2", "ARCADDBL", "STUDY",
-                     "misc", "act1", "act2", "arcaddbl", "study"}
-    for _, subdir in ipairs(subdirs) do
-        local sub_path = game_path .. "/" .. subdir
-        local sub_files = list_files(sub_path)
-        if #sub_files > 0 then
-            for _, fname in ipairs(sub_files) do
-                local upper = fname:upper()
-                if upper:match("%.PAK$") or upper:match("%.SVL$") then
-                    local full_pak = sub_path .. "/" .. fname
-                    local f = file_open(full_pak)
-                    local entries = parse_pak_directory(f)
-                    file_close(f)
-
-                    if #entries > 0 then
-                        local children = {}
-                        for _, entry in ipairs(entries) do
-                            children[#children + 1] = {
-                                id = "pak:" .. subdir .. "/" .. fname .. ":" .. entry.name,
-                                name = string.format("%s (%d bytes)", entry.name, entry.size),
-                                type = "image"
-                            }
-                        end
-
-                        resources[#resources + 1] = {
-                            id = "pak_" .. subdir .. "_" .. fname,
-                            name = subdir .. "/" .. fname .. " (" .. #entries .. " files)",
-                            type = "category",
-                            children = children
-                        }
-                    end
-                end
             end
         end
     end
@@ -418,16 +381,16 @@ end
 
 -- ── Resource loading ────────────────────────────────────────────
 
-function engine.load_resource(game_path, resource_id)
-    -- ID format: pak:<pak_filename>:<entry_name>
-    local pak_name, entry_name = resource_id:match("^pak:(.+):([^:]+)$")
-    if not pak_name or not entry_name then
+function engine.load_resource(game_path, resource_id, palette_id)
+    -- ID format: pak:<relative_pak_path>:<entry_name>
+    local pak_rel, entry_name = resource_id:match("^pak:(.+):([^:]+)$")
+    if not pak_rel or not entry_name then
         log_warn("Unknown resource ID format: " .. resource_id)
         return nil
     end
 
     -- Open the PAK and find the entry
-    local pak_path = game_path .. "/" .. pak_name
+    local pak_path = game_path .. "/" .. pak_rel
     local f = file_open(pak_path)
     local entries = parse_pak_directory(f)
 

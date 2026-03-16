@@ -8,12 +8,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import adventureexplorer.model.ResourceNode
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
@@ -22,6 +24,9 @@ import javax.imageio.ImageIO
 fun PreviewPane(
     image: BufferedImage?,
     paletteImage: BufferedImage?,
+    paletteOptions: List<ResourceNode>,
+    selectedPaletteIndex: Int,
+    onPaletteSelected: (Int) -> Unit,
     description: String?,
     textContent: String?,
     canExportPalette: Boolean,
@@ -30,7 +35,16 @@ fun PreviewPane(
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
         when {
-            image != null -> ImagePreview(image, paletteImage, description, canExportPalette, onExportPaletteBin)
+            image != null -> ImagePreview(
+                image = image,
+                paletteImage = paletteImage,
+                paletteOptions = paletteOptions,
+                selectedPaletteIndex = selectedPaletteIndex,
+                onPaletteSelected = onPaletteSelected,
+                description = description,
+                canExportPalette = canExportPalette,
+                onExportPaletteBin = onExportPaletteBin
+            )
             textContent != null -> TextPreview(textContent, description)
             else -> EmptyPreview()
         }
@@ -43,11 +57,14 @@ fun PreviewPane(
 private fun ImagePreview(
     image: BufferedImage,
     paletteImage: BufferedImage?,
+    paletteOptions: List<ResourceNode>,
+    selectedPaletteIndex: Int,
+    onPaletteSelected: (Int) -> Unit,
     description: String?,
     canExportPalette: Boolean,
     onExportPaletteBin: () -> Unit
 ) {
-    var zoomLevel by remember { mutableStateOf(2) }
+    var zoomLevel by remember { mutableStateOf(1) }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
@@ -64,13 +81,7 @@ private fun ImagePreview(
                 color = Color(0xFFAAAAAA),
                 modifier = Modifier.weight(1f)
             )
-
-            // Zoom toggle buttons
-            ZoomButtons(
-                current = zoomLevel,
-                options = listOf(1, 2, 3),
-                onSelect = { zoomLevel = it }
-            )
+            ZoomButtons(current = zoomLevel, options = listOf(1, 2, 3), onSelect = { zoomLevel = it })
         }
 
         Divider(color = Color(0xFF333333))
@@ -78,7 +89,7 @@ private fun ImagePreview(
         // ── Content row: image + optional palette pane ───────
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
 
-            // Scrollable image
+            // Scrollable image at exact pixel size × zoom
             val hScroll = rememberScrollState()
             val vScroll = rememberScrollState()
             Box(
@@ -97,18 +108,22 @@ private fun ImagePreview(
                         (image.width * zoomLevel).dp,
                         (image.height * zoomLevel).dp
                     ),
-                    contentScale = ContentScale.FillBounds
+                    contentScale = ContentScale.FillBounds,
+                    filterQuality = FilterQuality.None   // nearest-neighbor
                 )
             }
 
-            // Palette side pane (only when palette is available)
-            if (paletteImage != null) {
+            // Palette side pane
+            if (paletteImage != null || paletteOptions.isNotEmpty()) {
                 Divider(
                     modifier = Modifier.fillMaxHeight().width(1.dp),
                     color = Color(0xFF333333)
                 )
                 PalettePane(
                     paletteImage = paletteImage,
+                    paletteOptions = paletteOptions,
+                    selectedPaletteIndex = selectedPaletteIndex,
+                    onPaletteSelected = onPaletteSelected,
                     canExport = canExportPalette,
                     onExportBin = onExportPaletteBin,
                     modifier = Modifier.width(220.dp).fillMaxHeight()
@@ -116,7 +131,7 @@ private fun ImagePreview(
             }
         }
 
-        // ── Footer: pixel dimensions ─────────────────────────
+        // ── Footer ───────────────────────────────────────────
         Divider(color = Color(0xFF333333))
         Text(
             text = "${image.width} \u00D7 ${image.height} px  \u00B7  zoom \u00D7$zoomLevel",
@@ -157,7 +172,10 @@ private fun ZoomButtons(current: Int, options: List<Int>, onSelect: (Int) -> Uni
 
 @Composable
 private fun PalettePane(
-    paletteImage: BufferedImage,
+    paletteImage: BufferedImage?,
+    paletteOptions: List<ResourceNode>,
+    selectedPaletteIndex: Int,
+    onPaletteSelected: (Int) -> Unit,
     canExport: Boolean,
     onExportBin: () -> Unit,
     modifier: Modifier = Modifier
@@ -172,25 +190,70 @@ private fun PalettePane(
             "Palette",
             fontSize = 11.sp,
             color = Color(0xFF888888),
-            modifier = Modifier.padding(bottom = 6.dp)
+            modifier = Modifier.padding(bottom = 4.dp)
         )
 
-        // Palette swatch image — displayed at its natural size or scaled to fit
-        val bitmap = paletteImage.toImageBitmap()
-        val vScroll = rememberScrollState()
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(vScroll),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Image(
-                bitmap = bitmap,
-                contentDescription = "Palette",
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                contentScale = ContentScale.FillWidth
-            )
+        // Dropdown to select palette (only shown if there are options)
+        if (paletteOptions.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            val currentName = paletteOptions.getOrNull(selectedPaletteIndex)?.name
+                ?: paletteOptions.firstOrNull()?.name
+                ?: "Default"
+
+            Box(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colors.primary
+                    )
+                ) {
+                    Text(currentName, fontSize = 11.sp, maxLines = 1)
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    paletteOptions.forEachIndexed { idx, palNode ->
+                        DropdownMenuItem(onClick = {
+                            expanded = false
+                            onPaletteSelected(idx)
+                        }) {
+                            Text(
+                                text = palNode.name,
+                                fontSize = 12.sp,
+                                color = if (idx == selectedPaletteIndex)
+                                    MaterialTheme.colors.primary
+                                else MaterialTheme.colors.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Palette swatch
+        if (paletteImage != null) {
+            val bitmap = paletteImage.toImageBitmap()
+            val vScroll = rememberScrollState()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(vScroll),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "Palette swatch",
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                    contentScale = ContentScale.FillWidth,
+                    filterQuality = FilterQuality.None   // nearest-neighbor
+                )
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(8.dp))

@@ -310,7 +310,7 @@ function engine.get_resources(game_path)
         room_node.children[#room_node.children + 1] = {
             id   = "pal_" .. basename:lower(),
             name = "Palette",
-            type = "image"
+            type = "palette"
         }
         rooms_cat.children[#rooms_cat.children + 1] = room_node
     end

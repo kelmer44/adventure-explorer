@@ -120,6 +120,9 @@ fun App() {
                     PreviewPane(
                         image = appState.previewImage,
                         paletteImage = appState.previewPaletteImage,
+                        paletteOptions = appState.previewPaletteOptions,
+                        selectedPaletteIndex = appState.selectedPaletteIndex,
+                        onPaletteSelected = { appState.applyPalette(it) },
                         description = appState.previewDesc,
                         textContent = appState.previewText,
                         canExportPalette = appState.canExportPalette,

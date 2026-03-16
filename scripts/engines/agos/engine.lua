@@ -53,25 +53,21 @@ end
 -- ============================================================================
 -- VGA file2 image table: 8-byte entries (BE)
 -- u32be dataOffset, u8 flags, u8 height, u16be width
+-- Entry 0 is always a null sentinel (offset=0). Table ends at next offset=0 or end of data.
 -- ============================================================================
 
 local function parse_image_table(data)
-    if not data or #data < 16 then return nil end
-
-    local first_offset = u32be(data, 1)
-    -- Validate: first_offset must be divisible by 8, in range 8..file_size
-    if first_offset < 8 or first_offset > #data then return nil end
-    if first_offset % 8 ~= 0 then return nil end
-
-    local num_images = math.floor(first_offset / 8)
-    -- Reject unreasonable table sizes (should be 1-500)
-    if num_images > 500 then return nil end
+    if not data or #data < 8 then return nil end
 
     local images = {}
-    local valid_count = 0
 
-    for i = 0, num_images - 1 do
-        local base = i * 8 + 1  -- 1-based
+    -- Scan entries: 8 bytes each, until offset=0 after entry 0 (sentinel)
+    -- or we fall off the end of data
+    local i = 0
+    local max_entries = math.min(500, math.floor(#data / 8))
+
+    while i < max_entries do
+        local base = i * 8 + 1  -- 1-based Lua position
         if base + 7 > #data then break end
 
         local offset = u32be(data, base)
@@ -79,23 +75,31 @@ local function parse_image_table(data)
         local height = u8(data, base + 5)
         local width  = u16be(data, base + 6)
 
-        -- Strict validation: offset within file, reasonable dimensions
-        if offset < #data and width > 0 and width <= 2560
+        -- Entry 0 is sentinel (offset=0), skip it but don't stop
+        if i == 0 and offset == 0 then
+            i = i + 1
+            -- peek next to know how many entries there are from second entry's offset
+            -- just continue scanning
+        elseif offset == 0 then
+            -- offset=0 after sentinel = end of table
+            break
+        end
+
+        -- Only add valid entries
+        if offset ~= 0 and offset < #data and width > 0 and width <= 2560
            and height > 0 and height <= 512 then
-            valid_count = valid_count + 1
             images[#images + 1] = {
-                index    = i,
-                offset   = offset,
-                flags    = flags,
-                width    = width,
-                height   = height,
-                is_5bit  = (flags % 256 >= 128)  -- bit 7 = 0x80
+                index   = i,
+                offset  = offset,
+                flags   = flags,
+                width   = width,
+                height  = height,
+                is_5bit = (flags >= 128)  -- bit 7 = 0x80
             }
         end
-    end
 
-    -- Reject tables where less than half of entries are valid (probably not an image table)
-    if num_images > 0 and valid_count < num_images / 2 then return nil end
+        i = i + 1
+    end
 
     return images
 end
@@ -261,9 +265,21 @@ end
 local function get_zone_data(game_path, zone, file_type)
     -- file_type: 1=scripts/palettes, 2=images
     local is_s2 = is_simon2(game_path)
-    local gme_name = is_s2 and "simon2.gme" or "simon.gme"
 
-    local gme_f = file_open(game_path .. "/" .. gme_name)
+    -- Try lowercase then uppercase GME filename
+    local gme_names
+    if is_s2 then
+        gme_names = { "simon2.gme", "SIMON2.GME" }
+    else
+        gme_names = { "simon.gme", "SIMON.GME" }
+    end
+
+    local gme_f = nil
+    for _, gme_name in ipairs(gme_names) do
+        gme_f = file_open(game_path .. "/" .. gme_name)
+        if gme_f then break end
+    end
+
     if gme_f then
         local offsets, num = parse_gme(gme_f)
         if offsets then
@@ -305,8 +321,12 @@ function engine.get_resources(game_path)
 
     -- Determine number of zones from GME or loose files
     local max_zone = 0
-    local gme_name = is_s2 and "simon2.gme" or "simon.gme"
-    local gme_f = file_open(game_path .. "/" .. gme_name)
+    local gme_names = is_s2 and { "simon2.gme", "SIMON2.GME" } or { "simon.gme", "SIMON.GME" }
+    local gme_f = nil
+    for _, gme_name in ipairs(gme_names) do
+        gme_f = file_open(game_path .. "/" .. gme_name)
+        if gme_f then break end
+    end
 
     if gme_f then
         local offsets, num = parse_gme(gme_f)
@@ -346,10 +366,10 @@ function engine.get_resources(game_path)
         if file2 and #file2 >= 8 then
             local images = parse_image_table(file2)
             if images and #images > 0 then
-                -- Filter for likely backgrounds
+                -- Filter for likely backgrounds (320x134 or 320x200, allow some slack)
                 local bgs = {}
                 for _, img in ipairs(images) do
-                    if img.width >= 320 and img.height >= 100
+                    if img.width >= 256 and img.height >= 100
                        and img.width <= 2560 and img.height <= 400 then
                         bgs[#bgs + 1] = img
                     end
