@@ -252,6 +252,18 @@ local function load_pic_image(pic_path, pal_path, label)
     if pal_path then
         palette = load_palette(pal_path)
     end
+
+    -- No PAL found or failed to load: try AA.PAL (game default) from same directory
+    if not palette then
+        local pic_dir = pic_path:match("^(.+)/[^/]+$") or "."
+        local aa_path = pic_dir .. "/AA.PAL"
+        if not file_exists(aa_path) then aa_path = pic_dir .. "/aa.pal" end
+        if file_exists(aa_path) then
+            palette = load_palette(aa_path)
+        end
+    end
+
+    -- Last resort: EGA fallback colors
     if not palette then
         palette = ega_palette()
     end

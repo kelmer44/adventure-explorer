@@ -10,7 +10,7 @@ local engine = {}
 engine.name        = "The Legend of Kyrandia: Hand of Fate"
 engine.id          = "kyra2"
 engine.description = "The Legend of Kyrandia: Hand of Fate (1993, Westwood Studios)"
-engine.version     = "1.0"
+engine.version     = "2.0"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -129,6 +129,11 @@ local function decompress_type4(data, src_start, output_size)
     while n < output_size and pos <= #data do
         local code = u8(data, pos); pos = pos + 1
 
+        -- End-of-stream marker (must check before bit tests)
+        if code == 0x80 then
+            break
+        end
+
         local bit7 = math.floor(code / 128) % 2
         local bit6 = math.floor(code / 64) % 2
 
@@ -163,8 +168,6 @@ local function decompress_type4(data, src_start, output_size)
                     local idx = offs + i
                     n = n + 1; output[n] = (idx >= 1 and idx <= #output) and output[idx] or 0
                 end
-            elseif code == 0x80 then
-                break
             else
                 local len = (code % 64) + 3
                 if pos + 1 > #data then break end
@@ -206,9 +209,9 @@ local function decode_cps(data)
             local r = u8(data, 11 + i * 3 + 0) % 64
             local g = u8(data, 11 + i * 3 + 1) % 64
             local b = u8(data, 11 + i * 3 + 2) % 64
-            pal_data[i * 3 + 1] = r * 4 + math.floor(r / 16)
-            pal_data[i * 3 + 2] = g * 4 + math.floor(g / 16)
-            pal_data[i * 3 + 3] = b * 4 + math.floor(b / 16)
+            pal_data[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+            pal_data[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+            pal_data[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
         end
     end
 
@@ -254,9 +257,9 @@ local function load_col_palette(data)
         local r = data:byte(i * 3 + 1) % 64
         local g = data:byte(i * 3 + 2) % 64
         local b = data:byte(i * 3 + 3) % 64
-        palette[i * 3 + 1] = r * 4 + math.floor(r / 16)
-        palette[i * 3 + 2] = g * 4 + math.floor(g / 16)
-        palette[i * 3 + 3] = b * 4 + math.floor(b / 16)
+        palette[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
     end
     return palette
 end
@@ -394,8 +397,9 @@ local function extract_from_pak(game_path, ark_name, file_name)
 end
 
 local function find_palette(game_path)
-    -- Try PALETTE.COL
+    -- Try PALETTE.COL (case-insensitive)
     local f = file_open(game_path .. "/PALETTE.COL")
+    if not f then f = file_open(game_path .. "/palette.col") end
     if f then
         local sz = file_size(f)
         local data = file_read(f, 0, sz)
@@ -411,9 +415,11 @@ end
 -- Try to find a matching COL file for a CPS scene
 local function find_scene_palette(game_path, base_name, archives)
     local col_name = base_name .. ".COL"
+    local col_name_lower = base_name:lower() .. ".col"
 
-    -- Check loose
+    -- Check loose (both casings)
     local f = file_open(game_path .. "/" .. col_name)
+    if not f then f = file_open(game_path .. "/" .. col_name_lower) end
     if f then
         local sz = file_size(f)
         local data = file_read(f, 0, sz)

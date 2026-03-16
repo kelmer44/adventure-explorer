@@ -9,7 +9,7 @@ local engine = {}
 engine.name        = "The Legend of Kyrandia"
 engine.id          = "kyra1"
 engine.description = "The Legend of Kyrandia (1992, Westwood Studios)"
-engine.version     = "1.0"
+engine.version     = "2.0"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -155,6 +155,11 @@ local function decompress_type4(data, src_start, output_size)
     while n < output_size and pos <= #data do
         local code = u8(data, pos); pos = pos + 1
 
+        -- End-of-stream marker (must check before bit tests)
+        if code == 0x80 then
+            break
+        end
+
         local bit7 = math.floor(code / 128) % 2  -- (code >> 7) & 1
         local bit6 = math.floor(code / 64) % 2   -- (code >> 6) & 1
 
@@ -186,20 +191,15 @@ local function decompress_type4(data, src_start, output_size)
                     n = n + 1; output[n] = val
                 end
             elseif code == 0xFF then
-                -- Long copy from output
+                -- Long copy from output (absolute offset)
                 if pos + 3 > #data then break end
                 local len = u16le(data, pos); pos = pos + 2
                 local offs = u16le(data, pos); pos = pos + 2
-                for _ = 1, len do
+                for i = 1, len do
                     if n >= output_size then break end
-                    local src_idx = offs + 1 + (n - (n - #output >= 0 and n - #output or 0))
-                    -- Copy from absolute output offset
-                    local idx = offs + 1 + (_ - 1)
+                    local idx = offs + i  -- 1-based absolute offset
                     n = n + 1; output[n] = (idx >= 1 and idx <= #output) and output[idx] or 0
                 end
-            elseif code == 0x80 then
-                -- End marker
-                break
             else
                 -- Copy from output with offset
                 local len = low6 + 3
@@ -247,9 +247,9 @@ local function decode_cps(data)
             local r = u8(data, 11 + i * 3 + 0) % 64  -- mask 6-bit
             local g = u8(data, 11 + i * 3 + 1) % 64
             local b = u8(data, 11 + i * 3 + 2) % 64
-            pal_data[i * 3 + 1] = r * 4 + math.floor(r / 16)  -- 6-bit to 8-bit
-            pal_data[i * 3 + 2] = g * 4 + math.floor(g / 16)
-            pal_data[i * 3 + 3] = b * 4 + math.floor(b / 16)
+            pal_data[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+            pal_data[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+            pal_data[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
         end
     end
 
@@ -310,9 +310,9 @@ local function load_col_palette(data)
         local r = data:byte(i * 3 + 1) % 64
         local g = data:byte(i * 3 + 2) % 64
         local b = data:byte(i * 3 + 3) % 64
-        palette[i * 3 + 1] = r * 4 + math.floor(r / 16)
-        palette[i * 3 + 2] = g * 4 + math.floor(g / 16)
-        palette[i * 3 + 3] = b * 4 + math.floor(b / 16)
+        palette[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
     end
     return palette
 end
@@ -424,9 +424,10 @@ end
 -- Resource loading
 -- ============================================================================
 
--- Find and load palette: try PALETTE.COL first, then CPS embedded
+-- Find and load palette: try PALETTE.COL first (case-insensitive)
 local function find_palette(game_path)
     local f = file_open(game_path .. "/PALETTE.COL")
+    if not f then f = file_open(game_path .. "/palette.col") end
     if f then
         local sz = file_size(f)
         local data = file_read(f, 0, sz)

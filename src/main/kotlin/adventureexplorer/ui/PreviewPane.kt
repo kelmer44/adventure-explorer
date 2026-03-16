@@ -2,9 +2,9 @@ package adventureexplorer.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,58 +21,196 @@ import javax.imageio.ImageIO
 @Composable
 fun PreviewPane(
     image: BufferedImage?,
+    paletteImage: BufferedImage?,
     description: String?,
     textContent: String?,
+    canExportPalette: Boolean,
+    onExportPaletteBin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
         when {
-            image != null -> ImagePreview(image, description)
+            image != null -> ImagePreview(image, paletteImage, description, canExportPalette, onExportPaletteBin)
             textContent != null -> TextPreview(textContent, description)
             else -> EmptyPreview()
         }
     }
 }
 
+// ── Image preview ─────────────────────────────────────────────
+
 @Composable
-private fun ImagePreview(image: BufferedImage, description: String?) {
+private fun ImagePreview(
+    image: BufferedImage,
+    paletteImage: BufferedImage?,
+    description: String?,
+    canExportPalette: Boolean,
+    onExportPaletteBin: () -> Unit
+) {
+    var zoomLevel by remember { mutableStateOf(2) }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Description header
-        if (description != null) {
+
+        // ── Header row: description + zoom buttons ───────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                text = description,
+                text = description ?: "${image.width} \u00D7 ${image.height}",
                 fontSize = 12.sp,
                 color = Color(0xFFAAAAAA),
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                modifier = Modifier.weight(1f)
+            )
+
+            // Zoom toggle buttons
+            ZoomButtons(
+                current = zoomLevel,
+                options = listOf(1, 2, 3),
+                onSelect = { zoomLevel = it }
             )
         }
 
-        // Image with scroll support for zooming later
+        Divider(color = Color(0xFF333333))
+
+        // ── Content row: image + optional palette pane ───────
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+
+            // Scrollable image
+            val hScroll = rememberScrollState()
+            val vScroll = rememberScrollState()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .horizontalScroll(hScroll)
+                    .verticalScroll(vScroll)
+                    .padding(8.dp)
+            ) {
+                val bitmap = image.toImageBitmap()
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = description ?: "Preview",
+                    modifier = Modifier.size(
+                        (image.width * zoomLevel).dp,
+                        (image.height * zoomLevel).dp
+                    ),
+                    contentScale = ContentScale.FillBounds
+                )
+            }
+
+            // Palette side pane (only when palette is available)
+            if (paletteImage != null) {
+                Divider(
+                    modifier = Modifier.fillMaxHeight().width(1.dp),
+                    color = Color(0xFF333333)
+                )
+                PalettePane(
+                    paletteImage = paletteImage,
+                    canExport = canExportPalette,
+                    onExportBin = onExportPaletteBin,
+                    modifier = Modifier.width(220.dp).fillMaxHeight()
+                )
+            }
+        }
+
+        // ── Footer: pixel dimensions ─────────────────────────
+        Divider(color = Color(0xFF333333))
+        Text(
+            text = "${image.width} \u00D7 ${image.height} px  \u00B7  zoom \u00D7$zoomLevel",
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+        )
+    }
+}
+
+// ── Zoom buttons ──────────────────────────────────────────────
+
+@Composable
+private fun ZoomButtons(current: Int, options: List<Int>, onSelect: (Int) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEach { z ->
+            val selected = z == current
+            val bg = if (selected) MaterialTheme.colors.primary.copy(alpha = 0.25f)
+                     else Color(0xFF333333)
+            val textColor = if (selected) MaterialTheme.colors.primary else Color(0xFFAAAAAA)
+            Box(
+                modifier = Modifier
+                    .background(bg, RoundedCornerShape(4.dp))
+                    .clickable { onSelect(z) }
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("\u00D7$z", fontSize = 12.sp, color = textColor)
+            }
+        }
+    }
+}
+
+// ── Palette side pane ─────────────────────────────────────────
+
+@Composable
+private fun PalettePane(
+    paletteImage: BufferedImage,
+    canExport: Boolean,
+    onExportBin: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(Color(0xFF222222))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Palette",
+            fontSize = 11.sp,
+            color = Color(0xFF888888),
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        // Palette swatch image — displayed at its natural size or scaled to fit
+        val bitmap = paletteImage.toImageBitmap()
+        val vScroll = rememberScrollState()
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
+                .verticalScroll(vScroll),
+            contentAlignment = Alignment.TopCenter
         ) {
-            val bitmap = image.toImageBitmap()
             Image(
                 bitmap = bitmap,
-                contentDescription = description ?: "Preview",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
+                contentDescription = "Palette",
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                contentScale = ContentScale.FillWidth
             )
         }
 
-        // Image info footer
-        Text(
-            text = "${image.width} \u00D7 ${image.height} pixels",
-            fontSize = 11.sp,
-            color = Color(0xFF777777),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+        Spacer(Modifier.height(8.dp))
+
+        // Export .bin button
+        Button(
+            onClick = onExportBin,
+            enabled = canExport,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                backgroundColor = MaterialTheme.colors.primary
+            ),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Text("\uD83D\uDCBE  Export .bin", fontSize = 12.sp)
+        }
     }
 }
+
+// ── Text preview ─────────────────────────────────────────────
 
 @Composable
 private fun TextPreview(text: String, description: String?) {
@@ -96,14 +234,13 @@ private fun TextPreview(text: String, description: String?) {
     }
 }
 
+// ── Empty preview ─────────────────────────────────────────────
+
 @Composable
 private fun EmptyPreview() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "\uD83D\uDD0D",
-                fontSize = 48.sp
-            )
+            Text(text = "\uD83D\uDD0D", fontSize = 48.sp)
             Spacer(Modifier.height(12.dp))
             Text(
                 text = "Select a resource to preview",
@@ -114,15 +251,10 @@ private fun EmptyPreview() {
     }
 }
 
-// ── Utility ─────────────────────────────────────────────────────
+// ── Utility ──────────────────────────────────────────────────
 
-/**
- * Convert a BufferedImage to a Compose ImageBitmap via PNG encoding.
- * This works reliably across all Compose Desktop versions.
- */
 private fun BufferedImage.toImageBitmap(): ImageBitmap {
     val baos = ByteArrayOutputStream()
     ImageIO.write(this, "png", baos)
-    val bytes = baos.toByteArray()
-    return org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
+    return org.jetbrains.skia.Image.makeFromEncoded(baos.toByteArray()).toComposeImageBitmap()
 }

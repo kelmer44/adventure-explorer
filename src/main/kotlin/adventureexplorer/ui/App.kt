@@ -78,7 +78,7 @@ fun App() {
 
                     Spacer(Modifier.width(8.dp))
 
-                    // Export button
+                    // Export PNG button
                     Button(
                         onClick = { showExportDialog(appState) },
                         enabled = appState.canExport,
@@ -86,8 +86,10 @@ fun App() {
                             backgroundColor = MaterialTheme.colors.primary
                         )
                     ) {
-                        Text("\uD83D\uDCBE  Export PNG")
+                        Text("💾  Export PNG")
                     }
+
+                    Spacer(Modifier.width(8.dp))
 
                     Spacer(Modifier.width(16.dp))
                 }
@@ -117,8 +119,11 @@ fun App() {
                     // Right panel: preview
                     PreviewPane(
                         image = appState.previewImage,
+                        paletteImage = appState.previewPaletteImage,
                         description = appState.previewDesc,
                         textContent = appState.previewText,
+                        canExportPalette = appState.canExportPalette,
+                        onExportPaletteBin = { showExportPaletteBinDialog(appState) },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
@@ -233,5 +238,19 @@ private fun showExportDialog(appState: AppState) {
         var path = chooser.selectedFile.absolutePath
         if (!path.lowercase().endsWith(".png")) path += ".png"
         appState.exportCurrentAsPng(path)
+    }
+}
+
+private fun showExportPaletteBinDialog(appState: AppState) {
+    val chooser = JFileChooser()
+    chooser.dialogTitle = "Export Palette as .bin"
+    val defaultName = (appState.selectedNode?.name ?: "palette")
+        .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
+        .replace(" ", "_")
+    chooser.selectedFile = File("${defaultName}_palette.bin")
+    if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+        var path = chooser.selectedFile.absolutePath
+        if (!path.lowercase().endsWith(".bin")) path += ".bin"
+        appState.exportPaletteBin(path)
     }
 }
