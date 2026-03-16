@@ -241,19 +241,16 @@ local function parse_ext_table(data)
 end
 
 -- ============================================================================
--- EGA 16-colour palette (GOB1 uses 16-color EGA; palette is in TOT scripts)
--- For preview we use standard EGA colours.
+-- EGA 16-colour palette (fallback when no VGA palette found)
 -- ============================================================================
 
-local function build_palette_table()
-    -- Standard EGA colours for indices 0-15, then grayscale ramp for 16-255
+local function build_ega_palette()
     local EGA = {
         {0,0,0},{0,0,168},{0,168,0},{0,168,168},
         {168,0,0},{168,0,168},{168,84,0},{168,168,168},
         {84,84,84},{84,84,252},{84,252,84},{84,252,252},
         {252,84,84},{252,84,252},{252,252,84},{252,252,252},
     }
-    -- image_create_indexed expects palette as 768-entry flat table (R0 G0 B0 R1 G1 B1 ...)
     local pal = {}
     for i = 0, 255 do
         local r, g, b
@@ -270,17 +267,76 @@ local function build_palette_table()
     return pal
 end
 
+-- Try to load VGA palette from a .TOT file within an STK archive
+-- TOT files have palette data at known offsets
+local function try_load_tot_palette(game_path, scene_id)
+    -- Look for a matching .TOT file in STK archives
+    local tot_names = { scene_id .. ".TOT", "INTRO.TOT" }
+    for _, stk_file in ipairs(STK_FILES) do
+        local raw = read_file_all(game_path .. "/" .. stk_file)
+              or   read_file_all(game_path .. "/" .. stk_file:lower())
+        if raw then
+            for _, tot_name in ipairs(tot_names) do
+                local tot_data = stk_extract(raw, tot_name)
+                if tot_data and #tot_data > 0x34 then
+                    -- TOT header: palette offset hint at byte 0x30 (u16le)
+                    -- Try to find 768-byte palette block (values 0-63)
+                    -- Common positions: near the start, after script code
+
+                    -- Method 1: Check if data at offset 0x34 looks like a VGA palette
+                    -- (all bytes should be <= 63 for 6-bit VGA)
+                    local try_offsets = { 0x34, 0x38, 0x50, 0x100 }
+                    for _, off in ipairs(try_offsets) do
+                        local base = off + 1  -- 1-based
+                        if base + 767 <= #tot_data then
+                            local is_vga = true
+                            local nonzero = 0
+                            for test = 0, 47 do  -- check first 16 colors
+                                local v = tot_data:byte(base + test)
+                                if v > 63 then is_vga = false; break end
+                                if v > 0 then nonzero = nonzero + 1 end
+                            end
+                            if is_vga and nonzero >= 6 then
+                                -- Found a valid VGA palette
+                                local pal = {}
+                                for i = 0, 255 do
+                                    local r = (tot_data:byte(base + i * 3) or 0) % 64
+                                    local g = (tot_data:byte(base + i * 3 + 1) or 0) % 64
+                                    local b = (tot_data:byte(base + i * 3 + 2) or 0) % 64
+                                    pal[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+                                    pal[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+                                    pal[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
+                                end
+                                return pal
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function build_palette_table(game_path, scene_id)
+    -- Try to load VGA palette from TOT files first
+    if game_path and scene_id then
+        local vga_pal = try_load_tot_palette(game_path, scene_id)
+        if vga_pal then return vga_pal end
+    end
+    return build_ega_palette()
+end
+end
+
 -- ============================================================================
 -- Render pixel index table → image handle (via image_create_indexed)
 -- ============================================================================
 
-local function render_sprite(pixels, w, h)
+local function render_sprite(pixels, w, h, pal)
     if not pixels or w <= 0 or h <= 0 then return nil end
-    local pal = build_palette_table()
-    -- image_create_indexed(w, h, pixel_table, palette_table)
-    -- pixel_table: 1-based, values 0-255; palette_table: 768 entries R,G,B,...
+    if not pal then pal = build_ega_palette() end
     local img = image_create_indexed(w, h, pixels, pal)
-    return img   -- returns integer handle
+    return img
 end
 
 -- ============================================================================
@@ -290,6 +346,9 @@ end
 local STK_FILES = {
     "DISK1.STK","DISK2.STK","DISK3.STK","DISK4.STK","DISK5.STK",
     "INTRO.STK","MUSIC.STK",
+    "GOBLINS2.STK","GOB2.STK","GOB2CD.STK","GOBLIN2.STK",
+    "COMMUN03.STK","GOB3.STK","GOB3CD.STK","GOBLIN3.STK",
+    "PLAYTOON.STK","ADIBOU.STK",
 }
 
 -- Find and return the STK raw bytes that contains ext_name_upper
@@ -353,8 +412,9 @@ function engine.detect(game_path)
             local entries = parse_stk(raw)
             if entries then
                 for name, _ in pairs(entries) do
-                    -- GOB scenes are named AVTxx.EXT
-                    if name:match("^AVT") and name:match("%.EXT$") then
+                    -- Gob1: AVTxx.EXT; Gob2/3: *.TOT
+                    if (name:match("^AVT") and name:match("%.EXT$"))
+                        or name:match("%.TOT$") then
                         return true
                     end
                 end
@@ -459,8 +519,11 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local pixels = load_entry_pixels(best, ext_data, commun_raw)
     if not pixels then return nil end
 
+    -- Build palette (try VGA from TOT file, fall back to EGA)
+    local pal = build_palette_table(game_path, scene_id)
+
     -- Render image
-    local img = render_sprite(pixels, best.w, best.h)
+    local img = render_sprite(pixels, best.w, best.h, pal)
     if not img then return nil end
 
     return {

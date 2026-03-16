@@ -116,17 +116,24 @@ function engine.get_resources(game_path)
     return resources
 end
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local prefix, num_str = resource_id:match("^(%a+)_(%d+)$")
     local num = tonumber(num_str)
     if not prefix or not num then return nil end
 
-    if prefix == "bg"  then return load_background(game_path, num) end
+    if prefix == "bg"  then
+        local pal_room = num  -- default: own palette
+        if palette_id and palette_id ~= "" then
+            local _, pnum_str = palette_id:match("^(%a+)_(%d+)$")
+            if pnum_str then pal_room = tonumber(pnum_str) end
+        end
+        return load_background(game_path, num, pal_room)
+    end
     if prefix == "pal" then return load_palette_swatch(game_path, num) end
     return nil
 end
 
-function load_background(game_path, room_num)
+function load_background(game_path, room_num, pal_room_num)
     local f = file_open(game_path .. "/TOUCHE.DAT")
 
     -- Read room info
@@ -136,8 +143,13 @@ function load_background(game_path, room_num)
     local info_head = file_read(f, info_off, 4)
     local img_num = u16le(info_head, 3)
 
-    -- Read palette from room info: skip 2 + 2(imgnum) + 2 = 6 bytes, then 768
-    local pal_raw = file_read(f, info_off + 6, 768)
+    -- Read palette from the palette room (may differ from the bg room)
+    local pal_info_off = info_off
+    if pal_room_num and pal_room_num ~= room_num then
+        local pal_ptr = file_read(f, OFF_ROOM_INFO + pal_room_num * 4, 4)
+        if pal_ptr then pal_info_off = u32le(pal_ptr, 1) end
+    end
+    local pal_raw = file_read(f, pal_info_off + 6, 768)
 
     -- Read room image offset
     local img_ptr_data = file_read(f, OFF_ROOM_IMAGE + img_num * 4, 4)

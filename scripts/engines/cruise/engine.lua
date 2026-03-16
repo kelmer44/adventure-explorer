@@ -259,9 +259,10 @@ end
 local function rgb_palette(data, offset)
     local palette = {}
     for i = 0, 255 do
-        palette[i * 3 + 1] = u8(data, offset + i * 3 + 0)
-        palette[i * 3 + 2] = u8(data, offset + i * 3 + 1)
-        palette[i * 3 + 3] = u8(data, offset + i * 3 + 2)
+        -- VGA DAC palette is 6-bit (0-63), scale to 8-bit (0-255)
+        palette[i * 3 + 1] = math.min(u8(data, offset + i * 3 + 0) * 4, 255)
+        palette[i * 3 + 2] = math.min(u8(data, offset + i * 3 + 1) * 4, 255)
+        palette[i * 3 + 3] = math.min(u8(data, offset + i * 3 + 2) * 4, 255)
     end
     return palette
 end
@@ -347,7 +348,7 @@ end
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local vol_name, file_name = resource_id:match("^res_([^_]+)_(.+)$")
     if not vol_name or not file_name then return nil end
 

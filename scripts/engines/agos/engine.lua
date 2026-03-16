@@ -106,6 +106,7 @@ end
 
 -- ============================================================================
 -- 5-bit packed decoder: 5 bytes -> 8 pixels (5 bits each, values 0-31)
+-- Used for UNCOMPRESSED backgrounds (rare)
 -- ============================================================================
 
 local function decode_5bit(data, offset, width, height)
@@ -138,6 +139,54 @@ local function decode_5bit(data, offset, width, height)
                 n = n + 1; pixels[n] = math.floor(bits2 / 32) % 32        -- >> 5
                 n = n + 1; pixels[n] = bits2 % 32                         -- & 0x1F
             end
+        end
+    end
+
+    return pixels
+end
+
+-- ============================================================================
+-- RLE decompressor for AGOS backgrounds (flags & 0x80)
+-- Each byte is a control: high bit set = repeat, else literal run
+-- Produces 1 byte per pixel (values 0-31 for 32-color, or 0-255)
+-- ============================================================================
+
+local function decompress_agos_rle(data, offset, width, height)
+    local pixels = {}
+    local n = 0
+    local total = width * height
+    local pos = offset
+
+    for _ = 1, height do
+        local row_pixels = 0
+        while row_pixels < width and pos <= #data do
+            local ctrl = u8(data, pos); pos = pos + 1
+
+            if ctrl >= 128 then
+                -- RLE: repeat next byte (ctrl & 0x7F + 1) times
+                local reps = ctrl - 128 + 1
+                if pos > #data then break end
+                local color = u8(data, pos); pos = pos + 1
+                local fills = math.min(reps, width - row_pixels)
+                for _ = 1, fills do
+                    n = n + 1; pixels[n] = color
+                end
+                row_pixels = row_pixels + fills
+            else
+                -- Literal: copy (ctrl + 1) bytes
+                local count = ctrl + 1
+                local copies = math.min(count, width - row_pixels)
+                for _ = 1, copies do
+                    if pos > #data then break end
+                    n = n + 1; pixels[n] = u8(data, pos); pos = pos + 1
+                end
+                row_pixels = row_pixels + copies
+            end
+        end
+        -- Pad remaining pixels in row
+        while row_pixels < width do
+            n = n + 1; pixels[n] = 0
+            row_pixels = row_pixels + 1
         end
     end
 
@@ -405,7 +454,7 @@ end
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local zone, img_idx = resource_id:match("^bg_(%d+)_(%d+)$")
     if not zone or not img_idx then return nil end
     zone = tonumber(zone); img_idx = tonumber(img_idx)
@@ -448,14 +497,14 @@ function engine.load_resource(game_path, resource_id)
 
     if target.is_5bit then
         if w > 320 then
-            -- Scrolling background: RLE columns
+            -- Scrolling background: RLE columns (Simon 2)
             pixels = decode_rle_columns(file2, target.offset + 1, w, h)
         else
-            -- Standard 5-bit packed
-            pixels = decode_5bit(file2, target.offset + 1, w, h)
+            -- Standard background: RLE compressed (1 byte per pixel)
+            pixels = decompress_agos_rle(file2, target.offset + 1, w, h)
         end
     else
-        -- Try raw 8-bit indexed
+        -- Uncompressed: raw 8-bit indexed (one byte per pixel)
         pixels = {}
         local total = w * h
         for i = 1, total do

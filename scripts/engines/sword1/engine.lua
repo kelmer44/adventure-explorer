@@ -469,12 +469,18 @@ end
 
 -- ── Resource dispatcher ──────────────────────────────────────────
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local prefix, num_str = resource_id:match("^(%a+)_(%d+)$")
     local num = tonumber(num_str)
     if not prefix or not num then return nil end
 
-    if prefix == "bg"  then return load_background(game_path, num)
+    if prefix == "bg" then
+        local pal_room = num  -- default: own palette
+        if palette_id and palette_id ~= "" then
+            local _, pnum_str = palette_id:match("^(%a+)_(%d+)$")
+            if pnum_str then pal_room = tonumber(pnum_str) end
+        end
+        return load_background(game_path, num, pal_room)
     elseif prefix == "pal" then return load_palette_swatch(game_path, num)
     end
     return nil
@@ -483,7 +489,7 @@ end
 -- ── Background loader ─────────────────────────────────────────────
 -- Background layer 0: raw 8bpp indexed pixels, NO header, width*height bytes.
 
-function load_background(game_path, room_num)
+function load_background(game_path, room_num, pal_room_num)
     local def = ROOM_DEFS[room_num]
     if not def or def.bg == 0 then return nil end
 
@@ -512,8 +518,9 @@ function load_background(game_path, room_num)
         pixels[#pixels + 1] = 0
     end
 
-    -- Build combined 256-color palette
-    local palette = build_palette(data_dir, rif, def.bgPal, def.sprPal)
+    -- Build combined 256-color palette (use override room if specified)
+    local pal_def = ROOM_DEFS[pal_room_num or room_num] or def
+    local palette = build_palette(data_dir, rif, pal_def.bgPal, pal_def.sprPal)
 
     local img = image_create_indexed(w, h, pixels, palette)
     return {

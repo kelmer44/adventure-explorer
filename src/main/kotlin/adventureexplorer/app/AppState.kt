@@ -293,11 +293,11 @@ class AppState {
                 val images   = node.children.filter { it.type == "image" }
                 val palettes = node.children.filter { it.type == "palette" }
 
-                // Build companion map: match by suffix after first underscore
+                // Build companion map: match by suffix after type prefix
                 if (palettes.isNotEmpty()) {
                     for (img in images) {
-                        val suffix = img.id.substringAfter('_', img.id)
-                        val companion = palettes.find { it.id.substringAfter('_', it.id) == suffix }
+                        val suffix = stripTypePrefix(img.id)
+                        val companion = palettes.find { stripTypePrefix(it.id) == suffix }
                         if (companion != null) paletteCompanionOf[img.id] = companion.id
                     }
                     categoryPaletteMap[node.id] = palettes
@@ -321,9 +321,24 @@ class AppState {
         return null
     }
 
+    /** Strip the type prefix (e.g. "bg_room1" → "room1", "pal:MONKEY:1" → "MONKEY:1"). */
+    private fun stripTypePrefix(id: String): String {
+        // Find the first separator ('_' or ':')
+        val underIdx = id.indexOf('_')
+        val colonIdx = id.indexOf(':')
+        val sepIdx = when {
+            underIdx >= 0 && colonIdx >= 0 -> minOf(underIdx, colonIdx)
+            underIdx >= 0 -> underIdx
+            colonIdx >= 0 -> colonIdx
+            else -> return id
+        }
+        return id.substring(sepIdx + 1)
+    }
+
     private fun derivePaletteId(bgId: String): String? {
         return when {
             bgId.startsWith("bg_")  -> "pal_" + bgId.removePrefix("bg_")
+            bgId.startsWith("bg:")  -> "pal:" + bgId.removePrefix("bg:")
             bgId.startsWith("cd_")  -> "pal_" + bgId.removePrefix("cd_")
                                             .substringBeforeLast('.')
             else -> null

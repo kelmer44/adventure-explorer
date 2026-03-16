@@ -293,12 +293,10 @@ end
 local function load_col_palette(data)
     if not data or #data < 768 then return nil end
 
-    -- Check if this is a CPS-format COL
-    if #data > 10 then
+    -- For files LARGER than raw palette, try CPS format first
+    if #data > 780 then
         local pal_size = u16le(data, 9)
-        local comp = u8(data, 3)
-        if pal_size == 768 or pal_size == 0 then
-            -- Might be CPS format; try decoding
+        if pal_size > 0 and pal_size <= 768 then
             local _, pal = decode_cps(data)
             if pal then return pal end
         end
@@ -460,7 +458,7 @@ local function extract_from_pak(game_path, ark_name, file_name)
     return nil
 end
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     -- Parse resource ID
     local prefix, rest = resource_id:match("^(%a+)_(.+)$")
     if not prefix then return nil end
@@ -491,9 +489,34 @@ function engine.load_resource(game_path, resource_id)
     local pixels, embedded_pal, w, h = decode_cps(cps_data)
     if not pixels then return nil end
 
-    -- Use embedded palette, or fall back to PALETTE.COL
-    local palette = embedded_pal or find_palette(game_path)
-    if not palette then
+    -- Use embedded palette merged with PALETTE.COL fallback.
+    -- Some CPS files only have partial palettes, so merge with global palette.
+    local global_pal = find_palette(game_path)
+    local palette
+
+    if embedded_pal then
+        palette = {}
+        for i = 0, 255 do
+            local r = embedded_pal[i * 3 + 1]
+            local g = embedded_pal[i * 3 + 2]
+            local b = embedded_pal[i * 3 + 3]
+            if r and g and b then
+                palette[i * 3 + 1] = r
+                palette[i * 3 + 2] = g
+                palette[i * 3 + 3] = b
+            elseif global_pal then
+                palette[i * 3 + 1] = global_pal[i * 3 + 1] or 0
+                palette[i * 3 + 2] = global_pal[i * 3 + 2] or 0
+                palette[i * 3 + 3] = global_pal[i * 3 + 3] or 0
+            else
+                palette[i * 3 + 1] = 0
+                palette[i * 3 + 2] = 0
+                palette[i * 3 + 3] = 0
+            end
+        end
+    elseif global_pal then
+        palette = global_pal
+    else
         -- Generate grayscale fallback
         palette = {}
         for i = 0, 255 do

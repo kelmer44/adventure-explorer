@@ -110,50 +110,64 @@ local function parse_v2_room(data)
 end
 
 -- ── V2 EGA Bitmap Decoder ───────────────────────────────────────
--- V2 bitmap: column-by-column RLE encoding
--- Each byte encodes run+color: high nibble=run, low nibble=color
--- Special: if run == 0, next byte is full run count; if run == 8 → dither mode
+-- V2 bitmap: column-by-column RLE encoding (matches ScummVM GdiV2::prepareDrawBitmap)
+-- Each byte: if bit7 set → run = (byte & 0x7F), dither=true
+--            if bit7 clear → run = (byte >> 4), dither=false
+-- Color is always (byte & 0x0F).  If run == 0 → next byte is the full count.
+-- Dither: when true, pixel comes from the dither table (previous column's value
+-- at the same row); when false, the current color is written to the table.
+-- The run counter is persistent across columns (NOT reset per column).
 
 local function decode_v2_bitmap(data, bm_start, width, height)
-    -- bm_start = 1-based index of first pixel byte (after im00 sub-block header)
     local pixels = {}
     local total = width * height
     for i = 1, total do pixels[i] = 0 end
 
+    -- Dither table: one entry per row (max height 128 in original engine)
+    local dither_table = {}
+    for i = 0, 127 do dither_table[i] = 0 end
+
     local pos = bm_start
-    local col = 0
+    local run = 1          -- starts at 1 so first decrement triggers a read
+    local color = 0
+    local dither = false
 
-    while col < width and pos <= #data do
-        -- Decode one column (height pixels)
-        local row = 0
-        while row < height do
-            if pos > #data then break end
-
-            local byte = u8(data, pos); pos = pos + 1
-            local color = band(byte, 0x0F)
-            local run_raw = rshift(byte, 4)
-
-            local run
-            if run_raw == 0 then
-                -- run=0: next byte is full run count
+    for col = 0, width - 1 do
+        local ptr_dither = 0               -- reset dither pointer each column
+        for row = 0, height - 1 do
+            run = run - 1
+            if run == 0 then
                 if pos > #data then break end
-                run = u8(data, pos); pos = pos + 1
-            else
-                run = run_raw
+                local b = u8(data, pos); pos = pos + 1
+
+                if band(b, 0x80) ~= 0 then
+                    run = band(b, 0x7F)    -- high-bit set → dither mode
+                    dither = true
+                else
+                    run = rshift(b, 4)     -- normal mode
+                    dither = false
+                end
+
+                color = band(b, 0x0F)
+
+                if run == 0 then
+                    if pos > #data then break end
+                    run = u8(data, pos); pos = pos + 1
+                end
             end
 
-            -- Fill 'run' pixels in this column
-            for _ = 1, run do
-                if row >= height then break end
-                local dst = row * width + col + 1
-                if dst <= total then
-                    pixels[dst] = color
-                end
-                row = row + 1
+            if not dither then
+                dither_table[ptr_dither] = color
+            end
+
+            local pixel_color = dither_table[ptr_dither]
+            ptr_dither = ptr_dither + 1
+
+            local dst = row * width + col + 1
+            if dst <= total then
+                pixels[dst] = pixel_color
             end
         end
-
-        col = col + 1
     end
 
     return pixels
@@ -274,7 +288,7 @@ end
 
 -- ── Resource loading ────────────────────────────────────────────
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local room_id_str = resource_id:match("^room_(%d+)$")
     if not room_id_str then
         log_warn("Unknown SCUMM V2 resource ID: " .. resource_id)
@@ -323,9 +337,8 @@ function engine.load_resource(game_path, resource_id)
         }
     end
 
-    -- Image sub-block starts at im00_offs (1-based)
-    -- Sub-block: u16le size, u16le tag, then pixel data
-    local bm_start = room.im00_offs + 1 + 4  -- +1 for 1-based, +4 for sub-block header
+    -- Image data starts directly at im00_offs (V2 has no sub-block header)
+    local bm_start = room.im00_offs + 1  -- +1 for Lua 1-based indexing
 
     if bm_start > #data then
         return {

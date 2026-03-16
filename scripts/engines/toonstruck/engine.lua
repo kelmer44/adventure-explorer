@@ -141,23 +141,21 @@ local function decompress_lzss(data, expected_size)
             if n >= expected_size or pos > len then break end
 
             if flags % 2 == 1 then
-                -- flag bit 1: back-reference
+                -- flag bit 1: back-reference (u16le: top 4 bits = len-3, low 12 bits = offset)
                 if pos + 1 > len then break end
-                local b1 = data:byte(pos)
-                local b2 = data:byte(pos + 1)
+                local raw = u16le(data, pos)
                 pos = pos + 2
 
-                local copy_offset = b1 + (b2 % 16) * 256
-                local copy_len = math.floor(b2 / 16) + 3
+                local copy_len = math.floor(raw / 4096) + 3
+                local back_dist = 4096 - (raw % 4096)
 
                 for i = 1, copy_len do
                     if n >= expected_size then break end
-                    local src_idx = n - copy_offset
-                    if src_idx >= 1 and src_idx <= n then
-                        n = n + 1
+                    local src_idx = n + 1 - back_dist
+                    n = n + 1
+                    if src_idx >= 1 and src_idx < n then
                         result[n] = result[src_idx]
                     else
-                        n = n + 1
                         result[n] = 0
                     end
                 end
@@ -323,6 +321,7 @@ function engine.get_resources(game_path)
                         or upper_name:match("%.BMP$")
                         or upper_name:match("%.PIC$")
                         or upper_name:match("%.SCR$")
+                        or upper_name:match("%.CAF$")
                         or upper_name:match("BACK") then
                         images[#images + 1] = entry
                     else
@@ -419,6 +418,14 @@ function engine.load_resource(game_path, resource_id, palette_id)
     -- Detect format from magic bytes (big-endian)
     local magic = u32be(raw, 1)
 
+    -- Check for CAF "KevinAguilar" magic (first 4 bytes = "Kevi")
+    if magic == 0x4B657669 and #raw >= 68 then
+        local magic12 = raw:sub(1, 12)
+        if magic12 == "KevinAguilar" then
+            return decode_caf_image(raw, entry_name)
+        end
+    end
+
     if magic == 0x4C5A5353 then
         -- "LZSS" format
         return decode_lzss_image(raw, entry_name)
@@ -495,33 +502,31 @@ function decode_lzss_image(raw, name)
         log_warn(string.format("LZSS: Only decompressed %d of %d bytes", pixel_count, dst_size))
     end
 
-    -- Determine dimensions and palette location
-    local width, height
-    local pal_bytes = dst_size % 2048  -- lower bits indicate palette tail
-    if pal_bytes == 0 then pal_bytes = 768 end
-
-    local pal_entries = math.floor(pal_bytes / 3)
+    -- Palette is always 768 bytes (256×3, 6-bit VGA) at end of decompressed data
+    local pal_bytes = 768
     local pixel_bytes = dst_size - pal_bytes
+    local pal_entries = 256
 
+    -- Determine width: 1280 for scrolling backgrounds, 640 for normal
+    local width = 640
     if pixel_bytes > 640 * 400 then
         width = 1280
-    else
-        width = 640
     end
-    height = 400
 
-    -- Adjust if pixel data doesn't match 640x400 or 1280x400
-    if pixel_bytes ~= width * height then
-        -- Try to infer from actual data
-        if pixel_bytes > 0 and pixel_bytes <= 1280 * 400 then
-            height = math.floor(pixel_bytes / width)
-            if height == 0 then height = 1 end
-        end
+    local height = math.floor(pixel_bytes / width)
+    if height <= 0 or pixel_bytes < width then
+        -- No room for palette — treat entire data as pixels (no embedded palette)
+        pal_bytes = 0
+        pal_entries = 0
+        pixel_bytes = dst_size
+        height = math.floor(pixel_bytes / width)
     end
+    if height > 480 then height = 480 end
+    if height < 1 then height = 1 end
 
     -- Build palette (at end of decompressed data)
     local palette = {}
-    if pal_entries >= 256 then
+    if pal_entries == 256 then
         local pal_start = pixel_bytes + 1
         for i = 0, 255 do
             local idx = pal_start + i * 3
@@ -634,6 +639,178 @@ function decode_spcn_image(raw, name)
         description = string.format(
             "%s — SPCN, %dx%d, %d palette entries, %d bytes decompressed",
             name, width, height, pal_entries, dst_size
+        )
+    }
+end
+
+-- ── CAF (Character Animation Format) decoder ───────────────────
+-- Header: 68 bytes starting with "KevinAguilar"
+-- All fields little-endian. Shows first frame of the animation.
+
+function decode_caf_image(raw, name)
+    -- Header fields (all u32le)
+    local frame_header_size = u32le(raw, 17)   -- offset 16
+    local uncomp_total      = u32le(raw, 21)   -- offset 20
+    local comp_total        = u32le(raw, 25)   -- offset 24
+    local num_frames        = u32le(raw, 29)   -- offset 28
+    local glob_x1           = u32le(raw, 33)   -- offset 32
+    local glob_y1           = u32le(raw, 37)   -- offset 36
+    local glob_x2           = u32le(raw, 41)   -- offset 40
+    local glob_y2           = u32le(raw, 45)   -- offset 44
+    local pal_entries       = u32le(raw, 57)   -- offset 56
+    local fps               = u32le(raw, 61)   -- offset 60
+    local pal_size          = u32le(raw, 65)   -- offset 64
+
+    if num_frames == 0 or frame_header_size < 32 then
+        return { type = "text", text = string.format("CAF: %s\n%d frames (empty)", name, num_frames),
+                 description = name .. " — CAF (empty)" }
+    end
+
+    -- Read palette (8-bit RGB, NOT 6-bit VGA) at offset 68
+    local palette = {}
+    local pal_off = 69  -- 1-based
+    if pal_entries > 0 and pal_size > 0 then
+        local n_colors = math.min(math.floor(pal_size / 3), 256)
+        for i = 0, n_colors - 1 do
+            local idx = pal_off + i * 3
+            if idx + 2 <= #raw then
+                palette[i * 3 + 1] = raw:byte(idx)
+                palette[i * 3 + 2] = raw:byte(idx + 1)
+                palette[i * 3 + 3] = raw:byte(idx + 2)
+            else
+                palette[i * 3 + 1] = i
+                palette[i * 3 + 2] = i
+                palette[i * 3 + 3] = i
+            end
+        end
+        -- Fill remaining entries with greyscale
+        for i = math.min(math.floor(pal_size / 3), 256), 255 do
+            palette[i * 3 + 1] = i
+            palette[i * 3 + 2] = i
+            palette[i * 3 + 3] = i
+        end
+    else
+        for i = 0, 255 do
+            palette[i * 3 + 1] = i
+            palette[i * 3 + 2] = i
+            palette[i * 3 + 3] = i
+        end
+    end
+
+    -- Frame data block starts after header + palette
+    local frame_data_off = 69 + pal_size  -- 1-based
+
+    -- Decompress the entire frame data block if needed
+    local frame_data
+    if comp_total < uncomp_total and frame_data_off <= #raw then
+        local compressed = raw:sub(frame_data_off)
+        frame_data, _ = decompress_lzss(compressed, uncomp_total)
+    elseif frame_data_off <= #raw then
+        -- Uncompressed: convert to table
+        frame_data = {}
+        local avail = math.min(uncomp_total, #raw - frame_data_off + 1)
+        for i = 1, avail do
+            frame_data[i] = raw:byte(frame_data_off + i - 1)
+        end
+    else
+        return { type = "text", text = "CAF: frame data out of bounds",
+                 description = name .. " — CAF (error)" }
+    end
+
+    -- Convert frame_data table to a string for u32le reads
+    local fd_chars = {}
+    for i = 1, #frame_data do
+        fd_chars[i] = string.char(frame_data[i] or 0)
+    end
+    local fd_str = table.concat(fd_chars)
+
+    -- Find first frame with actual pixel data
+    local fd_pos = 1  -- 1-based position in fd_str
+    local best_frame = nil
+
+    for fr = 0, num_frames - 1 do
+        if fd_pos + frame_header_size > #fd_str then break end
+
+        -- Frame header
+        local sentinel = u32le(fd_str, fd_pos)
+        if sentinel ~= 0x12345678 then break end
+
+        local ref       = u32le(fd_str, fd_pos + 4)
+        local comp_sz   = u32le(fd_str, fd_pos + 8)
+        local decomp_sz = u32le(fd_str, fd_pos + 12)
+        local fx1       = u32le(fd_str, fd_pos + 16)
+        local fy1       = u32le(fd_str, fd_pos + 20)
+        local fx2       = u32le(fd_str, fd_pos + 24)
+        local fy2       = u32le(fd_str, fd_pos + 28)
+
+        -- Treat as signed int32
+        if fx1 >= 0x80000000 then fx1 = fx1 - 0x100000000 end
+        if fy1 >= 0x80000000 then fy1 = fy1 - 0x100000000 end
+        if fx2 >= 0x80000000 then fx2 = fx2 - 0x100000000 end
+        if fy2 >= 0x80000000 then fy2 = fy2 - 0x100000000 end
+
+        local fw = fx2 - fx1
+        local fh = fy2 - fy1
+
+        -- ref == -1 (0xFFFFFFFF unsigned) means own data, decomp_sz > 0 means has pixels
+        local pixel_off = fd_pos + frame_header_size
+
+        if ref == 0xFFFFFFFF and decomp_sz > 0 and fw > 0 and fh > 0 then
+            -- This frame has its own pixel data
+            local pix_data
+            if comp_sz < decomp_sz then
+                -- LZSS compressed frame pixels
+                local comp_str = fd_str:sub(pixel_off, pixel_off + comp_sz - 1)
+                pix_data, _ = decompress_lzss(comp_str, decomp_sz)
+            else
+                -- Uncompressed
+                pix_data = {}
+                for i = 1, decomp_sz do
+                    local p = pixel_off + i - 1
+                    pix_data[i] = (p <= #fd_str) and fd_str:byte(p) or 0
+                end
+            end
+
+            best_frame = { pixels = pix_data, w = fw, h = fh, x1 = fx1, y1 = fy1, index = fr }
+            break
+        end
+
+        -- Advance to next frame
+        fd_pos = pixel_off + comp_sz
+    end
+
+    if not best_frame then
+        return {
+            type = "text",
+            text = string.format("CAF: %s\n%d frames, no decodable frame found\nGlobal bbox: %d,%d → %d,%d",
+                name, num_frames, glob_x1, glob_y1, glob_x2, glob_y2),
+            description = string.format("%s — CAF (%d frames)", name, num_frames)
+        }
+    end
+
+    -- Render the frame with transparency (index 0 = transparent → render as magenta)
+    local w, h = best_frame.w, best_frame.h
+    local total = w * h
+    local img_pixels = {}
+    for i = 1, total do
+        img_pixels[i] = best_frame.pixels[i] or 0
+    end
+
+    -- Set palette index 0 to magenta for transparency indication
+    palette[1] = 255
+    palette[2] = 0
+    palette[3] = 255
+
+    local img = image_create_indexed(w, h, img_pixels, palette)
+
+    return {
+        type = "image",
+        image = img,
+        width = w,
+        height = h,
+        description = string.format(
+            "%s — CAF, frame %d/%d, %dx%d, %d palette entries, %d fps",
+            name, best_frame.index + 1, num_frames, w, h, pal_entries, fps
         )
     }
 end

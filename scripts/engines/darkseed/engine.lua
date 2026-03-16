@@ -156,7 +156,7 @@ function engine.get_resources(game_path)
     local resources = {}
     local is_cd = has_picture_dir(game_path)
 
-    -- CD version: scan PICTURE/ for .PIC files
+    -- CD version: scan PICTURE/ for .PIC and .PAL files
     if is_cd then
         local pic_dir = game_path .. "/PICTURE"
         local files = list_files(pic_dir)
@@ -166,14 +166,19 @@ function engine.get_resources(game_path)
         end
 
         if files and #files > 0 then
-            -- Collect .PIC files
+            -- Collect .PIC and .PAL files
             local pic_files = {}
+            local pal_files = {}
             for _, fname in ipairs(files) do
-                if fname:upper():match("%.PIC$") then
+                local upper = fname:upper()
+                if upper:match("%.PIC$") then
                     pic_files[#pic_files + 1] = fname
+                elseif upper:match("%.PAL$") then
+                    pal_files[#pal_files + 1] = fname
                 end
             end
             table.sort(pic_files)
+            table.sort(pal_files)
 
             if #pic_files > 0 then
                 local cat = {
@@ -186,13 +191,33 @@ function engine.get_resources(game_path)
                 for _, fname in ipairs(pic_files) do
                     local base = fname:match("^(.+)%.[Pp][Ii][Cc]$") or fname
                     cat.children[#cat.children + 1] = {
-                        id = "cd_" .. fname,
+                        id = "bg_" .. base,
                         name = base,
                         type = "image"
                     }
                 end
 
                 resources[#resources + 1] = cat
+            end
+
+            if #pal_files > 0 then
+                local pal_cat = {
+                    id = "cd_palettes",
+                    name = string.format("Palettes (%d)", #pal_files),
+                    type = "category",
+                    children = {}
+                }
+
+                for _, fname in ipairs(pal_files) do
+                    local base = fname:match("^(.+)%.[Pp][Aa][Ll]$") or fname
+                    pal_cat.children[#pal_cat.children + 1] = {
+                        id = "pal_" .. base,
+                        name = base .. " palette",
+                        type = "palette"
+                    }
+                end
+
+                resources[#resources + 1] = pal_cat
             end
         end
     end
@@ -201,6 +226,12 @@ function engine.get_resources(game_path)
     local rooms_cat = {
         id = "floppy_rooms",
         name = "Rooms (Floppy)",
+        type = "category",
+        children = {}
+    }
+    local floppy_pals = {
+        id = "floppy_palettes",
+        name = "Palettes (Floppy)",
         type = "category",
         children = {}
     }
@@ -217,12 +248,24 @@ function engine.get_resources(game_path)
                 name = string.format("Room %d", room),
                 type = "image"
             }
+            local pal_path = find_file(game_path, base .. ".pal")
+            if pal_path then
+                floppy_pals.children[#floppy_pals.children + 1] = {
+                    id   = "pal_" .. room,
+                    name = string.format("Room %d palette", room),
+                    type = "palette"
+                }
+            end
         end
     end
 
     if #rooms_cat.children > 0 then
         rooms_cat.name = string.format("Rooms (%d)", #rooms_cat.children)
         resources[#resources + 1] = rooms_cat
+    end
+    if #floppy_pals.children > 0 then
+        floppy_pals.name = string.format("Palettes (%d)", #floppy_pals.children)
+        resources[#resources + 1] = floppy_pals
     end
 
     return resources
@@ -276,28 +319,62 @@ local function load_pic_image(pic_path, pal_path, label)
 end
 
 -- Resource loader
-function engine.load_resource(game_path, resource_id)
-    -- CD version resource: cd_FILENAME.PIC
-    local cd_name = resource_id:match("^cd_(.+)$")
-    if cd_name then
+function engine.load_resource(game_path, resource_id, palette_id)
+    local is_cd = has_picture_dir(game_path)
+
+    -- Resolve palette override path
+    local function get_override_pal_path()
+        if not palette_id or palette_id == "" then return nil end
+        local pal_base = palette_id:match("^pal_(.+)$")
+        if not pal_base then return nil end
+
+        if is_cd then
+            -- CD: pal_base is the .PAL basename (e.g. "BEDROOM")
+            local pic_dir = game_path .. "/PICTURE"
+            if not file_exists(pic_dir) then pic_dir = game_path .. "/picture" end
+            local try_pal = pic_dir .. "/" .. pal_base .. ".PAL"
+            if file_exists(try_pal) then return try_pal end
+            try_pal = pic_dir .. "/" .. pal_base .. ".pal"
+            if file_exists(try_pal) then return try_pal end
+        else
+            -- Floppy: pal_base is room number
+            local room_num = tonumber(pal_base)
+            if room_num then
+                local base
+                if room_num == 20 or room_num == 22 then base = "room19"
+                else base = "room" .. room_num end
+                return find_file(game_path, base .. ".pal")
+            end
+        end
+        return nil
+    end
+
+    -- CD version resource: bg_BASENAME
+    local cd_base = resource_id:match("^bg_(.+)$")
+    if cd_base and is_cd then
         local pic_dir = game_path .. "/PICTURE"
-        if not file_exists(pic_dir .. "/" .. cd_name) then
+        if not file_exists(pic_dir .. "/" .. cd_base .. ".PIC") then
             pic_dir = game_path .. "/picture"
         end
 
-        local pic_path = pic_dir .. "/" .. cd_name
-        -- Find matching .PAL file
-        local base = cd_name:match("^(.+)%.[Pp][Ii][Cc]$") or cd_name
-        local pal_path = nil
-        local try_pal = pic_dir .. "/" .. base .. ".PAL"
-        if file_exists(try_pal) then
-            pal_path = try_pal
-        else
-            try_pal = pic_dir .. "/" .. base .. ".pal"
-            if file_exists(try_pal) then pal_path = try_pal end
+        local pic_path = pic_dir .. "/" .. cd_base .. ".PIC"
+        if not file_exists(pic_path) then
+            pic_path = pic_dir .. "/" .. cd_base .. ".pic"
         end
 
-        return load_pic_image(pic_path, pal_path, base)
+        -- Use override palette or find matching .PAL
+        local pal_path = get_override_pal_path()
+        if not pal_path then
+            local try_pal = pic_dir .. "/" .. cd_base .. ".PAL"
+            if file_exists(try_pal) then
+                pal_path = try_pal
+            else
+                try_pal = pic_dir .. "/" .. cd_base .. ".pal"
+                if file_exists(try_pal) then pal_path = try_pal end
+            end
+        end
+
+        return load_pic_image(pic_path, pal_path, cd_base)
     end
 
     -- Floppy version resource: bg_N
@@ -313,8 +390,46 @@ function engine.load_resource(game_path, resource_id)
             return { type = "text", text = "No .pic file for room " .. room_num }
         end
 
-        local pal_path = find_file(game_path, base .. ".pal")
+        local pal_path = get_override_pal_path() or find_file(game_path, base .. ".pal")
         return load_pic_image(pic_path, pal_path, "Room " .. room_num)
+    end
+
+    -- Palette resource
+    local pal_arg = resource_id:match("^pal_(.+)$")
+    if pal_arg then
+        local pal_path
+        if is_cd then
+            local pic_dir = game_path .. "/PICTURE"
+            if not file_exists(pic_dir) then pic_dir = game_path .. "/picture" end
+            pal_path = pic_dir .. "/" .. pal_arg .. ".PAL"
+            if not file_exists(pal_path) then pal_path = pic_dir .. "/" .. pal_arg .. ".pal" end
+        else
+            local room_num = tonumber(pal_arg)
+            if room_num then
+                local base = (room_num == 20 or room_num == 22) and "room19" or ("room" .. room_num)
+                pal_path = find_file(game_path, base .. ".pal")
+            end
+        end
+        if pal_path and file_exists(pal_path) then
+            local palette = load_palette(pal_path)
+            if palette then
+                -- Render palette swatch
+                local swatch_w = 128
+                local swatch_h = 32
+                local pixels = {}
+                for y = 0, swatch_h - 1 do
+                    for x = 0, swatch_w - 1 do
+                        pixels[y * swatch_w + x + 1] = math.floor(x * 16 / swatch_w)
+                    end
+                end
+                local img = image_create_indexed(swatch_w, swatch_h, pixels, palette)
+                return {
+                    type = "image", image = img,
+                    description = string.format("Palette: %s (16 colors)", pal_arg)
+                }
+            end
+        end
+        return { type = "text", text = "Palette not found: " .. pal_arg }
     end
 
     return nil

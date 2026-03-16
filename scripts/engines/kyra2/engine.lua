@@ -243,15 +243,16 @@ end
 -- ============================================================================
 
 local function load_col_palette(data)
-    if not data or #data < 768 then return nil end
+    if not data or #data < 4 then return nil end
 
-    -- Try CPS format first
+    -- Try CPS format first (Kyra2 .COL files are CPS-compressed, often < 768 bytes)
     if #data > 10 then
         local _, pal = decode_cps(data)
         if pal then return pal end
     end
 
-    -- Raw palette
+    -- Raw palette (requires at least 768 bytes: 256 × 3)
+    if #data < 768 then return nil end
     local palette = {}
     for i = 0, 255 do
         local r = data:byte(i * 3 + 1) % 64
@@ -444,7 +445,7 @@ local function find_scene_palette(game_path, base_name, archives)
     return nil
 end
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local prefix, rest = resource_id:match("^(%a+)_(.+)$")
     if not prefix then return nil end
 
@@ -485,11 +486,34 @@ function engine.load_resource(game_path, resource_id)
     if not pixels then return nil end
 
     -- Palette priority: CPS embedded > scene .COL > PALETTE.COL > grayscale
-    local palette = embedded_pal
-    if not palette and base_name then
-        palette = find_scene_palette(game_path, base_name, archives)
+    -- Merge partial embedded palettes with scene/global palette
+    local scene_pal = nil
+    if base_name then scene_pal = find_scene_palette(game_path, base_name, archives) end
+    local global_pal = find_palette(game_path)
+
+    local palette
+    if embedded_pal then
+        -- Merge: embedded CPS palette may be partial
+        local fallback = scene_pal or global_pal
+        palette = {}
+        for i = 0, 255 do
+            local r = embedded_pal[i * 3 + 1]
+            local g = embedded_pal[i * 3 + 2]
+            local b = embedded_pal[i * 3 + 3]
+            if r and g and b then
+                palette[i * 3 + 1] = r; palette[i * 3 + 2] = g; palette[i * 3 + 3] = b
+            elseif fallback then
+                palette[i * 3 + 1] = fallback[i * 3 + 1] or 0
+                palette[i * 3 + 2] = fallback[i * 3 + 2] or 0
+                palette[i * 3 + 3] = fallback[i * 3 + 3] or 0
+            else
+                palette[i * 3 + 1] = 0; palette[i * 3 + 2] = 0; palette[i * 3 + 3] = 0
+            end
+        end
+    else
+        palette = scene_pal or global_pal
     end
-    if not palette then palette = find_palette(game_path) end
+
     if not palette then
         palette = {}
         for i = 0, 255 do

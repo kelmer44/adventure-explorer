@@ -137,7 +137,7 @@ function engine.get_resources(game_path)
         room_node.children[#room_node.children + 1] = {
             id   = "pal_" .. room,
             name = string.format("Palette (offset 0x%X)", pal_ptr),
-            type = "image"
+            type = "palette"
         }
 
         rooms_cat.children[#rooms_cat.children + 1] = room_node
@@ -207,12 +207,24 @@ end
 
 -- ── Resource dispatcher ──────────────────────────────────────────
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local prefix, arg = resource_id:match("^(%a+)_(.+)$")
 
-    if prefix == "bg"  then return load_room_background(game_path, tonumber(arg))
+    if prefix == "bg"  then
+        local pal_override = nil
+        if palette_id and palette_id ~= "" then
+            local _, pnum = palette_id:match("^(%a+)_(%d+)$")
+            if pnum then pal_override = tonumber(pnum) end
+        end
+        return load_room_background(game_path, tonumber(arg), pal_override)
     elseif prefix == "pal"  then return load_room_palette(game_path, tonumber(arg))
-    elseif prefix == "obj"  then return load_object_image(game_path, tonumber(arg))
+    elseif prefix == "obj"  then
+        local pal_override = nil
+        if palette_id and palette_id ~= "" then
+            local _, pnum = palette_id:match("^(%a+)_(%d+)$")
+            if pnum then pal_override = tonumber(pnum) end
+        end
+        return load_object_image(game_path, tonumber(arg), pal_override)
     elseif prefix == "txt"  then
         local s, e = arg:match("^(%d+)_(%d+)$")
         if s and e then
@@ -224,7 +236,7 @@ end
 
 -- ── Load room background ─────────────────────────────────────────
 
-function load_room_background(game_path, room_num)
+function load_room_background(game_path, room_num, pal_override)
     local f_pant = file_open(game_path .. "/PANTALLA.DAT")
     local room_offset = room_num * ROOM_RECORD_SIZE
     local header = file_read(f_pant, room_offset, 10)
@@ -234,7 +246,8 @@ function load_room_background(game_path, room_num)
     local img_size  = u16le(header, 7)
 
     -- palettePointer at +9052: direct byte offset into PALETAS.DAT
-    local pal_area = file_read(f_pant, room_offset + 9052, 2)
+    local pal_room = pal_override or room_num
+    local pal_area = file_read(f_pant, pal_room * ROOM_RECORD_SIZE + 9052, 2)
     local pal_ptr  = u16le(pal_area, 1)
     file_close(f_pant)
 
@@ -312,7 +325,7 @@ end
 
 -- ── Load object image ────────────────────────────────────────────
 
-function load_object_image(game_path, obj_num)
+function load_object_image(game_path, obj_num, pal_override)
     local fo = file_open(game_path .. "/OBJETOS.DAT")
     local obj_data = file_read(fo, obj_num * OBJECT_RECORD_SIZE, 279)
     file_close(fo)
@@ -339,7 +352,15 @@ function load_object_image(game_path, obj_num)
         pixel_count = pixel_count + 1; pixels[pixel_count] = 0
     end
 
-    local palette = load_vga_palette_at(game_path, 0)
+    -- Use palette override if specified, otherwise try to find the object's room palette
+    local pal_ptr = 0
+    if pal_override then
+        local f_pant = file_open(game_path .. "/PANTALLA.DAT")
+        local pal_area = file_read(f_pant, pal_override * ROOM_RECORD_SIZE + 9052, 2)
+        file_close(f_pant)
+        pal_ptr = pal_area and u16le(pal_area, 1) or 0
+    end
+    local palette = load_vga_palette_at(game_path, pal_ptr)
     if not palette then
         palette = {}
         for i = 0, 255 do

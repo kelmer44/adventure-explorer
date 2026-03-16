@@ -311,7 +311,7 @@ function engine.get_resources(game_path)
     local handles, num = parse_index(game_path, dw2)
     if not handles then return {} end
 
-    -- Collect unique data files
+    -- Collect unique data files from index
     local data_files = {}
     local seen = {}
     for i = 0, num - 1 do
@@ -321,6 +321,23 @@ function engine.get_resources(game_path)
             data_files[#data_files + 1] = { name = h.name, index = i }
         end
     end
+
+    -- For DW2: also scan .CDP files (not in INDEX but contain graphics data)
+    if dw2 then
+        local all_files = list_files(game_path)
+        if all_files then
+            for _, fname in ipairs(all_files) do
+                if fname:upper():match("%.CDP$") and not seen[fname:lower()] then
+                    seen[fname:lower()] = true
+                    data_files[#data_files + 1] = { name = fname, index = -1 }
+                end
+            end
+        end
+    end
+
+    -- Minimum dimensions: DW2 has composited backgrounds so show more images
+    local min_w = dw2 and 100 or 300
+    local min_h = dw2 and 80 or 100
 
     local resources = {}
 
@@ -349,7 +366,7 @@ function engine.get_resources(game_path)
                     -- Filter for background-sized images
                     local bg_images = {}
                     for _, img in ipairs(images) do
-                        if img.width >= 300 and img.height >= 100
+                        if img.width >= min_w and img.height >= min_h
                            and img.hImgBits ~= 0 then
                             bg_images[#bg_images + 1] = img
                         end
@@ -386,7 +403,7 @@ end
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local file_name, pos_str = resource_id:match("^img_(.+)_(%d+)$")
     if not file_name or not pos_str then return nil end
     local img_pos = tonumber(pos_str)  -- 1-based position of IMAGE struct

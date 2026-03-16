@@ -262,13 +262,21 @@ end
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     -- Format: bg_CLUNAME_INDEX or pal_CLUNAME_INDEX
     local prefix, clu_label, idx_str = resource_id:match("^(%a+)_(.+)_(%d+)$")
     local idx = tonumber(idx_str)
     if not prefix or not clu_label or not idx then return nil end
 
-    if prefix == "bg"  then return load_screen_bg(game_path, clu_label, idx) end
+    if prefix == "bg" then
+        -- Optional palette override from a different screen
+        local pal_clu, pal_idx = clu_label, idx
+        if palette_id and palette_id ~= "" then
+            local _, pc, pi = palette_id:match("^(%a+)_(.+)_(%d+)$")
+            if pc and pi then pal_clu = pc; pal_idx = tonumber(pi) end
+        end
+        return load_screen_bg(game_path, clu_label, idx, pal_clu, pal_idx)
+    end
     if prefix == "pal" then return load_screen_pal(game_path, clu_label, idx) end
     return nil
 end
@@ -306,7 +314,7 @@ local function read_screen_resource(game_path, clu_label, res_index)
     return data
 end
 
-function load_screen_bg(game_path, clu_label, res_index)
+function load_screen_bg(game_path, clu_label, res_index, pal_clu, pal_idx)
     local data = read_screen_resource(game_path, clu_label, res_index)
     if not data or #data < 80 then return nil end
 
@@ -356,8 +364,19 @@ function load_screen_bg(game_path, clu_label, res_index)
     local pixels = decompress_parallax(data, bg_start, w, h)
     if not pixels then return nil end
 
-    -- Read palette at 44 + pal_off (1024 bytes: 256 x [R,G,B,pad])
-    local pal_abs = 45 + pal_off
+    -- Determine palette source (override from a different screen if requested)
+    local pal_data = data
+    if pal_clu and pal_idx and (pal_clu ~= clu_label or pal_idx ~= res_index) then
+        local override = read_screen_resource(game_path, pal_clu, pal_idx)
+        if override and #override >= 80 and u8(override, 1) == 2 then
+            pal_data = override
+        end
+    end
+
+    -- Read palette from pal_data at 44 + pal_off (1024 bytes: 256 x [R,G,B,pad])
+    local pd_msh = 45
+    local pd_pal_off = u32le(pal_data, pd_msh + 0)
+    local pal_abs = 45 + pd_pal_off
     local palette = {}
     for i = 0, 255 do
         palette[i * 3 + 1] = 0
@@ -365,14 +384,14 @@ function load_screen_bg(game_path, clu_label, res_index)
         palette[i * 3 + 3] = 0
     end
 
-    if pal_abs + 1023 <= #data then
+    if pal_abs + 1023 <= #pal_data then
         -- Skip color 0 (forced black), read from entry 1
         for i = 1, 255 do
             local p = pal_abs + i * 4
-            if p + 2 <= #data then
-                palette[i * 3 + 1] = u8(data, p + 0)
-                palette[i * 3 + 2] = u8(data, p + 1)
-                palette[i * 3 + 3] = u8(data, p + 2)
+            if p + 2 <= #pal_data then
+                palette[i * 3 + 1] = u8(pal_data, p + 0)
+                palette[i * 3 + 2] = u8(pal_data, p + 1)
+                palette[i * 3 + 3] = u8(pal_data, p + 2)
             end
         end
     end
