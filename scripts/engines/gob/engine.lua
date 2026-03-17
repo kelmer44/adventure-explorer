@@ -326,7 +326,6 @@ local function build_palette_table(game_path, scene_id)
     end
     return build_ega_palette()
 end
-end
 
 -- ============================================================================
 -- Render pixel index table → image handle (via image_create_indexed)

@@ -17,9 +17,28 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-| Engine | ID | Resources | Status |
-|--------|----|-----------|--------|
-| Alfred Pelrock (1997) | `pelrock` | Backgrounds, Palettes, Text | ✅ Working |
+18 game engines are currently supported via Lua scripts — no recompilation needed.
+
+| Engine | Year | ID | Resources | Status |
+|--------|------|----|-----------|--------|
+| Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
+| Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
+| Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
+| Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
+| Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
+| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds | ✅ Working |
+| The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds | ✅ Working |
+| The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds | ✅ Working |
+| Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
+| SCUMM V5 (Monkey Island 2, Indiana Jones 4…) | 1991-93 | `scumm` | Backgrounds, Palettes | ✅ Working |
+| SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
+| The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes | ✅ Working |
+| Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes | ✅ Working |
+| Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes | ✅ Working |
+| Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds | ✅ Working |
+| Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
+| Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
+| Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
 
 ## Building & Running
 
@@ -153,9 +172,25 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/
-│       └── pelrock/
-│           └── engine.lua        # Alfred Pelrock engine script
+│   └── engines/                  # 18 engine scripts (Lua)
+│       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
+│       ├── cine/engine.lua       # Future Wars / Operation Stealth
+│       ├── cruise/engine.lua     # Cruise for a Corpse
+│       ├── darkseed/engine.lua   # Dark Seed
+│       ├── gob/engine.lua        # Gobliiins series
+│       ├── igor/engine.lua       # Igor: Objective Uikokahonia
+│       ├── kyra1/engine.lua      # The Legend of Kyrandia
+│       ├── kyra2/engine.lua      # Hand of Fate
+│       ├── pelrock/engine.lua    # Alfred Pelrock
+│       ├── scumm/engine.lua      # SCUMM V5
+│       ├── scummv2/engine.lua    # SCUMM V2
+│       ├── sherlock/engine.lua   # Sherlock Holmes
+│       ├── sword1/engine.lua     # Broken Sword 1
+│       ├── sword2/engine.lua     # Broken Sword 2
+│       ├── tinsel/engine.lua     # Discworld 1 & 2
+│       ├── tot/engine.lua        # Trick or Treat
+│       ├── toonstruck/engine.lua # Toonstruck
+│       └── touche/engine.lua     # Touché
 └── src/main/kotlin/adventureexplorer/
     ├── Main.kt                   # Entry point
     ├── app/
