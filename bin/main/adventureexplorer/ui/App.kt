@@ -13,12 +13,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.app.AppState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.awt.FileDialog
 import java.awt.Frame
 import java.util.prefs.Preferences
 import javax.swing.JFileChooser
-import javax.swing.UIManager
+import javax.swing.SwingUtilities
 
 // Dark color scheme
 private val DarkColors = darkColors(
@@ -35,13 +39,8 @@ private val DarkColors = darkColors(
 
 @Composable
 fun App() {
-    // Set native look and feel for file dialogs
-    LaunchedEffect(Unit) {
-        try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-        catch (_: Exception) {}
-    }
-
     val appState = remember { AppState() }
+    val scope = rememberCoroutineScope()
 
     MaterialTheme(colors = DarkColors) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colors.background) {
@@ -66,9 +65,10 @@ fun App() {
 
                     Spacer(Modifier.weight(1f))
 
-                    // Open Folder button
+                    // Open Folder button — launched on IO to avoid blocking the
+                    // Compose main thread while the file dialog is open.
                     Button(
-                        onClick = { showOpenFolderDialog(appState) },
+                        onClick = { scope.launch(Dispatchers.IO) { showOpenFolderDialog(appState) } },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = MaterialTheme.colors.primary
                         )
@@ -80,7 +80,7 @@ fun App() {
 
                     // Export PNG button
                     Button(
-                        onClick = { showExportDialog(appState) },
+                        onClick = { scope.launch(Dispatchers.IO) { showExportDialog(appState) } },
                         enabled = appState.canExport,
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = MaterialTheme.colors.primary
@@ -126,7 +126,7 @@ fun App() {
                         description = appState.previewDesc,
                         textContent = appState.previewText,
                         canExportPalette = appState.canExportPalette,
-                        onExportPaletteBin = { showExportPaletteBinDialog(appState) },
+                        onExportPaletteBin = { scope.launch(Dispatchers.IO) { showExportPaletteBinDialog(appState) } },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
@@ -200,60 +200,89 @@ fun App() {
 
 private val prefs: Preferences = Preferences.userRoot().node("adventureexplorer")
 
-private fun showOpenFolderDialog(appState: AppState) {
+// Run a block on the AWT EDT and wait for it to complete.
+// Must only be called from a non-EDT thread (i.e. Dispatchers.IO).
+private fun <T> onEdt(block: () -> T): T {
+    var result: T? = null
+    SwingUtilities.invokeAndWait { result = block() }
+    @Suppress("UNCHECKED_CAST")
+    return result as T
+}
+
+// All dialog functions are suspend so they can switch to Main for any Compose-state
+// mutations, while keeping the blocking EDT call on the IO thread.
+
+private suspend fun showOpenFolderDialog(appState: AppState) {
     val lastPath = prefs.get("lastGamePath", null)
     val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
     if (isMac) {
-        System.setProperty("apple.awt.fileDialogForDirectories", "true")
-        val dialog = FileDialog(null as Frame?, "Open Game Folder", FileDialog.LOAD)
-        // Use last path if available, otherwise start at /Volumes for CD access
-        dialog.directory = lastPath ?: "/Volumes"
-        dialog.isVisible = true
-        System.setProperty("apple.awt.fileDialogForDirectories", "false")
-        val dir = dialog.directory ?: return
-        val file = dialog.file ?: return
-        val chosen = "$dir$file"
+        val chosen = withContext(Dispatchers.IO) {
+            onEdt {
+                System.setProperty("apple.awt.fileDialogForDirectories", "true")
+                val dialog = FileDialog(null as Frame?, "Open Game Folder", FileDialog.LOAD)
+                dialog.directory = lastPath ?: "/Volumes"
+                dialog.isVisible = true
+                System.setProperty("apple.awt.fileDialogForDirectories", "false")
+                val dir = dialog.directory ?: return@onEdt null
+                val file = dialog.file ?: return@onEdt null
+                "$dir$file"
+            }
+        } ?: return
         prefs.put("lastGamePath", chosen)
-        appState.openGameFolder(chosen)
+        withContext(Dispatchers.Main) { appState.openGameFolder(chosen) }
     } else {
-        val chooser = JFileChooser()
-        chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-        chooser.dialogTitle = "Open Game Folder"
-        val startDir = lastPath?.let { java.io.File(it).parentFile }
-            ?: java.io.File("/Volumes").takeIf { it.exists() }
-        if (startDir != null) chooser.currentDirectory = startDir
-        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-            val chosen = chooser.selectedFile.absolutePath
-            prefs.put("lastGamePath", chosen)
-            appState.openGameFolder(chosen)
+        val chosen = withContext(Dispatchers.IO) {
+            onEdt {
+                val chooser = JFileChooser()
+                chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+                chooser.dialogTitle = "Open Game Folder"
+                val startDir = lastPath?.let { java.io.File(it).parentFile }
+                    ?: java.io.File("/Volumes").takeIf { it.exists() }
+                if (startDir != null) chooser.currentDirectory = startDir
+                if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION)
+                    chooser.selectedFile.absolutePath
+                else null
+            }
+        } ?: return
+        prefs.put("lastGamePath", chosen)
+        withContext(Dispatchers.Main) { appState.openGameFolder(chosen) }
+    }
+}
+
+private suspend fun showExportDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Export as PNG"
+            val defaultName = (appState.selectedNode?.name ?: "export")
+                .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
+                .replace(" ", "_")
+            chooser.selectedFile = File("$defaultName.png")
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                var path = chooser.selectedFile.absolutePath
+                if (!path.lowercase().endsWith(".png")) path += ".png"
+                path
+            } else null
         }
-    }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportCurrentAsPng(chosen) }
 }
 
-private fun showExportDialog(appState: AppState) {
-    val chooser = JFileChooser()
-    chooser.dialogTitle = "Export as PNG"
-    val defaultName = (appState.selectedNode?.name ?: "export")
-        .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
-        .replace(" ", "_")
-    chooser.selectedFile = File("$defaultName.png")
-    if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
-        var path = chooser.selectedFile.absolutePath
-        if (!path.lowercase().endsWith(".png")) path += ".png"
-        appState.exportCurrentAsPng(path)
-    }
-}
-
-private fun showExportPaletteBinDialog(appState: AppState) {
-    val chooser = JFileChooser()
-    chooser.dialogTitle = "Export Palette as .bin"
-    val defaultName = (appState.selectedNode?.name ?: "palette")
-        .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
-        .replace(" ", "_")
-    chooser.selectedFile = File("${defaultName}_palette.bin")
-    if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
-        var path = chooser.selectedFile.absolutePath
-        if (!path.lowercase().endsWith(".bin")) path += ".bin"
-        appState.exportPaletteBin(path)
-    }
+private suspend fun showExportPaletteBinDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Export Palette as .bin"
+            val defaultName = (appState.selectedNode?.name ?: "palette")
+                .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
+                .replace(" ", "_")
+            chooser.selectedFile = File("${defaultName}_palette.bin")
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                var path = chooser.selectedFile.absolutePath
+                if (!path.lowercase().endsWith(".bin")) path += ".bin"
+                path
+            } else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportPaletteBin(chosen) }
 }
