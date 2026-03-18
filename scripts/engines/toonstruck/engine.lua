@@ -124,7 +124,7 @@ end
 
 -- ── LZSS decompression ─────────────────────────────────────────
 -- Bit-flagged: byte of flags controls 8 ops
--- flag=1: back-reference (12-bit offset | 4-bit length+3)  
+-- flag=1: back-reference (12-bit offset | 4-bit length+3)
 -- flag=0: count consecutive 0-bits for literal run length
 
 local function decompress_lzss(data, expected_size)

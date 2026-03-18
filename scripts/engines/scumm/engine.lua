@@ -667,20 +667,30 @@ local function find_scumm_games(game_path)
 
     -- Look for .000/.001 pairs
     for _, f in ipairs(files) do
-        local base = f:match("^(.+)%.000$") or f:match("^(.+)%.000$")
-        if not base then
-            base = f:match("^(.+)%.000$")
-        end
+        local base = f:match("^(.+)%.000$")
         if base then
             local data_upper = base:upper() .. ".001"
             local data_file = name_map[data_upper]
             if data_file then
-                games[#games + 1] = {
-                    base_name  = base,
-                    index_path = game_path .. "/" .. f,
-                    data_path  = game_path .. "/" .. data_file,
-                    xor_key    = 0x69  -- V5 default
-                }
+                -- Verify it's a SCUMM data file: first 8 bytes must decode to "LECF" tag
+                local peek_f = file_open(game_path .. "/" .. data_file)
+                local is_scumm = false
+                if peek_f then
+                    local peek = file_read(peek_f, 0, 8)
+                    file_close(peek_f)
+                    if peek and #peek >= 4 then
+                        local dec = xor_decrypt(peek, 0x69)
+                        is_scumm = (dec:sub(1, 4) == "LECF")
+                    end
+                end
+                if is_scumm then
+                    games[#games + 1] = {
+                        base_name  = base,
+                        index_path = game_path .. "/" .. f,
+                        data_path  = game_path .. "/" .. data_file,
+                        xor_key    = 0x69  -- V5 default
+                    }
+                end
             end
         end
     end
