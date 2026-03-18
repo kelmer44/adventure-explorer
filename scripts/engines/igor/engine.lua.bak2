@@ -8,14 +8,12 @@
 --   CD     (Spanish): IGOR.EXE  9,115,648 bytes (NE executable with embedded
 --                     resources) + IGOR.DAT 61,682,719 bytes (speech)
 --
--- Resource offsets:
---   Floppy: binary analysis of the 11.2 MB Spanish floppy IGOR.DAT
---           (the ScummVM resource_en_demo100.h is for a 4 MB English demo
---            and is NOT compatible with this file)
+-- Resource offsets are pre-computed from ScummVM's resource tables:
+--   Floppy: binary analysis of IGOR.DAT
 --   CD:     scummvm-create-igortbl/resource_sp_cdrom.h (offsets into IGOR.EXE)
 --
 -- Data formats:
---   IMG_  : Raw 8bpp indexed pixels, 320 x H, row-major
+--   IMG_  : Raw 8bpp indexed pixels, 320 x H, row-major (typically H=144)
 --   PAL_  : VGA DAC palette, 768 bytes (256 x RGB, 6-bit values 0-63)
 --           or 624 bytes (208 colours) / 720 bytes (240 colours)
 --   MSK_  : RLE-compressed walk mask (code_byte + u16LE length, fills 320x144)
@@ -28,7 +26,7 @@ local engine = {}
 engine.name        = "Igor: Objective Uikokahonia"
 engine.id          = "igor"
 engine.description = "Pendulo Studios (1994) - DOS floppy & CD"
-engine.version     = "5.0"
+engine.version     = "4.0"
 
 -- ============================================================================
 -- Binary helpers (no bit32 in LuaJ 3.0.1)
@@ -48,7 +46,7 @@ end
 
 local PAL_FULL  = 768   -- 256 colours x 3
 local IMG_W     = 320
-local IMG_H_STD = 144   -- standard game area height (CD rooms)
+local IMG_H_STD = 144   -- standard game area height
 
 -- ============================================================================
 -- Version detection
@@ -107,18 +105,13 @@ end
 -- ============================================================================
 -- RESOURCE TABLES
 -- ============================================================================
---
--- CD rooms: { name, img_off, img_size, pal_off, pal_size,
---             msk_off, msk_size, box_off, box_size, txt_off, txt_size }
---
--- Floppy rooms: { name, img_off, img_size, pal_off, pal_size,
---                 0, 0, 0, 0, 0, 0 }
---   (no mask/box/text data available for the Spanish floppy version)
---
--- Fullscreen images: { name, img_off, img_size, pal_off, pal_size }
+-- Each room entry: { name, img_offset, img_size, pal_offset, pal_size,
+--                    msk_offset, msk_size, box_offset, box_size,
+--                    txt_offset, txt_size }
+-- Fields may be 0 if that resource is not available.
 -- ============================================================================
 
--- ===== CD version (Spanish) - offsets into IGOR.EXE 9,115,648 bytes =====
+-- CD version (Spanish) - offsets into IGOR.EXE 9,115,648 bytes
 -- From scummvm-create-igortbl/resource_sp_cdrom.h
 local CD_ROOMS = {
     {"Philip's Room",               0x1a4f1c, 46080, 0x1b031c, 768,  0x1b061c, 3,    0x1b061f, 1280, 0x1a4a75, 1191},
@@ -148,9 +141,13 @@ local CD_ROOMS = {
     {"Spring Bridge (Intro)",       0x7d698f, 46080, 0x7e1d8f, 720,  0, 0, 0, 0,                     0x7d6264, 1835},
     {"Spring Rock",                 0x7e2de6, 46080, 0x7ee1e6, 720,  0x7ee4b6, 3117, 0x7ef0e3, 1280, 0x7e28a2, 1348},
     {"Spring Bridge",               0x6c0eda, 46080, 0x6cc2da, 624,  0x6cc5aa, 3936, 0x6cd50a, 1280, 0x6c0aa2, 1080},
+    {"Church Mosaic",               0x1eb513, 46080, 0x1f6913, 720,  0x1f6be3, 2445, 0, 0,           0, 0},
+    {"Church Puzzle",               0x2054e3, 46080, 0x2108e3, 624,  0x210b53, 1992, 0x21131b, 1280, 0x204eb0, 1587},
+    {"Inside Church",               0x21765f, 46080, 0x222a5f, 624,  0x222ccf, 2352, 0x2235ff, 1280, 0x217231, 1070},
+    {"Outside Church",              0x23ae4f, 46080, 0x24624f, 624,  0x2464bf, 3264, 0x24717f, 1280, 0x23a8bc, 1427},
 }
 
--- CD: full-screen images (320x200 = 64000 bytes)
+-- CD version: full-screen images (320x200 = 64000 bytes)
 local CD_FULLSCREEN = {
     {"Pendulo Studios",    0x7efa6e, 64000, 0x7ef76e, 768},
     {"Graphic Adventure",  0x7ff86e, 64000, 0x7ff56e, 768},
@@ -158,7 +155,7 @@ local CD_FULLSCREEN = {
     {"Optik Software",     0x81f46e, 64000, 0x81f16e, 768},
 }
 
--- CD: UI and sprite resources
+-- CD version: UI and sprite resources
 local CD_UI = {
     {"Verbs Panel (320x12)",     0x848ae0, 3840},
     {"Inventory Panel (320x30)", 0x89a298, 9600},
@@ -166,7 +163,7 @@ local CD_UI = {
     {"Meanwhile (320x144)",      0x56aeb7, 46080},
 }
 
--- CD: Igor walking sprites
+-- CD version: Igor walking sprites
 local CD_IGOR_SPRITES = {
     {"Igor Dir Back (set 1)",  0x83bdc3, 10500},
     {"Igor Dir Right (set 1)", 0x83e6c7, 13500},
@@ -180,175 +177,105 @@ local CD_IGOR_SPRITES = {
     {"Igor Head (set 2)",      0x83ac43, 3696},
 }
 
--- CD: Text resources
+-- CD version: Text resources
 local CD_TEXTS = {
     {"Main Text Table", 0x8499e0, 28028},
 }
 
 -- ============================================================================
 -- Floppy version (Spanish) - offsets into IGOR.DAT 11,199,335 bytes
--- Derived from binary analysis of the actual floppy IGOR.DAT.
--- Pixel blocks found by scanning for contiguous rows; palettes matched by
--- searching backward for the nearest valid 768-byte VGA palette.
--- Entries with shared palettes use the closest verified palette.
+-- From binary analysis of the floppy IGOR.DAT
 -- ============================================================================
 
--- Floppy rooms: { name, img_off, img_size, pal_off, 768, 0,0, 0,0, 0,0 }
--- No mask/box/text data available for the 11.2 MB Spanish floppy version.
 local FLOPPY_ROOMS = {
-    -- Early data blocks (before first named room)
-    {"Data Block 1",                        35200, 51520,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 2",                        87680, 32640,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 3",                       120640, 63360,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 4",                       185280, 47360,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 5",                       263040, 64000,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 6",                       327680, 45760,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 7",                       379200, 42560,  421029, 768, 0,0, 0,0, 0,0},
-    -- Named rooms (ScummVM resource_ids.h names)
-    {"Philip's Room",                      422080, 64000,  421029, 768, 0,0, 0,0, 0,0},
-    {"Physics Classroom",                  487360, 64000,  486549, 768, 0,0, 0,0, 0,0},
-    {"Chemistry Classroom",                552960, 64000,  552024, 768, 0,0, 0,0, 0,0},
-    {"College Stairs (2nd Floor)",         618560, 64000,  617495, 768, 0,0, 0,0, 0,0},
-    {"College Stairs (1st Floor)",         683840, 64000,  682966, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Miss Barrymore)",          749440, 64000,  748437, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Announcement Bd)",         817920, 62080,  817152, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Sharon & Michael)",        881600, 64000,  879379, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Caroline)",                966720, 63680,  945439, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Lucas)",                  1030720, 64000,  945439, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Margaret)",               1154560, 48640, 1115731, 768, 0,0, 0,0, 0,0},
-    {"College Lockers",                   1259200, 51200, 1115731, 768, 0,0, 0,0, 0,0},
-    {"Women's Toilets",                   1338240, 45120, 1115731, 768, 0,0, 0,0, 0,0},
-    {"Men's Toilets",                     1383680, 64000, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Outside College",                   1450240, 48640, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Laboratory",                        1553920, 52800, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Margaret's Room",                   1630400, 64000, 1628740, 768, 0,0, 0,0, 0,0},
-    {"Map",                               1729280, 50880, 1628740, 768, 0,0, 0,0, 0,0},
-    {"Spring Bridge",                     1807040, 49600, 1857052, 768, 0,0, 0,0, 0,0},
-    {"Spring Rock",                       1865920, 48960, 1857052, 768, 0,0, 0,0, 0,0},
-    {"Bell Church",                       1931520, 48000, 1855765, 768, 0,0, 0,0, 0,0},
-    {"Tobias' Office",                    1987840, 50240, 1979814, 768, 0,0, 0,0, 0,0},
-    {"Church Mosaic",                     2061120, 48640, 2053413, 768, 0,0, 0,0, 0,0},
-    {"Inside Church",                     2153920, 53120, 2131319, 768, 0,0, 0,0, 0,0},
-    {"Church Puzzle",                     2253120, 58560, 2227614, 768, 0,0, 0,0, 0,0},
-    {"Outside Church",                    2314240, 51520, 2227612, 768, 0,0, 0,0, 0,0},
-    -- Additional game backgrounds
-    {"Background 34",                     2387840, 37120, 2385396, 768, 0,0, 0,0, 0,0},
-    {"Background 35",                     2429440, 51840, 2386514, 768, 0,0, 0,0, 0,0},
-    {"Background 36",                     2576320, 56000, 2505268, 768, 0,0, 0,0, 0,0},
-    {"Library",                           2650560, 45120, 2647030, 768, 0,0, 0,0, 0,0},
-    {"Spring Bridge (Intro)",             2706560, 50240, 2647030, 768, 0,0, 0,0, 0,0},
-    {"Park",                              3855360, 48640, 3844749, 768, 0,0, 0,0, 0,0},
-    -- Extended rooms (alternate states, additional areas)
-    {"Admin (Secretary Room)",            5883520, 48960, 5876805, 768, 0,0, 0,0, 0,0},
-    {"Dean Pepper's Office",              5960640, 49600, 5953494, 768, 0,0, 0,0, 0,0},
-    {"Student Dormitory",                 6061120, 40640, 6045969, 768, 0,0, 0,0, 0,0},
-    {"Background 58",                     6106240, 53440, 6045969, 768, 0,0, 0,0, 0,0},
-    {"Background 59",                     6160960, 37440, 6159520, 768, 0,0, 0,0, 0,0},
-    {"Background 60",                     6200960, 52800, 6159998, 768, 0,0, 0,0, 0,0},
-    {"Background 61",                     6288320, 52160, 6274003, 768, 0,0, 0,0, 0,0},
-    {"Background 62",                     6366400, 40640, 6358236, 768, 0,0, 0,0, 0,0},
-    {"Background 63",                     6409600, 49920, 6357058, 768, 0,0, 0,0, 0,0},
-    {"Background 64",                     6487040, 49280, 6476192, 768, 0,0, 0,0, 0,0},
-    {"Background 65",                     6567680, 49280, 6552976, 768, 0,0, 0,0, 0,0},
-    {"Background 66",                     6636160, 49280, 6631534, 768, 0,0, 0,0, 0,0},
-    {"Background 67",                     6716800, 49280, 6702071, 768, 0,0, 0,0, 0,0},
-    {"Background 68",                     6811840, 50240, 6789022, 768, 0,0, 0,0, 0,0},
-    {"Background 69",                     6892160, 49600, 6878997, 768, 0,0, 0,0, 0,0},
-    {"Background 70",                     6978560, 33600, 6961491, 768, 0,0, 0,0, 0,0},
-    {"Background 71",                     7014720, 49600, 6961491, 768, 0,0, 0,0, 0,0},
-    {"Background 72",                     7096960, 49600, 7081358, 768, 0,0, 0,0, 0,0},
-    {"Background 73",                     7211520, 49920, 7190977, 768, 0,0, 0,0, 0,0},
-    {"Background 74",                     7308480, 49920, 7261816, 768, 0,0, 0,0, 0,0},
-    {"Background 75",                     7440320, 53440, 7384119, 768, 0,0, 0,0, 0,0},
-    {"Background 76",                     7604800, 49920, 7513740, 768, 0,0, 0,0, 0,0},
-    {"Background 77",                     7656960, 58240, 7513740, 768, 0,0, 0,0, 0,0},
-    {"Background 78",                     7717440, 48320, 7779541, 768, 0,0, 0,0, 0,0},
-    {"Background 79",                     7785280, 48960, 7779541, 768, 0,0, 0,0, 0,0},
-    {"Background 80",                     7868160, 48960, 7854029, 768, 0,0, 0,0, 0,0},
-    {"Background 81",                     7934400, 42880, 7931945, 768, 0,0, 0,0, 0,0},
-    {"Background 82",                     7979520, 48320, 7933063, 768, 0,0, 0,0, 0,0},
-    {"Background 83",                     8073280, 43200, 8044164, 768, 0,0, 0,0, 0,0},
-    {"Background 84",                     8122880, 35840, 8118943, 768, 0,0, 0,0, 0,0},
-    {"Background 85",                     8212480, 50880, 8208182, 768, 0,0, 0,0, 0,0},
-    {"Background 86",                     8292800, 49280, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 87",                     8342400, 49280, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 88",                     8392640, 53440, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 89",                     8446400, 52160, 8518763, 768, 0,0, 0,0, 0,0},
-    {"Background 90",                     8523200, 49920, 8518763, 768, 0,0, 0,0, 0,0},
-    {"Background 91",                     8621120, 54400, 8599403, 768, 0,0, 0,0, 0,0},
-    {"Background 92",                     8678080, 50880, 8598227, 768, 0,0, 0,0, 0,0},
-    {"Background 93",                     8790720, 51520, 8777516, 768, 0,0, 0,0, 0,0},
-    {"Background 94",                     8845440, 53760, 8842429, 768, 0,0, 0,0, 0,0},
-    {"Background 95",                     9032640, 51520, 9000174, 768, 0,0, 0,0, 0,0},
-    {"Background 96",                     9119040, 37120, 9108639, 768, 0,0, 0,0, 0,0},
-    {"Background 97",                     9157120, 53120, 9108639, 768, 0,0, 0,0, 0,0},
-    {"Background 98",                     9277120, 56960, 9260423, 768, 0,0, 0,0, 0,0},
-    {"Background 99",                     9336320, 50880, 9259189, 768, 0,0, 0,0, 0,0},
-    {"Background 100",                    9434880, 58560, 9259189, 768, 0,0, 0,0, 0,0},
-    {"Background 101",                    9495680, 51520, 9568764, 768, 0,0, 0,0, 0,0},
-    {"Background 102",                    9584960, 50880, 9568764, 768, 0,0, 0,0, 0,0},
-    {"Background 103",                    9679680, 51840, 9652152, 768, 0,0, 0,0, 0,0},
-    {"Background 104",                    9734080, 49600, 9652150, 768, 0,0, 0,0, 0,0},
-    {"Background 105",                    9872640, 49280, 9812011, 768, 0,0, 0,0, 0,0},
-    {"Background 106",                    9924160, 53760, 9812011, 768, 0,0, 0,0, 0,0},
-    {"Background 107",                   10054400, 36160, 10004120, 768, 0,0, 0,0, 0,0},
-    {"Background 108",                   10093120, 55040, 10004120, 768, 0,0, 0,0, 0,0},
-    {"Background 109",                   10153280, 42560, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 110",                   10198080, 48000, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 111",                   10248320, 50880, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 112",                   10300480, 64000, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 113",                   10689600, 38720, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 114",                   10728640, 51840, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 115",                   10780800, 53120, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 116",                   10834240, 48640, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 117",                   10886400, 51840, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 118",                   10947840, 44160, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 119",                   10994240, 51200, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 120",                   11046080, 46720, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 121",                   11095680, 43200, 10993073, 768, 0,0, 0,0, 0,0},
+    {"Philip's Room",               0x9a0c,  46080, 0x14e0c,  768,  0x1510c,  3,    0x1510f,  1280, 0x9580,  1164},
+    {"Physics Classroom",           0x1be81, 46080, 0x27281,  624,  0x274f1,  1557, 0x27b06,  1280, 0x1ba08, 1145},
+    {"Chemistry Classroom",         0x2eda0, 46080, 0x3a1a0,  624,  0x3a410,  1980, 0x3abcc,  1280, 0x2e8d6, 1226},
+    {"College Stairs (2nd Floor)",  0x46e16, 46080, 0x52216,  624,  0x52486,  4128, 0x534a6,  1280, 0x467ff, 1559},
+    {"College Stairs (1st Floor)",  0x67a79, 46080, 0x72e79,  624,  0x730e9,  2934, 0x73c5f,  1280, 0x675ad, 1228},
+    {"Corridor (Miss Barrymore)",   0x7f28d, 46080, 0x8a68d,  624,  0x8a8fd,  2484, 0x8b2b1,  1280, 0x7ed09, 1412},
+    {"Corridor (Announcement Bd)",  0x93d75, 46080, 0x9f175,  624,  0x9f3e5,  3117, 0xa0012,  1280, 0x9389f, 1238},
+    {"Corridor (Sharon & Michael)", 0xab8af, 46080, 0xb6caf,  624,  0xb6f1f,  3144, 0xb7b67,  1280, 0xab344, 1387},
+    {"Corridor (Caroline)",         0xc70d9, 46080, 0xd24d9,  624,  0xd2749,  2151, 0xd2fb0,  1280, 0xc68e4, 2037},
+    {"Corridor (Lucas)",            0xdb6f7, 46080, 0xe6af7,  624,  0xe6d67,  3297, 0xe7a48,  1280, 0xdb18c, 1387},
+    {"Corridor (Margaret)",         0xffafe, 46080, 0x10aefe, 624,  0x10b16e, 3690, 0x10bfd8, 1280, 0xff494, 1642},
+    {"College Lockers",             0x113cd2, 46080, 0x11f0d2, 624, 0x11f342, 2235, 0x11fbfd, 1280, 0x1135be, 1812},
+    {"Women's Toilets",             0x130775, 46080, 0x13bb75, 624, 0x13bde5, 2022, 0x13c5cb, 1280, 0x130110, 1637},
+    {"Men's Toilets",               0x13e9bc, 46080, 0x149dbc, 624, 0x14a02c, 1980, 0x14a7e8, 1280, 0x13e492, 1322},
+    {"Outside College",             0x157f42, 46080, 0x163342, 624, 0x1635b2, 4974, 0x164920, 1280, 0x157875, 1741},
+    {"Margaret's Room",             0x18fea4, 46080, 0x19b2a4, 768, 0x19b5a4, 3,    0x19b5a7, 1280, 0x18f7f9, 1707},
+    {"Laboratory",                  0x172338, 46080, 0x17d738, 624, 0x17d9a8, 2130, 0x17e1fa, 1280, 0x171d41, 1527},
+    {"Map",                         0x1a0583, 46080, 0x1ab983, 624, 0x1abbf3, 1809, 0x1ac304, 1280, 0x1a0184, 1023},
+    {"Tobias' Office",              0x1bce02, 46080, 0x1c8202, 624, 0x1c8472, 1455, 0x1c8a21, 1280, 0x1bc5dc, 2086},
+    {"Bell Church",                 0x1d82dd, 46080, 0x1e36dd, 624, 0x1e394d, 861,  0x1e3caa, 1280, 0x1d7e57, 1158},
+    {"Church Mosaic",               0x1eb513, 46080, 0x1f6913, 720, 0x1f6be3, 2445, 0, 0,           0, 0},
+    {"Church Puzzle",               0x2054e3, 46080, 0x2108e3, 624, 0x210b53, 1992, 0x21131b, 1280, 0x204eb0, 1587},
+    {"Inside Church",               0x21765f, 46080, 0x222a5f, 624, 0x222ccf, 2352, 0x2235ff, 1280, 0x217231, 1070},
+    {"Outside Church",              0x23ae4f, 46080, 0x24624f, 624, 0x2464bf, 3264, 0x24717f, 1280, 0x23a8bc, 1427},
+    {"Spring Bridge",               0x26161d, 46080, 0x26ca1d, 720, 0x26cced, 3936, 0x26dc4d, 1280, 0x2611ee, 1071},
+    {"Library",                     0x280f7c, 46080, 0x28c37c, 624, 0x28c5ec, 2217, 0x28ce95, 1280, 0x280794, 2024},
+    {"Spring Bridge (Intro)",       0x29997f, 46080, 0x2a4d7f, 720, 0, 0, 0, 0,                     0x299249, 1846},
+    {"Spring Rock",                 0x2a5cb4, 46080, 0x2b10b4, 720, 0x2b1384, 3117, 0x2b1fb1, 1280, 0x2a5756, 1374},
 }
 
--- Floppy: splash / shareware / title screens
+-- Floppy version: full-screen images
 local FLOPPY_FULLSCREEN = {
-    {"Shareware Screen 1",                2795200, 49920, 2789650, 768},
-    {"Shareware Screen 2",                2864960, 51200, 2860589, 768},
-    {"Shareware Screen 3",                2935360, 51200, 2931035, 768},
-    {"Shareware Screen 4",                3008320, 49600, 3003737, 768},
-    {"Shareware Screen 5",                3080000, 49600, 3075377, 768},
-    {"Shareware Screen 6",                3151360, 49920, 3146967, 768},
-    {"Shareware Screen 7",                3222720, 48960, 3218251, 768},
-    {"Title Screen",                      3292800, 49600, 3288446, 768},
-    {"Pendulo Studios",                   3363840, 48960, 3359454, 768},
-    {"Graphic Adventure",                 3433280, 49920, 3428887, 768},
-    {"Presents",                          3504640, 48320, 3499983, 768},
-    {"Optik Software",                    3573440, 49600, 3569032, 768},
-    {"Roman Numbers Paper",               3642880, 48960, 3638564, 768},
-    {"Newspaper",                         3712320, 48000, 3707857, 768},
-    {"Photo (Harrison & Margaret)",       3780480, 48640, 3775875, 768},
+    {"Shareware 7",        0x2b2a90, 46080, 0x2b2790, 768},
+    {"Shareware 6",        0x2be209, 46080, 0x2bdf09, 768},
+    {"Shareware 5",        0x2c9982, 46080, 0x2c9682, 768},
+    {"Shareware 4",        0x2d50fb, 46080, 0x2d4dfb, 768},
+    {"Shareware 3",        0x2e0874, 46080, 0x2e0574, 768},
+    {"Shareware 2",        0x2ebfed, 46080, 0x2ebced, 768},
+    {"Shareware 1",        0x2f7766, 46080, 0x2f7466, 768},
+    {"Title Screen",       0x3031c8, 64000, 0x302ec8, 768},
+    {"Pendulo Studios",    0x312f40, 64000, 0x312c40, 768},
+    {"Graphic Adventure",  0x322cb8, 64000, 0x3229b8, 768},
+    {"Presents",           0x332a30, 64000, 0x332730, 768},
+    {"Optik Software",     0x3427a8, 64000, 0x3424a8, 768},
 }
 
--- Floppy: no verified UI or sprite offsets available for the 11.2 MB version
-local FLOPPY_UI = {}
-local FLOPPY_IGOR_SPRITES = {}
-local FLOPPY_TEXTS = {}
+-- Floppy version: UI resources
+local FLOPPY_UI = {
+    {"Verbs Panel (320x12)",     0x39fd50, 3840},
+    {"Inventory Panel (320x30)", 0x3d7a76, 9600},
+    {"Objects Sheet (320x150)",  0x3d9ff6, 48000},
+    {"Meanwhile (320x144)",      0x352279, 46080},
+    {"Roman Numbers Paper",      0x3a7e14, 46080},
+    {"Newspaper",                0x3c017f, 46080},
+    {"Photo Harrison/Margaret",  0x3cbcf9, 46080},
+}
 
--- Floppy: CMF music files (found by scanning for "CTMF" magic)
+-- Floppy version: Igor walking sprites
+local FLOPPY_IGOR_SPRITES = {
+    {"Igor Dir Back",  0x38abb8, 10500},
+    {"Igor Dir Right", 0x38d4bc, 13500},
+    {"Igor Dir Front", 0x390978, 10500},
+    {"Igor Dir Left",  0x39327c, 13500},
+    {"Igor Head",      0x396738, 3696},
+}
+
+-- Floppy version: Text resources
+local FLOPPY_TEXTS = {
+    {"Main Text Table", 0x3a0c50, 28028},
+}
+
+-- Floppy version: Music (CMF files)
 local FLOPPY_MUSIC = {
-    {"CMF 1",   10706193, 26126},
-    {"CMF 2",   10732319,  9417},
-    {"CMF 3",   10741736, 10554},
-    {"CMF 4",   10752290, 15495},
-    {"CMF 5",   10767785, 13723},
-    {"CMF 6",   10781508,  3279},
-    {"CMF 7",   10784787,  7228},
-    {"CMF 8",   10792015,  7450},
-    {"CMF 9",   10799465,  8654},
-    {"CMF 10",  10808119,  8004},
-    {"CMF 11",  10816123,  6520},
-    {"CMF 12",  10822643,  5088},
-    {"CMF 13",  10827731,  2047},
-    {"CMF 14",  10829778,  2959},
-    {"CMF 15",  10832737,  4000},
+    {"CMF 8",    0x374cfc, 4926},
+    {"CMF 9",    0x37603a, 6249},
+    {"CMF 10",   0x3778a3, 5982},
+    {"CMF 11",   0x379001, 12793},
+    {"CMF 12",   0x381b77, 22275},
+    {"CMF 2.1",  0x381b77, 4111},
+    {"CMF 2.2",  0x382b86, 4303},
+    {"CMF 2.3",  0x383c55, 4343},
+    {"CMF 2.4",  0x384d4c, 5943},
+    {"CMF 3",    0x386483, 5898},
+    {"CMF 4",    0x387b8d, 3133},
+    {"CMF 7.1",  0x3887ca, 4671},
+    {"CMF 7.2",  0x389a09, 646},
+    {"CMF 7.3",  0x389c8f, 2014},
+    {"CMF 7.4",  0x38a46d, 1369},
 }
 
 -- ============================================================================
@@ -407,6 +334,7 @@ end
 
 -- ============================================================================
 -- Visualize walk mask as coloured overlay
+-- Each unique mask value gets a distinct colour
 -- ============================================================================
 
 local MASK_COLORS = {
@@ -448,6 +376,7 @@ end
 -- ============================================================================
 
 local function render_boxes(box_data)
+    -- Display as a 256x5 grid, scaled up
     local entries = {}
     for i = 0, 255 do
         local base = i * 5 + 1
@@ -496,6 +425,9 @@ end
 
 -- ============================================================================
 -- Render Igor walking sprites
+-- Each sprite data block = N frames of 1500 bytes each
+-- We show all frames in a horizontal strip
+-- Frame layout: 50 wide x 30 tall = 1500 bytes (raw indexed)
 -- ============================================================================
 
 local IGOR_FRAME_SIZE = 1500
@@ -506,6 +438,7 @@ local function render_igor_sprite(sprite_data, palette, total_size)
     local num_frames = math.floor(total_size / IGOR_FRAME_SIZE)
     if num_frames < 1 then return nil end
 
+    -- Render all frames in a horizontal strip
     local strip_w = IGOR_FRAME_W * num_frames
     local strip_h = IGOR_FRAME_H
     local pixels = {}
@@ -531,12 +464,15 @@ end
 
 -- ============================================================================
 -- Render inventory objects sheet
+-- 48000 bytes = 30 objects x 1200 bytes each = 40w x 30h per object
+-- Displayed as a 6-column x 5-row grid
 -- ============================================================================
 
 local OBJ_W = 40
 local OBJ_H = 30
 local OBJ_STRIDE = OBJ_W * OBJ_H  -- 1200
 local OBJ_COLS = 6
+local OBJ_COUNT = 30  -- total visible objects fitting in 48000 bytes
 
 local function render_objects_sheet(obj_data, palette)
     if not obj_data then return nil end
@@ -577,22 +513,32 @@ end
 -- Text decoding (Spanish XOR 0x6D encryption)
 -- ============================================================================
 
-local function decode_text(data)
+local function decode_text(data, is_spanish)
     local result = {}
     for i = 1, #data do
-        local x = data:byte(i)
-        -- Manual XOR 0x6D (no bitwise ops in LuaJ 3.0.1)
-        local xor_val = 0x6D
-        local b = 0
-        local pow = 1
-        for bit = 0, 7 do
-            local a_bit = math.floor(x / pow) % 2
-            local b_bit = math.floor(xor_val / pow) % 2
-            if a_bit ~= b_bit then
-                b = b + pow
+        local b = data:byte(i)
+        if is_spanish then
+            b = (b + 256 - 0x6D) % 256
+            b = (b + 256) % 256
+            -- XOR
+            local x = data:byte(i)
+            -- XOR 0x6D
+            local lo = x % 128
+            local xor_val = 0x6D
+            -- Manual XOR since no bitwise ops
+            local result_byte = 0
+            local pow = 1
+            for bit = 0, 7 do
+                local a_bit = math.floor(x / pow) % 2
+                local b_bit = math.floor(xor_val / pow) % 2
+                if a_bit ~= b_bit then
+                    result_byte = result_byte + pow
+                end
+                pow = pow * 2
             end
-            pow = pow * 2
+            b = result_byte
         end
+        -- Filter to printable ASCII range
         if b >= 32 and b <= 126 then
             result[#result + 1] = string.char(b)
         elseif b == 10 or b == 13 then
@@ -742,23 +688,19 @@ function engine.get_resources(game_path)
         }
     end
 
-    if #ui_children > 0 then
-        root[#root + 1] = {
-            id = "cat_ui",
-            name = "UI Elements (" .. #ui .. ")",
-            type = "category",
-            children = ui_children,
-        }
-    end
+    root[#root + 1] = {
+        id = "cat_ui",
+        name = "UI Elements (" .. #ui .. ")",
+        type = "category",
+        children = ui_children,
+    }
 
-    if #sprite_children > 0 then
-        root[#root + 1] = {
-            id = "cat_igor",
-            name = "Igor Sprites (" .. #igor_sprites .. ")",
-            type = "category",
-            children = sprite_children,
-        }
-    end
+    root[#root + 1] = {
+        id = "cat_igor",
+        name = "Igor Sprites (" .. #igor_sprites .. ")",
+        type = "category",
+        children = sprite_children,
+    }
 
     if #text_children > 0 then
         root[#root + 1] = {
@@ -770,7 +712,7 @@ function engine.get_resources(game_path)
     end
 
     -- Music (floppy only)
-    if music and #music > 0 then
+    if music then
         local music_children = {}
         for i, m in ipairs(music) do
             music_children[#music_children + 1] = {
@@ -946,7 +888,7 @@ function engine.load_resource(game_path, resource_id)
                 return {type = "text", text = "Failed to read text for " .. name}
             end
 
-            local decoded = decode_text(txt_raw)
+            local decoded = decode_text(txt_raw, version == VER_CD)
             return {
                 type = "text",
                 text = string.format("%s - Text Strings (%d bytes)\n\n%s", name, txt_size, decoded),
@@ -1004,7 +946,7 @@ function engine.load_resource(game_path, resource_id)
 
         local img_raw = file_read(fh, u[2], u[3])
 
-        -- For UI elements, grab palette from the first room
+        -- For UI elements, try to grab palette from the first room
         local pal_off = rooms[1][4]
         local pal_size = rooms[1][5]
         local palette = read_palette(fh, pal_off, pal_size)
@@ -1014,7 +956,7 @@ function engine.load_resource(game_path, resource_id)
             return {type = "text", text = "Failed to read UI data"}
         end
 
-        -- Detect objects sheet
+        -- Detect if this is the objects sheet
         if u[3] == 48000 then
             local img = render_objects_sheet(img_raw, palette)
             if img then
@@ -1076,6 +1018,7 @@ function engine.load_resource(game_path, resource_id)
 
         -- Special handling for head frames (3696 bytes = 4 positions x 924 bytes)
         if s[3] == 3696 then
+            -- Head: 4 positions x 6 frames x (14 x 11 = 154 bytes)
             local head_w = 14
             local head_h = 11
             local head_frame_size = head_w * head_h  -- 154
@@ -1141,7 +1084,7 @@ function engine.load_resource(game_path, resource_id)
             return {type = "text", text = "Failed to read text data"}
         end
 
-        local decoded = decode_text(txt_raw)
+        local decoded = decode_text(txt_raw, version == VER_CD)
         return {
             type = "text",
             text = string.format("%s (%d bytes)\n\n%s", t[1], t[3], decoded),
@@ -1149,7 +1092,7 @@ function engine.load_resource(game_path, resource_id)
     end
 
     -- ====== Music (CMF) ======
-    if music and #music > 0 then
+    if music then
         local music_idx = resource_id:match("^music_(%d+)$")
         if music_idx then
             local idx = tonumber(music_idx)

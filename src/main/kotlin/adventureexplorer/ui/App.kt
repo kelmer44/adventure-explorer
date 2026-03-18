@@ -68,7 +68,11 @@ fun App() {
                     // Open Folder button — launched on IO to avoid blocking the
                     // Compose main thread while the file dialog is open.
                     Button(
-                        onClick = { scope.launch(Dispatchers.IO) { showOpenFolderDialog(appState) } },
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                showOpenFolderDialog(appState)
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = MaterialTheme.colors.primary
                         )
