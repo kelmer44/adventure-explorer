@@ -400,7 +400,33 @@ local function parse_cc4_entries(f)
 end
 
 -- ============================================================================
--- Palette loading - from RES.PAK index 5
+-- Sub-resource extraction from decompressed PAK blob (floppy format)
+-- The decompressed blob has an internal offset table: array of u32le values.
+-- Sub-resource i starts at offset[i], size = offset[i+1] - offset[i].
+-- Based on ScummVM ResourceManager::loadRawFromRaw().
+-- ============================================================================
+
+local function extract_raw_sub_resource(raw_data, sub_index, max_count)
+    if not raw_data or #raw_data < (sub_index + 1) * 4 then return nil end
+
+    local offset = u32le(raw_data, sub_index * 4 + 1)
+    local next_offset
+    if sub_index < max_count then
+        next_offset = u32le(raw_data, (sub_index + 1) * 4 + 1)
+    else
+        next_offset = #raw_data
+    end
+
+    local data_size = next_offset - offset
+    if data_size <= 0 or offset + data_size > #raw_data then return nil end
+
+    return raw_data:sub(offset + 1, offset + data_size)
+end
+
+-- ============================================================================
+-- Palette loading
+-- Floppy: RES.PAK entry 0 → decompress → sub-index 5 within blob
+-- CD: RES.PAK entry 5 directly
 -- VGA 6-bit palette (0-63 per component), 768 bytes
 -- ============================================================================
 
@@ -413,9 +439,9 @@ local function raw_palette_to_8bit(pal_data)
         local r = u8(pal_data, i * 3 + 1)
         local g = u8(pal_data, i * 3 + 2)
         local b = u8(pal_data, i * 3 + 3)
-        palette[i * 3 + 1] = math.min(r * 4, 255)
-        palette[i * 3 + 2] = math.min(g * 4, 255)
-        palette[i * 3 + 3] = math.min(b * 4, 255)
+        palette[i * 3 + 1] = math.min(r, 255)
+        palette[i * 3 + 2] = math.min(g, 255)
+        palette[i * 3 + 3] = math.min(b, 255)
     end
     return palette
 end
@@ -431,9 +457,23 @@ local function load_game_palette(game_path)
         return nil
     end
 
-    -- Directly load index 5 (gamePalette) from RES.PAK
-    local pal_data = extract_pak_by_index(f, 5)
-    file_close(f)
+    local count = pak_resource_count(f)
+    local pal_data = nil
+
+    if count <= 1 then
+        -- Floppy version: single compressed blob, sub-resources inside
+        -- Load entry 0, decompress, then extract sub-index 5 (palette)
+        local blob = extract_pak_by_index(f, 0)
+        file_close(f)
+        if blob and #blob > 24 then
+            -- max_count = 6: sub-indices 0-6 (font, bubble, hero, icon, inv, palette, flashbak)
+            pal_data = extract_raw_sub_resource(blob, 5, 6)
+        end
+    else
+        -- CD version: palette is a separate PAK entry at index 5
+        pal_data = extract_pak_by_index(f, 5)
+        file_close(f)
+    end
 
     if not pal_data or #pal_data < 768 then
         log_warn("comet: palette data invalid (got " ..
@@ -861,9 +901,40 @@ function engine.get_resources(game_path)
         local f = file_open(game_path .. "/" .. pak_name)
         if f then
             local entries = parse_pak_entries(f)
-            file_close(f)
-            if entries and #entries > 0 then
-                local lower = pak_name:lower()
+            local lower = pak_name:lower()
+            local is_res = (lower == "res.pak")
+
+            -- Floppy RES.PAK: single blob with sub-resources inside
+            if is_res and entries and #entries == 1 then
+                file_close(f)
+                local res_names = {
+                    [0] = "Font",
+                    [1] = "Bubble Sprite",
+                    [2] = "Hero Sprite",
+                    [3] = "Icon Sprite",
+                    [4] = "Inventory Sprites",
+                    [5] = "Game Palette",
+                    [6] = "Flashback Palette"
+                }
+                local cat = {
+                    id = "pak_" .. pak_name,
+                    name = pak_name .. " - Global Resources (7 sub-resources)",
+                    type = "category",
+                    children = {}
+                }
+                for si = 0, 6 do
+                    local res_type = "image"
+                    if si == 5 or si == 6 then res_type = "palette" end
+                    cat.children[#cat.children + 1] = {
+                        id   = string.format("respak_sub_%d", si),
+                        name = string.format("[%d] %s", si, res_names[si]),
+                        type = res_type
+                    }
+                end
+                resources[#resources + 1] = cat
+
+            elseif entries and #entries > 0 then
+                file_close(f)
                 local is_scene = lower:match("^d%d+%.pak$")
                 local is_anim = lower:match("^a%d+%.pak$")
                 local is_smp = (lower == "smp.pak")
@@ -925,6 +996,8 @@ function engine.get_resources(game_path)
                 end
 
                 resources[#resources + 1] = cat
+            else
+                file_close(f)
             end
         end
     end
@@ -977,6 +1050,12 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id)
+    -- Floppy RES.PAK sub-resource
+    local sub_idx = resource_id:match("^respak_sub_(%d+)$")
+    if sub_idx then
+        return load_respak_sub_resource(game_path, tonumber(sub_idx))
+    end
+
     local res_type, filename, index_str = resource_id:match("^(pak)_(.+)_(%d+)$")
     if not res_type then
         res_type, filename, index_str = resource_id:match("^(cc4)_(.+)_(%d+)$")
@@ -1115,18 +1194,47 @@ function load_pak_resource(game_path, pak_name, res_index)
                 end
             end
 
-            -- Show first cel as standalone sprite image
-            local cel = anim.cels[1]
+            -- Render all cels as a horizontal sprite sheet
             local palette = get_or_make_palette(game_path)
-            local cel_pixels = decompress_cel_sprite(data, cel.data_pos, cel.width, cel.height)
+            local max_h = 0
+            local total_w = 0
+            local cel_images = {}
 
-            -- Create image with black background for transparency
-            local img = image_create_indexed(cel.width, cel.height, cel_pixels, palette)
-            local desc = string.format(
-                "Animation Sprite - %s[%d]\nCel 0: %dx%d (flags=0x%04X)\n%d cels, %d elements total",
-                pak_name, res_index, cel.width, cel.height, cel.flags,
-                #anim.cels, #anim.elements)
-            return { type = "image", image = img, description = desc }
+            for ci = 1, #anim.cels do
+                local cel = anim.cels[ci]
+                local pix = decompress_cel_sprite(data, cel.data_pos, cel.width, cel.height)
+                cel_images[ci] = { pixels = pix, w = cel.width, h = cel.height }
+                total_w = total_w + cel.width
+                if cel.height > max_h then max_h = cel.height end
+            end
+
+            if total_w > 0 and max_h > 0 then
+                local sheet = {}
+                for i = 1, total_w * max_h do sheet[i] = 0 end
+
+                local x_off = 0
+                for ci = 1, #cel_images do
+                    local ci_data = cel_images[ci]
+                    local y_off = max_h - ci_data.h  -- bottom-align
+                    for sy = 0, ci_data.h - 1 do
+                        for sx = 0, ci_data.w - 1 do
+                            local pixel = ci_data.pixels[sy * ci_data.w + sx + 1]
+                            if pixel ~= 0 then
+                                local dy = y_off + sy
+                                local dx = x_off + sx
+                                sheet[dy * total_w + dx + 1] = pixel
+                            end
+                        end
+                    end
+                    x_off = x_off + ci_data.w
+                end
+
+                local img = image_create_indexed(total_w, max_h, sheet, palette)
+                local desc = string.format(
+                    "Animation Sprite Sheet - %s[%d]\n%d cels, %d elements\nSheet: %dx%d",
+                    pak_name, res_index, #anim.cels, #anim.elements, total_w, max_h)
+                return { type = "image", image = img, description = desc }
+            end
         end
     end
 
