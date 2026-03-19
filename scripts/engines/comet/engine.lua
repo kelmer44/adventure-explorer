@@ -1092,6 +1092,107 @@ local function get_or_make_palette(game_path)
     return palette
 end
 
+-- Load a sub-resource from floppy RES.PAK (decompressed blob, internal offsets)
+local function load_respak_sub_resource(game_path, sub_index)
+    local f = file_open(game_path .. "/RES.PAK")
+    if not f then
+        return { type = "text", text = "Cannot open RES.PAK" }
+    end
+
+    local blob = extract_pak_by_index(f, 0)
+    file_close(f)
+
+    if not blob then
+        return { type = "text", text = "Failed to decompress RES.PAK entry 0" }
+    end
+
+    local data = extract_raw_sub_resource(blob, sub_index, 6)
+    if not data then
+        return { type = "text", text = string.format(
+            "Failed to extract sub-resource %d from RES.PAK", sub_index) }
+    end
+
+    local res_names = {
+        [0] = "Font", [1] = "Bubble Sprite", [2] = "Hero Sprite",
+        [3] = "Icon Sprite", [4] = "Inventory Sprites",
+        [5] = "Game Palette", [6] = "Flashback Palette"
+    }
+    local name = res_names[sub_index] or string.format("Sub-resource %d", sub_index)
+
+    -- Palette (768 bytes)
+    if (sub_index == 5 or sub_index == 6) and #data >= 768 then
+        local pal = raw_palette_to_8bit(data)
+        local pw, ph = 256, 256
+        local pixels = {}
+        for y = 0, ph - 1 do
+            local row = math.floor(y / 16)
+            for x = 0, pw - 1 do
+                local col = math.floor(x / 16)
+                pixels[y * pw + x + 1] = row * 16 + col
+            end
+        end
+        local img = image_create_indexed(pw, ph, pixels, pal)
+        return {
+            type = "image", image = img,
+            description = string.format("%s (%d bytes) - 256 colors, 6-bit VGA", name, #data)
+        }
+    end
+
+    -- Animation sub-resources (indices 1-4)
+    if sub_index >= 1 and sub_index <= 4 and #data >= 16 then
+        local anim = parse_animation(data)
+        if anim and #anim.cels > 0 then
+            anim.raw_data = data
+            local palette = get_or_make_palette(game_path)
+
+            -- Render all cels as sprite sheet
+            local max_h = 0
+            local total_w = 0
+            local cel_images = {}
+            for ci = 1, #anim.cels do
+                local cel = anim.cels[ci]
+                local pix = decompress_cel_sprite(data, cel.data_pos, cel.width, cel.height)
+                cel_images[ci] = { pixels = pix, w = cel.width, h = cel.height }
+                total_w = total_w + cel.width
+                if cel.height > max_h then max_h = cel.height end
+            end
+
+            if total_w > 0 and max_h > 0 then
+                local sheet = {}
+                for i = 1, total_w * max_h do sheet[i] = 0 end
+                local x_off = 0
+                for ci = 1, #cel_images do
+                    local ci_data = cel_images[ci]
+                    local y_off = max_h - ci_data.h
+                    for sy = 0, ci_data.h - 1 do
+                        for sx = 0, ci_data.w - 1 do
+                            local pixel = ci_data.pixels[sy * ci_data.w + sx + 1]
+                            if pixel ~= 0 then
+                                local dy = y_off + sy
+                                local dx = x_off + sx
+                                sheet[dy * total_w + dx + 1] = pixel
+                            end
+                        end
+                    end
+                    x_off = x_off + ci_data.w
+                end
+                local img = image_create_indexed(total_w, max_h, sheet, palette)
+                return {
+                    type = "image", image = img,
+                    description = string.format("%s - %d cels, sheet %dx%d",
+                        name, #anim.cels, total_w, max_h)
+                }
+            end
+        end
+    end
+
+    -- Generic fallback
+    local info = string.format("RES.PAK Sub-resource %d: %s\n", sub_index, name)
+    info = info .. string.format("Size: %d bytes\n\n", #data)
+    info = info .. hex_dump(data)
+    return { type = "text", text = info }
+end
+
 function load_pak_resource(game_path, pak_name, res_index)
     local f = file_open(game_path .. "/" .. pak_name)
     if not f then
