@@ -228,88 +228,99 @@ end
 -- Resource index i has its offset at file position (i+1)*4
 -- ============================================================================
 
-local function parse_pak_entries(f)
+-- Directly load a single PAK entry by index (like ScummVM does)
+local function load_pak_entry_by_index(f, index)
     local fsize = file_size(f)
-    if fsize < 8 then return nil end
+    local seek_pos = (index + 1) * 4
+    if seek_pos + 4 > fsize then return nil end
 
-    -- Read first two offsets to determine entry count
-    local hdr = file_read(f, 0, 8)
-    if not hdr or #hdr < 8 then return nil end
+    local pos_data = file_read(f, seek_pos, 4)
+    if not pos_data or #pos_data < 4 then return nil end
+    local offset = u32le(pos_data, 1)
+    if offset + 16 > fsize then return nil end
 
-    local val0 = u32le(hdr, 1)  -- offset table entry 0 (not a resource)
-    local val1 = u32le(hdr, 5)  -- offset for resource 0
+    local hdr_data = file_read(f, offset, math.min(32, fsize - offset))
+    if not hdr_data or #hdr_data < 16 then return nil end
 
-    -- Validate: val1 should be a reasonable file offset
-    if val1 < 8 or val1 >= fsize or val1 % 4 ~= 0 then return nil end
+    local disc_size   = u32le(hdr_data, 5)
+    local uncomp_size = u32le(hdr_data, 9)
+    local comp_type   = u8(hdr_data, 13)
+    local comp_flags  = u8(hdr_data, 14)
+    local name_len    = u16le(hdr_data, 15)
 
-    -- Resource i's offset is at position (i+1)*4, so the table runs from
-    -- position 0 to val1-4. Number of resources = val1/4 - 1.
-    local num_resources = math.floor(val1 / 4) - 1
+    if comp_type > 1 then return nil end
 
-    if num_resources < 1 or num_resources > 10000 then
-        -- Fallback: use val0 as count indicator
-        num_resources = math.floor(val0 / 4) - 1
-        if num_resources < 1 or num_resources > 10000 then
-            return nil
-        end
-    end
-
-    -- Read the full offset table
-    local table_size = (num_resources + 1) * 4
-    local offset_data = file_read(f, 0, math.min(table_size, fsize))
-    if not offset_data then return nil end
-
-    local entries = {}
-    for i = 0, num_resources - 1 do
-        local pos = (i + 1) * 4 + 1  -- 1-based position for resource i
-        if pos + 3 > #offset_data then break end
-        local offset = u32le(offset_data, pos)
-        if offset >= fsize then break end
-
-        -- Read the entry header at the offset
-        local hdr_data = file_read(f, offset, math.min(32, fsize - offset))
-        if not hdr_data or #hdr_data < 16 then break end
-
-        local unknown      = u32le(hdr_data, 1)
-        local disc_size    = u32le(hdr_data, 5)
-        local uncomp_size  = u32le(hdr_data, 9)
-        local comp_type    = u8(hdr_data, 13)
-        local comp_flags   = u8(hdr_data, 14)
-        local name_len     = u16le(hdr_data, 15)
-
-        -- Validate
-        if comp_type > 1 then break end
-        if disc_size > fsize then break end
-
-        -- Read name if present
-        local name = ""
-        if name_len > 0 and name_len < 256 then
-            local hdr_size = 16 + name_len
-            local full_hdr = file_read(f, offset, math.min(hdr_size, fsize - offset))
-            if full_hdr and #full_hdr >= hdr_size then
-                for c = 17, 16 + name_len do
-                    local b = full_hdr:byte(c)
-                    if not b or b == 0 then break end
-                    name = name .. string.char(b)
-                end
+    local name = ""
+    if name_len > 0 and name_len < 256 then
+        local hdr_size = 16 + name_len
+        local full_hdr = file_read(f, offset, math.min(hdr_size, fsize - offset))
+        if full_hdr and #full_hdr >= hdr_size then
+            for c = 17, 16 + name_len do
+                local b = full_hdr:byte(c)
+                if not b or b == 0 then break end
+                name = name .. string.char(b)
             end
         end
-
-        -- Data starts after the header
-        local data_offset = offset + 16 + name_len
-
-        entries[#entries + 1] = {
-            index       = i,
-            offset      = offset,
-            data_offset = data_offset,
-            disc_size   = disc_size,
-            uncomp_size = uncomp_size,
-            comp_type   = comp_type,
-            comp_flags  = comp_flags,
-            name        = name
-        }
     end
 
+    return {
+        index       = index,
+        offset      = offset,
+        data_offset = offset + 16 + name_len,
+        disc_size   = disc_size,
+        uncomp_size = uncomp_size,
+        comp_type   = comp_type,
+        comp_flags  = comp_flags,
+        name        = name
+    }
+end
+
+-- Determine how many resources a PAK file contains
+local function pak_resource_count(f)
+    local fsize = file_size(f)
+    if fsize < 8 then return 0 end
+
+    -- Find the smallest offset in the table to determine where data starts.
+    -- Read the first few u32le values; the minimum tells us the table boundary.
+    local scan_size = math.min(fsize, 4096)
+    local scan_data = file_read(f, 0, scan_size)
+    if not scan_data then return 0 end
+
+    local min_offset = fsize
+    local i = 0
+    while true do
+        local pos = i * 4 + 1  -- 1-based in scan_data
+        if pos + 3 > #scan_data then break end
+        local val = u32le(scan_data, pos)
+        if val > 0 and val < min_offset then
+            min_offset = val
+        end
+        -- Stop once we've scanned past the data boundary
+        if (i + 1) * 4 >= min_offset then break end
+        i = i + 1
+    end
+
+    -- Resources are at positions 4, 8, ..., min_offset-4
+    -- (position 0 is a sentinel/unused in PakResourceLoader)
+    local count = math.floor(min_offset / 4) - 1
+    if count < 0 then count = 0 end
+    return count
+end
+
+-- Parse all PAK entries (for resource tree building)
+local function parse_pak_entries(f)
+    local count = pak_resource_count(f)
+    if count < 1 then return nil end
+
+    local entries = {}
+    for i = 0, count - 1 do
+        local entry = load_pak_entry_by_index(f, i)
+        if entry then
+            entries[#entries + 1] = entry
+        end
+    end
+
+    if #entries == 0 then return nil end
     return entries
 end
 
@@ -322,13 +333,10 @@ local function extract_pak_entry(f, entry)
     if not raw or #raw < entry.disc_size then return nil end
 
     if entry.comp_type == 0 then
-        -- Uncompressed
         return raw
     elseif entry.comp_type == 1 then
-        -- PKWARE DCL Implode
         local result = implode_decompress(raw, entry.comp_flags, entry.uncomp_size)
         if not result then return nil end
-        -- Convert array to string
         local chars = {}
         for i = 1, #result do
             chars[i] = string.char(result[i] % 256)
@@ -338,10 +346,17 @@ local function extract_pak_entry(f, entry)
     return nil
 end
 
+-- Load and extract a PAK resource by (file_handle, index)
+local function extract_pak_by_index(f, index)
+    local entry = load_pak_entry_by_index(f, index)
+    if not entry then return nil end
+    return extract_pak_entry(f, entry), entry
+end
+
 -- ============================================================================
 -- CC4 file parser
--- CC4 format: offset table of u32le values, then raw data blocks
--- Resource i is at offset[i], size = offset[i+1] - offset[i]
+-- CC4 format: flat offset table of u32le values, then raw data blocks
+-- Resource i at offset[i], size = offset[i+1] - offset[i]
 -- ============================================================================
 
 local function parse_cc4_entries(f)
@@ -357,13 +372,12 @@ local function parse_cc4_entries(f)
     local num_entries = math.floor(first_offset / 4)
     if num_entries < 1 or num_entries > 10000 then return nil end
 
-    -- Read full offset table
     local offset_data = file_read(f, 0, first_offset)
     if not offset_data then return nil end
 
     local entries = {}
     for i = 0, num_entries - 1 do
-        local pos = i * 4 + 1  -- 1-based
+        local pos = i * 4 + 1
         if pos + 3 > #offset_data then break end
         local offset = u32le(offset_data, pos)
         local next_offset
@@ -393,82 +407,417 @@ end
 local cached_palette = nil
 local cached_palette_path = nil
 
+local function raw_palette_to_8bit(pal_data)
+    local palette = {}
+    for i = 0, 255 do
+        local r = u8(pal_data, i * 3 + 1)
+        local g = u8(pal_data, i * 3 + 2)
+        local b = u8(pal_data, i * 3 + 3)
+        palette[i * 3 + 1] = math.min(r * 4, 255)
+        palette[i * 3 + 2] = math.min(g * 4, 255)
+        palette[i * 3 + 3] = math.min(b * 4, 255)
+    end
+    return palette
+end
+
 local function load_game_palette(game_path)
     if cached_palette and cached_palette_path == game_path then
         return cached_palette
     end
 
     local f = file_open(game_path .. "/RES.PAK")
-    if not f then return nil end
-
-    local entries = parse_pak_entries(f)
-    if not entries then
-        file_close(f)
+    if not f then
+        log_warn("comet: cannot open RES.PAK for palette")
         return nil
     end
 
-    -- Palette is at index 5 in RES.PAK
-    local pal_entry = nil
-    for _, e in ipairs(entries) do
-        if e.index == 5 then pal_entry = e; break end
-    end
-
-    if not pal_entry then
-        file_close(f)
-        return nil
-    end
-
-    local pal_data = extract_pak_entry(f, pal_entry)
+    -- Directly load index 5 (gamePalette) from RES.PAK
+    local pal_data = extract_pak_by_index(f, 5)
     file_close(f)
 
-    if not pal_data or #pal_data < 768 then return nil end
-
-    -- Convert 6-bit VGA palette to 8-bit
-    local palette = {}
-    for i = 0, 255 do
-        local r = u8(pal_data, i * 3 + 1)
-        local g = u8(pal_data, i * 3 + 2)
-        local b = u8(pal_data, i * 3 + 3)
-        -- Scale 6-bit (0-63) to 8-bit (0-255): multiply by 4, cap at 255
-        palette[i * 3 + 1] = math.min(r * 4, 255)
-        palette[i * 3 + 2] = math.min(g * 4, 255)
-        palette[i * 3 + 3] = math.min(b * 4, 255)
+    if not pal_data or #pal_data < 768 then
+        log_warn("comet: palette data invalid (got " ..
+            (pal_data and tostring(#pal_data) or "nil") .. " bytes, need 768)")
+        return nil
     end
 
+    local palette = raw_palette_to_8bit(pal_data)
     cached_palette = palette
     cached_palette_path = game_path
     return palette
 end
 
--- Also try loading alternate palettes from RES.PAK
--- Index 5 = gamePalette, Index 6 = flashbakPal
--- Index 7 = introPalette1, Index 8 = introPalette2
-local function load_palette_by_index(game_path, pal_index)
-    local f = file_open(game_path .. "/RES.PAK")
-    if not f then return nil end
-    local entries = parse_pak_entries(f)
-    if not entries then file_close(f); return nil end
+-- ============================================================================
+-- Animation sprite decompression
+-- Based on ScummVM engines/comet/graphics.cpp drawAnimationCelSprite
+-- Each row: u8 chunks, per chunk: {skip, count_hi, count_lo} + pixels,
+-- then 1 padding byte. Pixel count = count_hi*4 + count_lo.
+-- AnimationCel header: u16le flags, u8 width/16, u8 height, then data.
+-- ============================================================================
 
-    local pal_entry = nil
-    for _, e in ipairs(entries) do
-        if e.index == pal_index then pal_entry = e; break end
+local function decompress_cel_sprite(data, data_pos, width, height)
+    -- data_pos is 1-based position of the sprite row data
+    local pixels = {}
+    for i = 1, width * height do pixels[i] = 0 end
+
+    local src = data_pos
+    for y = 0, height - 1 do
+        if src > #data then break end
+        local chunks = u8(data, src); src = src + 1
+        local x = 0
+        for c = 1, chunks do
+            if src + 2 > #data then break end
+            local skip = u8(data, src)
+            local count_hi = u8(data, src + 1)
+            local count_lo = u8(data, src + 2)
+            src = src + 3
+            local count = count_hi * 4 + count_lo
+            x = x + skip
+            for p = 1, count do
+                if src > #data then break end
+                if x >= 0 and x < width then
+                    pixels[y * width + x + 1] = u8(data, src)
+                end
+                src = src + 1
+                x = x + 1
+            end
+        end
+        src = src + 1  -- padding byte
     end
-    if not pal_entry then file_close(f); return nil end
 
-    local pal_data = extract_pak_entry(f, pal_entry)
-    file_close(f)
-    if not pal_data or #pal_data < 768 then return nil end
+    return pixels
+end
 
-    local palette = {}
-    for i = 0, 255 do
-        local r = u8(pal_data, i * 3 + 1)
-        local g = u8(pal_data, i * 3 + 2)
-        local b = u8(pal_data, i * 3 + 3)
-        palette[i * 3 + 1] = math.min(r * 4, 255)
-        palette[i * 3 + 2] = math.min(g * 4, 255)
-        palette[i * 3 + 3] = math.min(b * 4, 255)
+-- ============================================================================
+-- Animation resource parser
+-- Animations have 4 sections accessed via offset table:
+--   Section 0: Elements (groups of draw commands)
+--   Section 1: Cels (bitmap sprites)
+--   Section 2: Frame lists (animation sequences)
+--   Section 3: unused
+-- Each section starts with its own sub-offset table (loadOffsets pattern).
+-- ============================================================================
+
+-- Read an offset table: first u32 = first offset, count = first/4
+local function read_offsets(data, base_pos)
+    -- base_pos is 1-based position in data
+    if base_pos + 3 > #data then return nil end
+    local first = u32le(data, base_pos)
+    local count = math.floor(first / 4)
+    if count < 1 or count > 10000 then return nil end
+
+    local offsets = {}
+    for i = 0, count - 1 do
+        local pos = base_pos + i * 4
+        if pos + 3 > #data then break end
+        offsets[i] = u32le(data, pos)
     end
-    return palette
+    return offsets, count
+end
+
+local function parse_animation(data)
+    if #data < 16 then return nil end
+
+    -- Read section offsets
+    local section_offsets, section_count = read_offsets(data, 1)
+    if not section_offsets or section_count < 3 then return nil end
+
+    local result = { cels = {}, elements = {} }
+
+    -- ---- Section 1: Cels ----
+    local cels_base = section_offsets[1]
+    if cels_base and cels_base + 4 <= #data then
+        local cel_offsets, cel_count = read_offsets(data, cels_base + 1)
+        if cel_offsets and cel_count > 0 then
+            -- Determine section 2 start for sizing the last cel
+            local section2_end = section_offsets[2] or #data
+            -- Add a sentinel offset for computing last cel's data size
+            cel_offsets[cel_count] = section2_end - cels_base
+
+            for i = 0, cel_count - 1 do
+                -- ScummVM: stream.seek(sectionOffsets[1] + offsets[i] - 2)
+                -- celDataSize = offsets[i+1] - offsets[i] - 2
+                local abs_pos = cels_base + cel_offsets[i] - 2 + 1  -- +1 for Lua 1-based
+                local cel_data_size = cel_offsets[i + 1] - cel_offsets[i] - 2
+
+                if abs_pos > 0 and abs_pos + 3 <= #data and cel_data_size > 0 then
+                    local cel_flags = u16le(data, abs_pos)
+                    local w = u8(data, abs_pos + 2) * 16
+                    local h = u8(data, abs_pos + 3)
+
+                    if w > 0 and w <= 320 and h > 0 and h <= 200 then
+                        result.cels[#result.cels + 1] = {
+                            index = i,
+                            flags = cel_flags,
+                            width = w,
+                            height = h,
+                            data_pos = abs_pos + 4,  -- sprite data starts after 4-byte header
+                            data_size = cel_data_size
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- ---- Section 0: Elements ----
+    local elem_base = section_offsets[0]
+    if elem_base and elem_base + 4 <= #data then
+        local elem_offsets, elem_count = read_offsets(data, elem_base + 1)
+        if elem_offsets and elem_count > 0 then
+            for i = 0, elem_count - 1 do
+                -- ScummVM: stream.seek(sectionOffsets[0] + offsets[i] - 2)
+                local abs_pos = elem_base + elem_offsets[i] - 2 + 1
+                if abs_pos > 0 and abs_pos + 3 <= #data then
+                    local elem_width = u8(data, abs_pos)
+                    local elem_height = u8(data, abs_pos + 1)
+                    local elem_flags = u8(data, abs_pos + 2)
+                    local cmd_count = u8(data, abs_pos + 3)
+
+                    local commands = {}
+                    local cmd_pos = abs_pos + 4
+                    local pt_as_byte = (math.floor(elem_flags / 16) % 2 == 1) -- flags & 0x10
+
+                    for j = 1, cmd_count do
+                        if cmd_pos + 3 > #data then break end
+                        local cmd_type = u8(data, cmd_pos)
+                        local points_count = u8(data, cmd_pos + 1)
+                        local arg1 = u8(data, cmd_pos + 2)
+                        local arg2 = u8(data, cmd_pos + 3)
+                        cmd_pos = cmd_pos + 4
+
+                        local points = {}
+                        for p = 1, points_count do
+                            if pt_as_byte then
+                                if cmd_pos + 1 > #data then break end
+                                local px = u8(data, cmd_pos)
+                                local py = u8(data, cmd_pos + 1)
+                                if px >= 128 then px = px - 256 end
+                                if py >= 128 then py = py - 256 end
+                                points[p] = {x = px, y = py}
+                                cmd_pos = cmd_pos + 2
+                            else
+                                if cmd_pos + 3 > #data then break end
+                                local px = u16le(data, cmd_pos)
+                                local py = u16le(data, cmd_pos + 2)
+                                if px >= 32768 then px = px - 65536 end
+                                if py >= 32768 then py = py - 65536 end
+                                points[p] = {x = px, y = py}
+                                cmd_pos = cmd_pos + 4
+                            end
+                        end
+
+                        commands[#commands + 1] = {
+                            cmd = cmd_type,
+                            arg1 = arg1,
+                            arg2 = arg2,
+                            points = points
+                        }
+                    end
+
+                    result.elements[#result.elements + 1] = {
+                        index = i,
+                        width = elem_width,
+                        height = elem_height,
+                        flags = elem_flags,
+                        commands = commands
+                    }
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+-- Render an animation element composited onto a canvas
+-- Commands kActCelSprite(1) draw cel sprites at positions
+local function render_element(anim, elem_index, canvas_w, canvas_h, palette)
+    local elem = nil
+    for _, e in ipairs(anim.elements) do
+        if e.index == elem_index then elem = e; break end
+    end
+    if not elem then return nil end
+
+    local pixels = {}
+    for i = 1, canvas_w * canvas_h do pixels[i] = 0 end
+
+    for _, cmd in ipairs(elem.commands) do
+        -- kActCelSprite = 1, kActCelRle = 10, kActElement = 0
+        if cmd.cmd == 1 and #cmd.points > 0 then
+            -- arg1 + arg2*256 gives cel index (& 0x0FFF)
+            local cel_index = (cmd.arg1 + cmd.arg2 * 256) % 4096
+            local cel = nil
+            for _, c in ipairs(anim.cels) do
+                if c.index == cel_index then cel = c; break end
+            end
+            if cel then
+                local cx = cmd.points[1].x
+                local cy = cmd.points[1].y - cel.height + 1
+                local cel_pixels = decompress_cel_sprite(
+                    -- need the full data - passed via anim.raw_data
+                    anim.raw_data, cel.data_pos, cel.width, cel.height)
+
+                -- Blit cel onto canvas (skip color 0 = transparent)
+                for sy = 0, cel.height - 1 do
+                    local dy = cy + sy
+                    if dy >= 0 and dy < canvas_h then
+                        for sx = 0, cel.width - 1 do
+                            local dx = cx + sx
+                            if dx >= 0 and dx < canvas_w then
+                                local pixel = cel_pixels[sy * cel.width + sx + 1]
+                                if pixel ~= 0 then
+                                    pixels[dy * canvas_w + dx + 1] = pixel
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        elseif cmd.cmd == 0 and #cmd.points > 0 then
+            -- kActElement: recursively draw sub-element
+            local sub_index = (cmd.arg1 + cmd.arg2 * 256) % 4096
+            local sub_elem = nil
+            for _, e in ipairs(anim.elements) do
+                if e.index == sub_index then sub_elem = e; break end
+            end
+            if sub_elem then
+                local ox = cmd.points[1].x
+                local oy = cmd.points[1].y
+                for _, sub_cmd in ipairs(sub_elem.commands) do
+                    if sub_cmd.cmd == 1 and #sub_cmd.points > 0 then
+                        local cel_index = (sub_cmd.arg1 + sub_cmd.arg2 * 256) % 4096
+                        local cel = nil
+                        for _, c in ipairs(anim.cels) do
+                            if c.index == cel_index then cel = c; break end
+                        end
+                        if cel then
+                            local cx = ox + sub_cmd.points[1].x
+                            local cy = oy + sub_cmd.points[1].y - cel.height + 1
+                            local cel_pixels = decompress_cel_sprite(
+                                anim.raw_data, cel.data_pos, cel.width, cel.height)
+                            for sy = 0, cel.height - 1 do
+                                local dy = cy + sy
+                                if dy >= 0 and dy < canvas_h then
+                                    for sx = 0, cel.width - 1 do
+                                        local dx = cx + sx
+                                        if dx >= 0 and dx < canvas_w then
+                                            local pixel = cel_pixels[sy * cel.width + sx + 1]
+                                            if pixel ~= 0 then
+                                                pixels[dy * canvas_w + dx + 1] = pixel
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return pixels
+end
+
+-- ============================================================================
+-- VOC header parser (Creative Voice File)
+-- ============================================================================
+
+local function parse_voc_info(data)
+    -- VOC signature: "Creative Voice File\x1A" (20 bytes)
+    -- First byte may be \0 instead of 'C' (game quirk)
+    if #data < 26 then return nil end
+    local sig_start = 2  -- skip first byte (may be \0)
+    local expected = "reative Voice File"
+    local found = data:sub(sig_start, sig_start + #expected - 1)
+    if found ~= expected then return nil end
+
+    local header_size = u16le(data, 21)
+    local version = u16le(data, 23)
+    local ver_major = math.floor(version / 256)
+    local ver_minor = version % 256
+
+    -- Parse data blocks to get total samples and sample rate
+    local pos = header_size + 1  -- 1-based
+    local total_samples = 0
+    local sample_rate = 0
+
+    while pos <= #data do
+        local block_type = u8(data, pos)
+        if block_type == 0 then break end  -- terminator
+
+        if pos + 3 > #data then break end
+        local block_size = u8(data, pos + 1)
+            + u8(data, pos + 2) * 256
+            + u8(data, pos + 3) * 65536
+        pos = pos + 4
+
+        if block_type == 1 then
+            -- Sound data block
+            if pos + 1 <= #data then
+                local freq_div = u8(data, pos)
+                local codec = u8(data, pos + 1)
+                if sample_rate == 0 then
+                    sample_rate = math.floor(1000000 / (256 - freq_div))
+                end
+                total_samples = total_samples + block_size - 2
+            end
+        elseif block_type == 9 then
+            -- Extended sound data (VOC v1.20+)
+            if pos + 11 <= #data then
+                sample_rate = u32le(data, pos)
+                local bits = u8(data, pos + 4)
+                local channels = u8(data, pos + 5) + 1
+                total_samples = total_samples + block_size - 12
+            end
+        end
+
+        pos = pos + block_size
+    end
+
+    local duration = 0
+    if sample_rate > 0 then
+        duration = total_samples / sample_rate
+    end
+
+    return {
+        version = string.format("%d.%02d", ver_major, ver_minor),
+        sample_rate = sample_rate,
+        total_samples = total_samples,
+        duration = duration
+
+    }
+end
+
+-- ============================================================================
+-- Hex dump helper
+-- ============================================================================
+
+local function hex_dump(data, max_bytes)
+    max_bytes = max_bytes or 256
+    local dump_len = math.min(#data, max_bytes)
+    local lines = {}
+    for row = 0, math.floor((dump_len - 1) / 16) do
+        local line = string.format("%04X: ", row * 16)
+        local ascii = ""
+        for col = 0, 15 do
+            local idx = row * 16 + col + 1
+            if idx <= dump_len then
+                line = line .. string.format("%02X ", u8(data, idx))
+                local ch = u8(data, idx)
+                if ch >= 32 and ch < 127 then
+                    ascii = ascii .. string.char(ch)
+                else
+                    ascii = ascii .. "."
+                end
+            else
+                line = line .. "   "
+            end
+        end
+        lines[#lines + 1] = line .. " " .. ascii
+    end
+    return table.concat(lines, "\n")
 end
 
 -- ============================================================================
@@ -492,8 +841,6 @@ function engine.get_resources(game_path)
     if not files then return {} end
 
     local resources = {}
-
-    -- Collect PAK files (dNN.pak = backgrounds, aNN.pak = animations, RES.PAK, SMP.PAK)
     local pak_files = {}
     local cc4_files = {}
 
@@ -509,7 +856,7 @@ function engine.get_resources(game_path)
     table.sort(pak_files, function(a, b) return a:lower() < b:lower() end)
     table.sort(cc4_files, function(a, b) return a:lower() < b:lower() end)
 
-    -- --- PAK files (scene backgrounds and animations) ---
+    -- --- PAK files ---
     for _, pak_name in ipairs(pak_files) do
         local f = file_open(game_path .. "/" .. pak_name)
         if f then
@@ -519,6 +866,7 @@ function engine.get_resources(game_path)
                 local lower = pak_name:lower()
                 local is_scene = lower:match("^d%d+%.pak$")
                 local is_anim = lower:match("^a%d+%.pak$")
+                local is_smp = (lower == "smp.pak")
 
                 local cat = {
                     id = "pak_" .. pak_name,
@@ -527,15 +875,17 @@ function engine.get_resources(game_path)
                     children = {}
                 }
 
-                -- Add a label based on file type
                 if is_scene then
                     local mod_num = lower:match("^d(%d+)")
-                    cat.name = string.format("%s - Module %s Backgrounds (%d entries)",
+                    cat.name = string.format("%s - Module %s Scenes (%d entries)",
                         pak_name, mod_num, #entries)
                 elseif is_anim then
                     local mod_num = lower:match("^a(%d+)")
                     cat.name = string.format("%s - Module %s Animations (%d entries)",
                         pak_name, mod_num, #entries)
+                elseif is_smp then
+                    cat.name = string.format("%s - Sound Effects (%d entries)",
+                        pak_name, #entries)
                 else
                     cat.name = string.format("%s (%d entries)", pak_name, #entries)
                 end
@@ -555,15 +905,16 @@ function engine.get_resources(game_path)
                         size_str = string.format("%dB", e.disc_size)
                     end
 
-                    -- Determine resource type hint
                     local res_type = "image"
                     if is_scene then
-                        -- Even indices are backgrounds, odd are decoration sprites
                         if e.index % 2 == 0 then
                             label = label .. " (Background)"
                         else
                             label = label .. " (Decoration)"
                         end
+                    elseif is_smp then
+                        res_type = "sound"
+                        label = label .. " (Sound)"
                     end
 
                     cat.children[#cat.children + 1] = {
@@ -578,7 +929,7 @@ function engine.get_resources(game_path)
         end
     end
 
-    -- --- CC4 files (scripts, text) ---
+    -- --- CC4 files ---
     if #cc4_files > 0 then
         local cc4_cat = {
             id = "cc4_files",
@@ -626,7 +977,6 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id)
-    -- Parse resource ID: pak_FILENAME_INDEX or cc4_FILENAME_INDEX
     local res_type, filename, index_str = resource_id:match("^(pak)_(.+)_(%d+)$")
     if not res_type then
         res_type, filename, index_str = resource_id:match("^(cc4)_(.+)_(%d+)$")
@@ -646,60 +996,50 @@ function engine.load_resource(game_path, resource_id)
     return nil
 end
 
+-- ============================================================================
+-- PAK resource loader
+-- ============================================================================
+
+local function get_or_make_palette(game_path)
+    local palette = load_game_palette(game_path)
+    if palette then return palette end
+    -- Grayscale fallback
+    palette = {}
+    for i = 0, 255 do
+        palette[i * 3 + 1] = i
+        palette[i * 3 + 2] = i
+        palette[i * 3 + 3] = i
+    end
+    return palette
+end
+
 function load_pak_resource(game_path, pak_name, res_index)
     local f = file_open(game_path .. "/" .. pak_name)
     if not f then
         return { type = "text", text = "Cannot open " .. pak_name }
     end
 
-    local entries = parse_pak_entries(f)
-    if not entries then
-        file_close(f)
-        return { type = "text", text = "Cannot parse PAK: " .. pak_name }
-    end
-
-    -- Find the entry with the matching index
-    local target = nil
-    for _, e in ipairs(entries) do
-        if e.index == res_index then target = e; break end
-    end
-    if not target then
-        file_close(f)
-        return { type = "text", text = string.format("Entry %d not found in %s", res_index, pak_name) }
-    end
-
-    -- Extract data
-    local data = extract_pak_entry(f, target)
+    -- Direct extraction by index
+    local data, entry = extract_pak_by_index(f, res_index)
     file_close(f)
 
     if not data then
         return { type = "text", text = string.format(
-            "Failed to extract entry %d from %s (comp=%d, disc=%d, uncomp=%d)",
-            res_index, pak_name, target.comp_type, target.disc_size, target.uncomp_size) }
+            "Failed to extract entry %d from %s", res_index, pak_name) }
     end
 
-    -- Determine what kind of resource this is based on filename pattern and data size
     local lower = pak_name:lower()
     local is_scene_pak = lower:match("^d%d+%.pak$")
+    local is_anim_pak = lower:match("^a%d+%.pak$")
+    local is_smp = (lower == "smp.pak")
 
-    -- --- Scene background (64000 bytes = 320x200 raw pixels) ---
+    -- === Scene background (64000 bytes = 320x200 raw pixels) ===
     if #data == 64000 then
-        local palette = load_game_palette(game_path)
-        if not palette then
-            -- Fallback: grayscale
-            palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-        end
-
+        local palette = get_or_make_palette(game_path)
         local pixels = {}
         for i = 1, 64000 do
             pixels[i] = u8(data, i)
         end
-
         local img = image_create_indexed(320, 200, pixels, palette)
         local mod_num = lower:match("^d(%d+)") or "?"
         return {
@@ -709,31 +1049,18 @@ function load_pak_resource(game_path, pak_name, res_index)
         }
     end
 
-    -- --- Palette data (768 bytes) ---
+    -- === Palette data (768 bytes) ===
     if #data == 768 then
-        -- Display as a palette swatch (16x16 grid of colors)
-        local pal = {}
-        for i = 0, 255 do
-            local r = u8(data, i * 3 + 1)
-            local g = u8(data, i * 3 + 2)
-            local b = u8(data, i * 3 + 3)
-            pal[i * 3 + 1] = math.min(r * 4, 255)
-            pal[i * 3 + 2] = math.min(g * 4, 255)
-            pal[i * 3 + 3] = math.min(b * 4, 255)
-        end
-
-        -- Create a 256x256 palette preview (16x16 blocks of 16x16 pixels each)
+        local pal = raw_palette_to_8bit(data)
         local pw, ph = 256, 256
         local pixels = {}
         for y = 0, ph - 1 do
             local row = math.floor(y / 16)
             for x = 0, pw - 1 do
                 local col = math.floor(x / 16)
-                local color_idx = row * 16 + col
-                pixels[y * pw + x + 1] = color_idx
+                pixels[y * pw + x + 1] = row * 16 + col
             end
         end
-
         local img = image_create_indexed(pw, ph, pixels, pal)
         return {
             type = "image", image = img,
@@ -741,22 +1068,73 @@ function load_pak_resource(game_path, pak_name, res_index)
         }
     end
 
-    -- --- Try to interpret as a background with non-standard size ---
-    -- Some entries might be slightly different sizes
-    if #data > 32000 and #data <= 64000 then
-        local palette = load_game_palette(game_path)
-        if not palette then
-            palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
+    -- === Sound effects (VOC format in SMP.PAK) ===
+    if is_smp then
+        -- Fix VOC header quirk: first byte \0 -> 'C'
+        local fixed = "C" .. data:sub(2)
+        local voc_info = parse_voc_info(fixed)
+        if voc_info then
+            local info = string.format("VOC Sound Effect - SMP.PAK[%d]\n\n", res_index)
+            info = info .. string.format("Format: Creative Voice File v%s\n", voc_info.version)
+            info = info .. string.format("Sample Rate: %d Hz\n", voc_info.sample_rate)
+            info = info .. string.format("Samples: %d\n", voc_info.total_samples)
+            info = info .. string.format("Duration: %.2f seconds\n", voc_info.duration)
+            info = info .. string.format("Data Size: %d bytes\n", #data)
+            return { type = "text", text = info }
+        else
+            local info = string.format("Sound Effect - SMP.PAK[%d]\n", res_index)
+            info = info .. string.format("Data Size: %d bytes\n\n", #data)
+            info = info .. hex_dump(data, 128)
+            return { type = "text", text = info }
         end
+    end
 
-        -- Try to display as 320xH where H = data_size / 320
+    -- === Animation / Decoration sprites ===
+    -- Odd indices in dNN.pak are decorations, aNN.pak entries are animations
+    local is_decoration = is_scene_pak and (res_index % 2 == 1)
+    local try_animation = is_decoration or is_anim_pak
+
+    if try_animation and #data >= 16 then
+        local anim = parse_animation(data)
+        if anim and #anim.cels > 0 then
+            anim.raw_data = data  -- store for cel decompression
+
+            if is_decoration and #anim.elements > 0 then
+                -- Decoration: render element 0 composited on full 320x200 canvas
+                local palette = get_or_make_palette(game_path)
+                local pixels = render_element(anim, 0, 320, 200, palette)
+                if pixels then
+                    local img = image_create_indexed(320, 200, pixels, palette)
+                    local mod_num = lower:match("^d(%d+)") or "?"
+                    return {
+                        type = "image", image = img,
+                        description = string.format(
+                            "Module %s - Decoration %d (%d elements, %d cels)",
+                            mod_num, res_index, #anim.elements, #anim.cels)
+                    }
+                end
+            end
+
+            -- Show first cel as standalone sprite image
+            local cel = anim.cels[1]
+            local palette = get_or_make_palette(game_path)
+            local cel_pixels = decompress_cel_sprite(data, cel.data_pos, cel.width, cel.height)
+
+            -- Create image with black background for transparency
+            local img = image_create_indexed(cel.width, cel.height, cel_pixels, palette)
+            local desc = string.format(
+                "Animation Sprite - %s[%d]\nCel 0: %dx%d (flags=0x%04X)\n%d cels, %d elements total",
+                pak_name, res_index, cel.width, cel.height, cel.flags,
+                #anim.cels, #anim.elements)
+            return { type = "image", image = img, description = desc }
+        end
+    end
+
+    -- === Try as partial background (any 320xH raw data) ===
+    if #data > 32000 and #data <= 64000 then
         local h = math.floor(#data / 320)
         if h > 0 and h <= 200 then
+            local palette = get_or_make_palette(game_path)
             local pixels = {}
             for i = 1, 320 * h do
                 pixels[i] = u8(data, i)
@@ -769,42 +1147,25 @@ function load_pak_resource(game_path, pak_name, res_index)
         end
     end
 
-    -- --- Generic data: show hex dump ---
+    -- === Generic hex dump fallback ===
     local info = string.format("PAK Entry %d from %s\n", res_index, pak_name)
-    info = info .. string.format("Compression: %s\n",
-        target.comp_type == 0 and "None" or "PKWARE Implode")
-    info = info .. string.format("Disc size: %d bytes\n", target.disc_size)
-    info = info .. string.format("Uncompressed size: %d bytes\n", target.uncomp_size)
-    if target.name and #target.name > 0 then
-        info = info .. string.format("Name: %s\n", target.name)
-    end
-    info = info .. string.format("\nData size: %d bytes\n", #data)
-
-    -- Show first 256 bytes as hex dump
-    info = info .. "\nHex dump (first 256 bytes):\n"
-    local dump_len = math.min(#data, 256)
-    for row = 0, math.floor((dump_len - 1) / 16) do
-        local line = string.format("%04X: ", row * 16)
-        local ascii = ""
-        for col = 0, 15 do
-            local idx = row * 16 + col + 1
-            if idx <= dump_len then
-                line = line .. string.format("%02X ", u8(data, idx))
-                local ch = u8(data, idx)
-                if ch >= 32 and ch < 127 then
-                    ascii = ascii .. string.char(ch)
-                else
-                    ascii = ascii .. "."
-                end
-            else
-                line = line .. "   "
-            end
+    if entry then
+        info = info .. string.format("Compression: %s\n",
+            entry.comp_type == 0 and "None" or "PKWARE Implode")
+        info = info .. string.format("Disc size: %d bytes\n", entry.disc_size)
+        info = info .. string.format("Uncompressed size: %d bytes\n", entry.uncomp_size)
+        if entry.name and #entry.name > 0 then
+            info = info .. string.format("Name: %s\n", entry.name)
         end
-        info = info .. line .. " " .. ascii .. "\n"
     end
-
+    info = info .. string.format("Data size: %d bytes\n\n", #data)
+    info = info .. hex_dump(data)
     return { type = "text", text = info }
 end
+
+-- ============================================================================
+-- CC4 resource loader
+-- ============================================================================
 
 function load_cc4_resource(game_path, cc4_name, res_index)
     local f = file_open(game_path .. "/" .. cc4_name)
@@ -819,7 +1180,6 @@ function load_cc4_resource(game_path, cc4_name, res_index)
         return { type = "text", text = "Cannot parse CC4: " .. cc4_name }
     end
 
-    -- Find the entry
     local target = nil
     for _, e in ipairs(entries) do
         if e.index == res_index then target = e; break end
@@ -836,58 +1196,73 @@ function load_cc4_resource(game_path, cc4_name, res_index)
         return { type = "text", text = "Failed to read CC4 entry" }
     end
 
-    -- CC4 files contain scripts (rNN.cc4) or text (e.cc4, d.cc4, etc.)
     local lower = cc4_name:lower()
     local is_text = lower:match("^[a-z]%.cc4$")
     local is_script = lower:match("^r%d+%.cc4$")
 
-    if is_text then
-        -- Text resource: entire block is encrypted with data[i] -= 0x54*(i+1)
-        -- Must decrypt ALL bytes first, then parse offset table from decrypted data
-        -- (ScummVM TextResource constructor decrypts before reading _count)
+    -- === Text resource (ScummVM TextResource format) ===
+    -- Structure: offset table (unencrypted), then text data (encrypted)
+    -- Encryption only applies to text data after firstOffs
+    if is_text and #data >= 8 then
+        local first_offs = u32le(data, 1)
+        local str_count = math.floor(first_offs / 4)
 
-        -- Decrypt entire block (i is 1-based in Lua, matching 0x54*(0+1) for C's i=0)
-        local dec_chars = {}
-        for i = 1, #data do
-            dec_chars[i] = string.char((data:byte(i) - 0x54 * i) % 256)
-        end
-        local dec = table.concat(dec_chars)
+        if str_count > 0 and str_count < 10000 and first_offs < #data then
+            -- Read string offsets (these are NOT encrypted)
+            local str_offsets = {}
+            str_offsets[0] = 0
+            for i = 1, str_count - 1 do
+                local pos = i * 4 + 1
+                if pos + 3 <= #data then
+                    str_offsets[i] = u32le(data, pos) - first_offs
+                end
+            end
+            str_offsets[str_count] = #data - first_offs
 
-        if #dec >= 4 then
-            -- Decrypted structure: u32le count, then count u32le offsets, then string data
-            local str_count = u32le(dec, 1)
+            -- Read and decrypt text data (everything after first_offs)
+            local text_size = #data - first_offs
+            local text_start = first_offs + 1  -- 1-based position
 
-            if str_count > 0 and str_count < 10000 then
-                local info = string.format("Text Resource from %s[%d]\n", cc4_name, res_index)
-                info = info .. string.format("%d strings:\n\n", str_count)
+            local decrypted = {}
+            for i = 0, text_size - 1 do
+                local src_pos = text_start + i
+                if src_pos <= #data then
+                    -- data[i] -= 0x54 * (i + 1), where i is 0-based within text block
+                    decrypted[i] = (u8(data, src_pos) - 0x54 * (i + 1)) % 256
+                end
+            end
 
-                for i = 0, math.min(str_count - 1, 99) do
-                    local offs_pos = (i + 1) * 4 + 1  -- 1-based position for offset i
-                    if offs_pos + 3 <= #dec then
-                        local offs = u32le(dec, offs_pos)
-                        -- String at dec[offs] (0-based offset), null-terminated
-                        local str = ""
-                        for j = offs + 1, #dec do  -- 1-based
-                            local b = dec:byte(j)
-                            if b == 0 then break end
-                            if b >= 32 and b < 127 then
-                                str = str .. string.char(b)
-                            else
-                                str = str .. "."
-                            end
-                        end
-                        if #str > 0 then
-                            info = info .. string.format("[%d] %s\n", i, str)
+            local info = string.format("Text Resource from %s[%d]\n", cc4_name, res_index)
+            info = info .. string.format("%d strings:\n\n", str_count)
+
+            for i = 0, math.min(str_count - 1, 199) do
+                local start_off = str_offsets[i]
+                local end_off = str_offsets[i + 1]
+
+                if start_off and end_off and start_off >= 0 and end_off <= text_size then
+                    local str = ""
+                    -- +1 to skip the '*' terminator of the previous string
+                    for j = start_off + 1, end_off - 1 do
+                        local b = decrypted[j]
+                        if b and b >= 32 and b < 127 then
+                            str = str .. string.char(b)
+                        elseif b == 0 or b == nil then
+                            break
+                        else
+                            str = str .. "."
                         end
                     end
+                    if #str > 0 then
+                        info = info .. string.format("[%d] %s\n", i, str)
+                    end
                 end
-
-                return { type = "text", text = info }
             end
+
+            return { type = "text", text = info }
         end
     end
 
-    -- Generic: show hex dump
+    -- === Generic hex dump ===
     local info = string.format("CC4 Entry %d from %s\n", res_index, cc4_name)
     info = info .. string.format("Offset: 0x%X, Size: %d bytes\n\n", target.offset, target.data_size)
 
@@ -895,28 +1270,7 @@ function load_cc4_resource(game_path, cc4_name, res_index)
         info = info .. "Script data\n\n"
     end
 
-    -- Hex dump
-    info = info .. "Hex dump (first 256 bytes):\n"
-    local dump_len = math.min(#data, 256)
-    for row = 0, math.floor((dump_len - 1) / 16) do
-        local line = string.format("%04X: ", row * 16)
-        local ascii = ""
-        for col = 0, 15 do
-            local idx = row * 16 + col + 1
-            if idx <= dump_len then
-                line = line .. string.format("%02X ", u8(data, idx))
-                local ch = u8(data, idx)
-                if ch >= 32 and ch < 127 then
-                    ascii = ascii .. string.char(ch)
-                else
-                    ascii = ascii .. "."
-                end
-            else
-                line = line .. "   "
-            end
-        end
-        info = info .. line .. " " .. ascii .. "\n"
-    end
+    info = info .. hex_dump(data)
 
     return { type = "text", text = info }
 end
