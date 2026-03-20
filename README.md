@@ -19,17 +19,20 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-23 game engines are currently supported via Lua scripts — no recompilation needed.
+27 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
+| Alone in the Dark series | 1992-95 | `aitd` | Backgrounds | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
+| Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds | ✅ Working |
+| Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations | ✅ Working |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -45,6 +48,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
+| Sierra SCI (SCI0) | 1988-96 | `sci` | Sprites, Cursors | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 
 > \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file
@@ -233,19 +237,24 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 23 engine scripts (Lua)
+│   └── engines/                  # 27 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
+│       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
+│       ├── cobramission/         # Cobra Mission
 │       ├── comet/engine.lua      # Shadow of the Comet
 │       ├── cruise/engine.lua     # Cruise for a Corpse
 │       ├── darkseed/engine.lua   # Dark Seed
 │       ├── gob/engine.lua        # Gobliiins series
+│       ├── harvester/engine.lua  # Harvester
 │       ├── hollywoodmonsters/    # Hollywood Monsters
 │       ├── igor/engine.lua       # Igor: Objective Uikokahonia
 │       ├── kyra1/engine.lua      # The Legend of Kyrandia
 │       ├── kyra2/engine.lua      # Hand of Fate
 │       ├── lastexpress/          # The Last Express
 │       ├── pelrock/engine.lua    # Alfred Pelrock
+│       ├── scumm/engine.lua      # SCUMM V5
+│       ├── sci/engine.lua        # Sierra SCI (SCI0)
 │       ├── scumm/engine.lua      # SCUMM V5
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
@@ -280,7 +289,7 @@ adventure-explorer/
 - [ ] Sound/music preview and export (OGG/WAV)
 - [x] Zoom for image and animation preview
 - [ ] Sprite sheet viewer
-- [ ] More engine scripts (SCI, AGI, etc.)
+- [x] More engine scripts (SCI, AITD, Harvester, Cobra Mission)
 - [ ] Resource search/filter
 - [ ] Batch export
 
