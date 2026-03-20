@@ -4,8 +4,12 @@ import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.zip.DataFormatException
+import java.util.zip.Inflater
+import javax.imageio.ImageIO
 
 /**
  * Wraps the LuaJ runtime and exposes the Adventure Explorer API to Lua scripts.
@@ -28,10 +32,13 @@ class LuaEngine {
     private var nextFileHandle = 1
     private val images = mutableMapOf<Int, BufferedImage>()
     private var nextImageHandle = 1
+    private val animations = mutableMapOf<Int, Pair<List<BufferedImage>, Int>>() // handle -> (frames, delayMs)
+    private var nextAnimHandle = 1
 
     init {
         registerFileApi()
         registerImageApi()
+        registerBinaryApi()
         registerLogApi()
     }
 
@@ -163,6 +170,91 @@ class LuaEngine {
                 return valueOf(handle)
             }
         }
+
+        // animation_create(image_handles_table [, delay_ms]) -> animation_handle
+        // image_handles_table: 1-indexed table of image handles (from image_create_*)
+        // delay_ms: optional milliseconds per frame (default 100)
+        globals["animation_create"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val handlesTable = args.checktable(1)
+                val delayMs = args.optint(2, 100)
+                val frames = mutableListOf<BufferedImage>()
+                var i = 1
+                while (true) {
+                    val v = handlesTable.rawget(i)
+                    if (v.isnil()) break
+                    val imgHandle = v.checkint()
+                    val img = images[imgHandle] ?: return NIL
+                    frames.add(img)
+                    i++
+                }
+                if (frames.isEmpty()) return NIL
+                val handle = nextAnimHandle++
+                animations[handle] = Pair(frames.toList(), delayMs)
+                return valueOf(handle)
+            }
+        }
+    }
+
+    // ── Binary utilities API ─────────────────────────────────────────
+
+    private fun registerBinaryApi() {
+        // zlib_decompress(compressed_data, uncompressed_size) -> decompressed binary string or nil
+        // Handles both zlib-wrapped (0x78…) and raw deflate streams.
+        globals["zlib_decompress"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, expectedSize: LuaValue): LuaValue {
+                val bytes = try {
+                    data.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                } catch (e: Exception) { return NIL }
+                val outSize = expectedSize.checkint()
+                // Try standard zlib (with header) first, then raw deflate.
+                for (nowrap in listOf(false, true)) {
+                    try {
+                        val inf = Inflater(nowrap)
+                        inf.setInput(bytes)
+                        val out = ByteArray(outSize)
+                        val n = inf.inflate(out)
+                        inf.end()
+                        if (n > 0) return LuaString.valueOf(out, 0, n)
+                    } catch (_: DataFormatException) { /* try the other mode */ }
+                }
+                return NIL
+            }
+        }
+
+        // image_load_png(data) -> image handle or nil
+        // Accepts any format supported by Java ImageIO (PNG, BMP, GIF, JPEG).
+        globals["image_load_png"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                return try {
+                    val bytes = data.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    val src = ImageIO.read(ByteArrayInputStream(bytes)) ?: return NIL
+                    val image = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
+                    val g2d = image.createGraphics()
+                    g2d.drawImage(src, 0, 0, null)
+                    g2d.dispose()
+                    val handle = nextImageHandle++
+                    images[handle] = image
+                    valueOf(handle)
+                } catch (e: Exception) { NIL }
+            }
+        }
+
+        // xor_bytes(data, key) -> XOR-decrypted binary string
+        // Each byte of data is XORed with the cycling key bytes.
+        globals["xor_bytes"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, key: LuaValue): LuaValue {
+                return try {
+                    val input = data.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    val keyBytes = key.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    if (keyBytes.isEmpty()) return data
+                    val output = ByteArray(input.size) { i ->
+                        (input[i].toInt() and 0xFF xor (keyBytes[i % keyBytes.size].toInt() and 0xFF)).toByte()
+                    }
+                    LuaString.valueOf(output, 0, output.size)
+                } catch (e: Exception) { NIL }
+            }
+        }
     }
 
     // ── Log API ─────────────────────────────────────────────────────
@@ -197,12 +289,16 @@ class LuaEngine {
 
     fun getImage(handle: Int): BufferedImage? = images[handle]
 
+    fun getAnimation(handle: Int): Pair<List<BufferedImage>, Int>? = animations[handle]
+
     fun cleanup() {
         openFiles.values.forEach { runCatching { it.close() } }
         openFiles.clear()
         nextFileHandle = 1
         images.clear()
         nextImageHandle = 1
+        animations.clear()
+        nextAnimHandle = 1
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

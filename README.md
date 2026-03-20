@@ -12,33 +12,43 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 - **Cross-platform**: Runs on macOS, Windows, and Linux (Compose Desktop / JVM)
 - **No recompilation**: Add new game engines by dropping Lua scripts into `scripts/engines/`
 - **Auto-detection**: Opens a game folder and automatically identifies the engine
-- **Preview**: View room backgrounds, palettes, and text data
-- **Export**: Save resources as PNG
+- **Preview**: View room backgrounds, palettes, text data, and animations
+- **Animation playback**: Frame-by-frame navigation, play/pause, adjustable speed
+- **Export**: Save resources as PNG — individual frames or entire animation sequences
 
 ## Supported Engines
 
-18 game engines are currently supported via Lua scripts — no recompilation needed.
+23 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
+| Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations | ✅ Working |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
-| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds | ✅ Working |
-| The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds | ✅ Working |
-| The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds | ✅ Working |
+| Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds | ✅ Working |
+| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations | ✅ Working |
+| The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
+| The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
+| The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | SCUMM V5 (Monkey Island 2, Indiana Jones 4…) | 1991-93 | `scumm` | Backgrounds, Palettes | ✅ Working |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
 | The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes | ✅ Working |
+| Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes | ✅ Working |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds | ✅ Working |
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
+| Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
+
+> \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file
+> in the game folder for encrypted games (format: `ID;Game Name;Key`, one entry per line).
+> Unencrypted archives and archives shipped with known keys work without any extra setup.
 
 ## Building & Running
 
@@ -67,6 +77,38 @@ gradle wrapper
 ./gradlew packageMsi
 ```
 
+## Running from a Binary Release
+
+If you have a pre-built release (`.dmg`, `.msi`, or fat JAR), follow these steps:
+
+### macOS (.dmg)
+
+1. Open the `.dmg` file and drag **Adventure Explorer** to your Applications folder
+2. Make sure the `scripts/` folder (containing engine Lua scripts) is located next to the application, or inside the app bundle's `Resources/` directory
+3. Launch from Applications — if macOS blocks it, right-click → Open → Open
+
+### Windows (.msi)
+
+1. Run the `.msi` installer and follow the prompts
+2. The `scripts/` folder is bundled inside the installation directory automatically
+3. Launch from the Start Menu or desktop shortcut
+
+### Fat JAR
+
+If you have a standalone `.jar` file:
+
+```bash
+java -jar adventure-explorer.jar
+```
+
+The `scripts/` folder must be in the **working directory** (the folder you run the command from), or next to the JAR file.
+
+### Requirements
+
+- **Java 17+** runtime is required for the JAR distribution
+- Native packages (`.dmg` / `.msi`) bundle their own JVM — no separate Java install needed
+- The `scripts/engines/` folder must be accessible at runtime — this is where engine Lua scripts live
+
 ## Usage
 
 1. Launch the application
@@ -74,7 +116,8 @@ gradle wrapper
    (e.g., the folder containing `ALFRED.1`, `JUEGO.EXE`, etc.)
 3. The app auto-detects the game engine and populates the resource tree
 4. Click on a resource to preview it
-5. Click **Export PNG** to save the current preview
+5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
+6. Click **Export PNG** to save the current preview, or use the animation export buttons to save individual frames or the full sequence
 
 ## Writing Engine Scripts
 
@@ -140,10 +183,27 @@ return engine
 |----------|---------|-------------|
 | `image_create_indexed(w, h, pixels, palette)` | handle | Create image from indexed pixels + palette |
 | `image_create_rgb(w, h, rgb_data)` | handle | Create image from RGB triplets |
+| `image_load_png(data)` | handle | Load image from PNG binary data |
 
 - `pixels`: Lua table (1-indexed), values 0–255 (color indices)
 - `palette`: Lua table (1-indexed), 768 entries (R,G,B triplets, 0–255)
 - `rgb_data`: Lua table (1-indexed), w×h×3 entries (R,G,B, 0–255)
+
+#### Animation
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `animation_create(image_handles, delay_ms)` | handle | Create animation from a table of image handles |
+
+- `image_handles`: Lua table of image handles (from `image_create_*` calls)
+- `delay_ms`: Frame delay in milliseconds (default: 100)
+
+#### Data Helpers
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `zlib_decompress(data)` | string | Decompress zlib-compressed data |
+| `xor_bytes(data, key)` | string | XOR each byte of data with the key string (repeating) |
 
 #### Logging
 
@@ -172,25 +232,30 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 18 engine scripts (Lua)
+│   └── engines/                  # 23 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
+│       ├── comet/engine.lua      # Shadow of the Comet
 │       ├── cruise/engine.lua     # Cruise for a Corpse
 │       ├── darkseed/engine.lua   # Dark Seed
 │       ├── gob/engine.lua        # Gobliiins series
+│       ├── hollywoodmonsters/    # Hollywood Monsters
 │       ├── igor/engine.lua       # Igor: Objective Uikokahonia
 │       ├── kyra1/engine.lua      # The Legend of Kyrandia
 │       ├── kyra2/engine.lua      # Hand of Fate
+│       ├── lastexpress/          # The Last Express
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── scumm/engine.lua      # SCUMM V5
 │       ├── scummv2/engine.lua    # SCUMM V2
-│       ├── sherlock/engine.lua   # Sherlock Holmes
+│       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
+│       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)
 │       ├── sword1/engine.lua     # Broken Sword 1
 │       ├── sword2/engine.lua     # Broken Sword 2
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
 │       ├── tot/engine.lua        # Trick or Treat
 │       ├── toonstruck/engine.lua # Toonstruck
-│       └── touche/engine.lua     # Touché
+│       ├── touche/engine.lua     # Touché
+│       └── visionaire/           # Visionaire (Daedalic games)
 └── src/main/kotlin/adventureexplorer/
     ├── Main.kt                   # Entry point
     ├── app/
@@ -210,11 +275,11 @@ adventure-explorer/
 
 ## Roadmap
 
-- [ ] Animation playback (sprite frames)
+- [x] Animation playback (sprite frames) with frame navigation and export
 - [ ] Sound/music preview and export (OGG/WAV)
-- [ ] Zoom and pan for image preview
+- [x] Zoom for image and animation preview
 - [ ] Sprite sheet viewer
-- [ ] More engine scripts (SCUMM, SCI, AGI, etc.)
+- [ ] More engine scripts (SCI, AGI, etc.)
 - [ ] Resource search/filter
 - [ ] Batch export
 

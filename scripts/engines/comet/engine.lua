@@ -982,7 +982,10 @@ function engine.get_resources(game_path)
                             label = label .. " (Background)"
                         else
                             label = label .. " (Decoration)"
+                            res_type = "animation"
                         end
+                    elseif is_anim then
+                        res_type = "animation"
                     elseif is_smp then
                         res_type = "sound"
                         label = label .. " (Sound)"
@@ -1280,61 +1283,69 @@ function load_pak_resource(game_path, pak_name, res_index)
             anim.raw_data = data  -- store for cel decompression
 
             if is_decoration and #anim.elements > 0 then
-                -- Decoration: render element 0 composited on full 320x200 canvas
+                -- Decoration: render each element as a frame
                 local palette = get_or_make_palette(game_path)
-                local pixels = render_element(anim, 0, 320, 200, palette)
-                if pixels then
-                    local img = image_create_indexed(320, 200, pixels, palette)
+                local handles = {}
+                for ei = 0, #anim.elements - 1 do
+                    local pixels = render_element(anim, ei, 320, 200, palette)
+                    if pixels then
+                        handles[#handles + 1] = image_create_indexed(320, 200, pixels, palette)
+                    end
+                end
+                if #handles > 0 then
                     local mod_num = lower:match("^d(%d+)") or "?"
-                    return {
-                        type = "image", image = img,
-                        description = string.format(
-                            "Module %s - Decoration %d (%d elements, %d cels)",
-                            mod_num, res_index, #anim.elements, #anim.cels)
-                    }
+                    if #handles == 1 then
+                        return {
+                            type = "image", image = handles[1],
+                            description = string.format(
+                                "Module %s - Decoration %d (%d elements, %d cels)",
+                                mod_num, res_index, #anim.elements, #anim.cels)
+                        }
+                    else
+                        local anim_handle = animation_create(handles, 150)
+                        return {
+                            type = "animation",
+                            animation = anim_handle,
+                            delay_ms = 150,
+                            description = string.format(
+                                "Module %s - Decoration %d (%d elements, %d cels)",
+                                mod_num, res_index, #anim.elements, #anim.cels)
+                        }
+                    end
                 end
             end
 
-            -- Render all cels as a horizontal sprite sheet
+            -- Render each cel as an individual animation frame
             local palette = get_or_make_palette(game_path)
-            local max_h = 0
-            local total_w = 0
-            local cel_images = {}
+            local handles = {}
 
             for ci = 1, #anim.cels do
                 local cel = anim.cels[ci]
                 local pix = decompress_cel_sprite(data, cel.data_pos, cel.width, cel.height)
-                cel_images[ci] = { pixels = pix, w = cel.width, h = cel.height }
-                total_w = total_w + cel.width
-                if cel.height > max_h then max_h = cel.height end
+                if pix then
+                    local frame_pixels = {}
+                    for i = 1, cel.width * cel.height do
+                        frame_pixels[i] = pix[i] or 0
+                    end
+                    handles[#handles + 1] = image_create_indexed(cel.width, cel.height, frame_pixels, palette)
+                end
             end
 
-            if total_w > 0 and max_h > 0 then
-                local sheet = {}
-                for i = 1, total_w * max_h do sheet[i] = 0 end
-
-                local x_off = 0
-                for ci = 1, #cel_images do
-                    local ci_data = cel_images[ci]
-                    local y_off = max_h - ci_data.h  -- bottom-align
-                    for sy = 0, ci_data.h - 1 do
-                        for sx = 0, ci_data.w - 1 do
-                            local pixel = ci_data.pixels[sy * ci_data.w + sx + 1]
-                            if pixel ~= 0 then
-                                local dy = y_off + sy
-                                local dx = x_off + sx
-                                sheet[dy * total_w + dx + 1] = pixel
-                            end
-                        end
-                    end
-                    x_off = x_off + ci_data.w
-                end
-
-                local img = image_create_indexed(total_w, max_h, sheet, palette)
+            if #handles > 0 then
                 local desc = string.format(
-                    "Animation Sprite Sheet - %s[%d]\n%d cels, %d elements\nSheet: %dx%d",
-                    pak_name, res_index, #anim.cels, #anim.elements, total_w, max_h)
-                return { type = "image", image = img, description = desc }
+                    "Animation - %s[%d]\n%d cels, %d elements",
+                    pak_name, res_index, #anim.cels, #anim.elements)
+                if #handles == 1 then
+                    return { type = "image", image = handles[1], description = desc }
+                else
+                    local anim_handle = animation_create(handles, 150)
+                    return {
+                        type = "animation",
+                        animation = anim_handle,
+                        delay_ms = 150,
+                        description = desc
+                    }
+                end
             end
         end
     end

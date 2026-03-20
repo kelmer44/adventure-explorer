@@ -10,7 +10,7 @@ local engine = {}
 engine.name        = "The Legend of Kyrandia: Hand of Fate"
 engine.id          = "kyra2"
 engine.description = "The Legend of Kyrandia: Hand of Fate (1993, Westwood Studios)"
-engine.version     = "2.0"
+engine.version     = "3.0"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -192,6 +192,80 @@ local function decompress_type4(data, src_start, output_size)
 end
 
 -- ============================================================================
+-- WSA Animation decoder
+-- Same Format 80 + XOR delta as CPS type 4 decompression
+-- ============================================================================
+
+local function decode_wsa(data)
+    if not data or #data < 10 then return nil end
+
+    local num_frames = u16le(data, 1)
+    local width      = u16le(data, 3)
+    local height     = u16le(data, 5)
+
+    if num_frames < 1 or width < 1 or height < 1 then return nil end
+    if width > 640 or height > 480 then return nil end
+
+    local frame_size = width * height
+
+    -- Read offset table: (numFrames + 2) entries starting at byte 7
+    local offsets = {}
+    local ot_start = 7
+    for i = 0, num_frames + 1 do
+        local pos = ot_start + i * 4
+        if pos + 3 > #data then return nil end
+        offsets[i] = u32le(data, pos)
+    end
+
+    local data_base = ot_start + (num_frames + 2) * 4
+
+    local frames = {}
+    local prev_frame = nil
+
+    for f = 0, num_frames - 1 do
+        local frame_off = offsets[f]
+        local next_off  = offsets[f + 1]
+        if frame_off == 0 and next_off == 0 then
+            if prev_frame then
+                local copy = {}
+                for i = 1, frame_size do copy[i] = prev_frame[i] end
+                frames[#frames + 1] = copy
+                prev_frame = copy
+            end
+        else
+            local src_start = data_base + frame_off
+            if src_start > #data then break end
+
+            local decoded = decompress_type4(data, src_start, frame_size)
+
+            if prev_frame then
+                for i = 1, frame_size do
+                    local a = decoded[i] or 0
+                    local b = prev_frame[i] or 0
+                    local xor_val = 0
+                    local va, vb = a, b
+                    local bit_val = 1
+                    for _ = 1, 8 do
+                        local ba = va % 2
+                        local bb = vb % 2
+                        if ba ~= bb then xor_val = xor_val + bit_val end
+                        va = math.floor(va / 2)
+                        vb = math.floor(vb / 2)
+                        bit_val = bit_val * 2
+                    end
+                    decoded[i] = xor_val
+                end
+            end
+
+            frames[#frames + 1] = decoded
+            prev_frame = decoded
+        end
+    end
+
+    return frames, width, height, num_frames
+end
+
+-- ============================================================================
 -- CPS image loader
 -- ============================================================================
 
@@ -295,7 +369,10 @@ function engine.get_resources(game_path)
 
     local archives = {}
     local loose_cps = {}
+    local loose_col = {}
+    local loose_wsa = {}
     local seen_cps = {}
+    local seen_wsa = {}
 
     for _, fname in ipairs(files) do
         local lower = fname:lower()
@@ -304,11 +381,17 @@ function engine.get_resources(game_path)
         elseif lower:match("%.cps$") then
             loose_cps[#loose_cps + 1] = fname
             seen_cps[lower] = true
+        elseif lower:match("%.col$") then
+            loose_col[#loose_col + 1] = fname
+        elseif lower:match("%.wsa$") then
+            loose_wsa[#loose_wsa + 1] = fname
+            seen_wsa[lower] = true
         end
     end
 
-    -- Scan PAK files
+    -- Scan PAK files for CPS and WSA
     local pak_cps = {}
+    local pak_wsa = {}
     for _, ark_name in ipairs(archives) do
         local f = file_open(game_path .. "/" .. ark_name)
         if f then
@@ -319,9 +402,13 @@ function engine.get_resources(game_path)
                 local entries = parse_pak(raw)
                 if entries then
                     for _, e in ipairs(entries) do
-                        if e.name:lower():match("%.cps$") and not seen_cps[e.name:lower()] then
+                        local el = e.name:lower()
+                        if el:match("%.cps$") and not seen_cps[el] then
                             pak_cps[#pak_cps + 1] = { name = e.name, archive = ark_name }
-                            seen_cps[e.name:lower()] = true
+                            seen_cps[el] = true
+                        elseif el:match("%.wsa$") and not seen_wsa[el] then
+                            pak_wsa[#pak_wsa + 1] = { name = e.name, archive = ark_name }
+                            seen_wsa[el] = true
                         end
                     end
                 end
@@ -369,6 +456,41 @@ function engine.get_resources(game_path)
             end
             resources[#resources + 1] = cat
         end
+    end
+
+    -- WSA animation files
+    local all_wsa = {}
+    for _, fname in ipairs(loose_wsa) do
+        local base = fname:match("^(.+)%.") or fname
+        all_wsa[#all_wsa + 1] = { id = "wsa_" .. base, name = base }
+    end
+    for _, w in ipairs(pak_wsa) do
+        local base = w.name:match("^(.+)%.") or w.name
+        all_wsa[#all_wsa + 1] = {
+            id = "wpak_" .. w.archive .. "_" .. base,
+            name = base .. " [" .. w.archive .. "]"
+        }
+    end
+    if #all_wsa > 0 then
+        table.sort(all_wsa, function(a, b) return a.name:lower() < b.name:lower() end)
+        local cat = { id = "wsa", name = string.format("WSA Animations (%d)", #all_wsa),
+                      type = "category", children = {} }
+        for _, w in ipairs(all_wsa) do
+            cat.children[#cat.children + 1] = { id = w.id, name = w.name, type = "animation" }
+        end
+        resources[#resources + 1] = cat
+    end
+
+    -- COL palette files
+    if #loose_col > 0 then
+        table.sort(loose_col, function(a, b) return a:lower() < b:lower() end)
+        local cat = { id = "palettes", name = string.format("Palettes (%d)", #loose_col),
+                      type = "category", children = {} }
+        for _, fname in ipairs(loose_col) do
+            local base = fname:match("^(.+)%.") or fname
+            cat.children[#cat.children + 1] = { id = "col_" .. base, name = base, type = "palette" }
+        end
+        resources[#resources + 1] = cat
     end
 
     return resources
@@ -478,6 +600,97 @@ function engine.load_resource(game_path, resource_id, palette_id)
         if not ark or not base then return nil end
         base_name = base
         cps_data = extract_from_pak(game_path, ark, base .. ".CPS")
+
+    elseif prefix == "wsa" then
+        local f = file_open(game_path .. "/" .. rest .. ".WSA")
+        if not f then
+            f = file_open(game_path .. "/" .. rest .. ".wsa")
+        end
+        if not f then return nil end
+        local sz = file_size(f)
+        local wsa_data = file_read(f, 0, sz)
+        file_close(f)
+        if not wsa_data then return nil end
+
+        local raw_frames, w, h, nf = decode_wsa(wsa_data)
+        if not raw_frames or #raw_frames == 0 then return nil end
+
+        local palette = find_palette(game_path)
+        if not palette then
+            palette = {}
+            for i = 0, 255 do
+                palette[i * 3 + 1] = i
+                palette[i * 3 + 2] = i
+                palette[i * 3 + 3] = i
+            end
+        end
+
+        local handles = {}
+        for i = 1, #raw_frames do
+            handles[i] = image_create_indexed(w, h, raw_frames[i], palette)
+        end
+        local anim = animation_create(handles, 100)
+        return {
+            type = "animation",
+            animation = anim,
+            delay_ms = 100,
+            description = string.format("%s.WSA - %dx%d, %d frames", rest, w, h, #raw_frames)
+        }
+
+    elseif prefix == "wpak" then
+        local ark, base = rest:match("^(.+%..+)_([^_]+)$")
+        if not ark or not base then return nil end
+        local wsa_data = extract_from_pak(game_path, ark, base .. ".WSA")
+        if not wsa_data or #wsa_data < 10 then return nil end
+
+        local raw_frames, w, h, nf = decode_wsa(wsa_data)
+        if not raw_frames or #raw_frames == 0 then return nil end
+
+        local palette = find_palette(game_path)
+        if not palette then
+            palette = {}
+            for i = 0, 255 do
+                palette[i * 3 + 1] = i
+                palette[i * 3 + 2] = i
+                palette[i * 3 + 3] = i
+            end
+        end
+
+        local handles = {}
+        for i = 1, #raw_frames do
+            handles[i] = image_create_indexed(w, h, raw_frames[i], palette)
+        end
+        local anim = animation_create(handles, 100)
+        return {
+            type = "animation",
+            animation = anim,
+            delay_ms = 100,
+            description = string.format("%s.WSA (in %s) - %dx%d, %d frames", base, ark, w, h, #raw_frames)
+        }
+
+    elseif prefix == "col" then
+        local f = file_open(game_path .. "/" .. rest .. ".COL")
+        if not f then return nil end
+        local sz = file_size(f)
+        local data = file_read(f, 0, sz)
+        file_close(f)
+        if not data then return nil end
+        local pal = load_col_palette(data)
+        if not pal then return nil end
+        local W, H, sw = 256, 256, 16
+        local rgb = {}
+        local n = 1
+        for y = 0, H - 1 do
+            for x = 0, W - 1 do
+                local ci = math.floor(y / sw) * 16 + math.floor(x / sw)
+                rgb[n] = pal[ci * 3 + 1] or 0; n = n + 1
+                rgb[n] = pal[ci * 3 + 2] or 0; n = n + 1
+                rgb[n] = pal[ci * 3 + 3] or 0; n = n + 1
+            end
+        end
+        local img = image_create_rgb(W, H, rgb)
+        return { type = "image", image = img,
+                 description = string.format("%s.COL - 256-color VGA palette", rest) }
     end
 
     if not cps_data then return nil end

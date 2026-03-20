@@ -495,25 +495,23 @@ local function render_boxes(box_data)
 end
 
 -- ============================================================================
--- Render Igor walking sprites
+-- Render Igor walking sprites as individual animation frames
 -- ============================================================================
 
 local IGOR_FRAME_SIZE = 1500
 local IGOR_FRAME_W    = 50
 local IGOR_FRAME_H    = 30
 
-local function render_igor_sprite(sprite_data, palette, total_size)
+local function render_igor_sprite_frames(sprite_data, palette, total_size)
     local num_frames = math.floor(total_size / IGOR_FRAME_SIZE)
     if num_frames < 1 then return nil end
 
-    local strip_w = IGOR_FRAME_W * num_frames
-    local strip_h = IGOR_FRAME_H
-    local pixels = {}
-    local n = 0
-
-    for row = 0, strip_h - 1 do
-        for frame = 0, num_frames - 1 do
-            local frame_base = frame * IGOR_FRAME_SIZE
+    local handles = {}
+    for frame = 0, num_frames - 1 do
+        local pixels = {}
+        local n = 0
+        local frame_base = frame * IGOR_FRAME_SIZE
+        for row = 0, IGOR_FRAME_H - 1 do
             for col = 0, IGOR_FRAME_W - 1 do
                 local src_idx = frame_base + row * IGOR_FRAME_W + col + 1
                 n = n + 1
@@ -524,9 +522,10 @@ local function render_igor_sprite(sprite_data, palette, total_size)
                 end
             end
         end
+        handles[#handles + 1] = image_create_indexed(IGOR_FRAME_W, IGOR_FRAME_H, pixels, palette)
     end
 
-    return image_create_indexed(strip_w, strip_h, pixels, palette)
+    return handles, num_frames
 end
 
 -- ============================================================================
@@ -711,7 +710,7 @@ function engine.get_resources(game_path)
         sprite_children[#sprite_children + 1] = {
             id = "igor_" .. i,
             name = s[1],
-            type = "image",
+            type = "animation",
         }
     end
 
@@ -1072,8 +1071,6 @@ function engine.load_resource(game_path, resource_id)
         palette[2] = 0
         palette[3] = 255
 
-        local num_frames = math.floor(s[3] / IGOR_FRAME_SIZE)
-
         -- Special handling for head frames (3696 bytes = 4 positions x 924 bytes)
         if s[3] == 3696 then
             local head_w = 14
@@ -1081,13 +1078,12 @@ function engine.load_resource(game_path, resource_id)
             local head_frame_size = head_w * head_h  -- 154
             local frames_per_pos = 6
             local positions = 4
-            local strip_w = head_w * frames_per_pos
-            local strip_h = head_h * positions
-            local pixels = {}
-            local n = 0
+            local handles = {}
             for pos = 0, positions - 1 do
-                for row = 0, head_h - 1 do
-                    for frame = 0, frames_per_pos - 1 do
+                for frame = 0, frames_per_pos - 1 do
+                    local pixels = {}
+                    local n = 0
+                    for row = 0, head_h - 1 do
                         for col = 0, head_w - 1 do
                             local off = pos * 924 + frame * head_frame_size + row * head_w + col + 1
                             n = n + 1
@@ -1098,26 +1094,29 @@ function engine.load_resource(game_path, resource_id)
                             end
                         end
                     end
+                    handles[#handles + 1] = image_create_indexed(head_w, head_h, pixels, palette)
                 end
             end
-
-            local img = image_create_indexed(strip_w, strip_h, pixels, palette)
+            local anim = animation_create(handles, 150)
             return {
-                type = "image",
-                image = img,
+                type = "animation",
+                animation = anim,
+                delay_ms = 150,
                 description = string.format(
-                    "%s  |  %dx%d  |  4 positions x 6 frames (14x11 each)  |  %d bytes",
-                    s[1], strip_w, strip_h, s[3]),
+                    "%s  |  4 positions x 6 frames (14x11 each)  |  %d bytes",
+                    s[1], s[3]),
             }
         end
 
-        local img = render_igor_sprite(sprite_raw, palette, s[3])
-        if not img then
+        local handles, num_frames = render_igor_sprite_frames(sprite_raw, palette, s[3])
+        if not handles then
             return {type = "text", text = "Failed to render sprite"}
         end
+        local anim = animation_create(handles, 150)
         return {
-            type = "image",
-            image = img,
+            type = "animation",
+            animation = anim,
+            delay_ms = 150,
             description = string.format(
                 "%s  |  %d frames (50x30 each)  |  %d bytes",
                 s[1], num_frames, s[3]),

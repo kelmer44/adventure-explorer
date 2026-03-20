@@ -131,6 +131,14 @@ fun App() {
                         textContent = appState.previewText,
                         canExportPalette = appState.canExportPalette,
                         onExportPaletteBin = { scope.launch(Dispatchers.IO) { showExportPaletteBinDialog(appState) } },
+                        frames = appState.previewFrames,
+                        frameDelayMs = appState.previewFrameDelayMs,
+                        onExportFrame = { frame ->
+                            scope.launch(Dispatchers.IO) { showExportFrameDialog(appState, frame) }
+                        },
+                        onExportAllFrames = {
+                            scope.launch(Dispatchers.IO) { showExportAllFramesDialog(appState) }
+                        },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
@@ -289,4 +297,37 @@ private suspend fun showExportPaletteBinDialog(appState: AppState) {
         }
     } ?: return
     withContext(Dispatchers.Main) { appState.exportPaletteBin(chosen) }
+}
+
+private suspend fun showExportFrameDialog(appState: AppState, frame: java.awt.image.BufferedImage) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Export Frame as PNG"
+            val defaultName = (appState.selectedNode?.name ?: "frame")
+                .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
+                .replace(" ", "_")
+            chooser.selectedFile = File("${defaultName}_frame.png")
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                var path = chooser.selectedFile.absolutePath
+                if (!path.lowercase().endsWith(".png")) path += ".png"
+                path
+            } else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportAnimationFrame(chosen, frame) }
+}
+
+private suspend fun showExportAllFramesDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Choose folder for exported frames"
+            chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                chooser.selectedFile.absolutePath
+            } else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportAllFrames(chosen) }
 }

@@ -27,6 +27,8 @@ class AppState {
     var previewPaletteColors by mutableStateOf(256)
     var previewDesc      by mutableStateOf<String?>(null)
     var previewText      by mutableStateOf<String?>(null)
+    var previewFrames    by mutableStateOf<List<BufferedImage>?>(null)
+    var previewFrameDelayMs by mutableStateOf(100)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
 
@@ -74,6 +76,8 @@ class AppState {
         currentBgNodeId = null
         previewDesc = null
         previewText = null
+        previewFrames = null
+        previewFrameDelayMs = 100
         selectedNode = null
         nodeById.clear()
         paletteCompanionOf.clear()
@@ -162,6 +166,8 @@ class AppState {
                         previewImage = bgWithPal?.image ?: data.image
                         previewDesc = bgWithPal?.description ?: data.description
                         previewText = data.textContent
+                        previewFrames = data.frames
+                        previewFrameDelayMs = data.frameDelayMs
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
@@ -180,6 +186,8 @@ class AppState {
                         selectedPaletteIndex = -1
                         previewDesc = null
                         previewText = null
+                        previewFrames = null
+                        previewFrameDelayMs = 100
                         statusMessage = "Failed to load ${node.name}"
                     }
                 }
@@ -245,6 +253,32 @@ class AppState {
         }
     }
 
+    fun exportAnimationFrame(outputPath: String, frame: BufferedImage) {
+        try {
+            val file = File(outputPath)
+            file.parentFile?.mkdirs()
+            ImageIO.write(frame, "PNG", file)
+            statusMessage = "Exported frame to ${file.name}"
+        } catch (e: Exception) {
+            statusMessage = "Export failed: ${e.message}"
+        }
+    }
+
+    fun exportAllFrames(outputDir: String) {
+        val frames = previewFrames ?: return
+        try {
+            val dir = File(outputDir)
+            dir.mkdirs()
+            for (i in frames.indices) {
+                val file = File(dir, "frame_${String.format("%04d", i)}.png")
+                ImageIO.write(frames[i], "PNG", file)
+            }
+            statusMessage = "Exported ${frames.size} frames to ${dir.name}/"
+        } catch (e: Exception) {
+            statusMessage = "Export failed: ${e.message}"
+        }
+    }
+
     fun exportPaletteBin(outputPath: String) {
         val pal = previewPaletteImage ?: return
         try {
@@ -276,6 +310,9 @@ class AppState {
 
     val canExportPalette: Boolean
         get() = previewPaletteImage != null
+
+    val canExportAnimation: Boolean
+        get() = !previewFrames.isNullOrEmpty()
 
     // ── Internal helpers ────────────────────────────────────────────
 

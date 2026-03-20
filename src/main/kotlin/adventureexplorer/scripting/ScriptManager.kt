@@ -118,6 +118,18 @@ class ScriptManager {
                     val image = lua.getImage(imgHandle)
                     ResourceData(type, image, description)
                 }
+                "animation" -> {
+                    val animHandle = table.get("animation").checkint()
+                    val anim = lua.getAnimation(animHandle)
+                    val delayMs = table.get("delay_ms").optint(anim?.second ?: 100)
+                    ResourceData(
+                        type = type,
+                        image = anim?.first?.firstOrNull(),
+                        description = description,
+                        frames = anim?.first,
+                        frameDelayMs = delayMs
+                    )
+                }
                 "text" -> {
                     val text = table.get("text").optjstring("")
                     ResourceData(type, null, description, textContent = text)

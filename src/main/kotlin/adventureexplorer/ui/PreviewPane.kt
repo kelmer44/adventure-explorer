@@ -13,9 +13,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.model.ResourceNode
+import kotlinx.coroutines.delay
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
@@ -31,10 +33,21 @@ fun PreviewPane(
     textContent: String?,
     canExportPalette: Boolean,
     onExportPaletteBin: () -> Unit,
+    frames: List<BufferedImage>?,
+    frameDelayMs: Int,
+    onExportFrame: (BufferedImage) -> Unit,
+    onExportAllFrames: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
         when {
+            frames != null && frames.size > 1 -> AnimationPreview(
+                frames = frames,
+                frameDelayMs = frameDelayMs,
+                description = description,
+                onExportFrame = onExportFrame,
+                onExportAllFrames = onExportAllFrames
+            )
             image != null -> ImagePreview(
                 image = image,
                 paletteImage = paletteImage,
@@ -270,6 +283,151 @@ private fun PalettePane(
         ) {
             Text("\uD83D\uDCBE  Export .bin", fontSize = 12.sp)
         }
+    }
+}
+
+// ── Animation preview ─────────────────────────────────────────
+
+@Composable
+private fun AnimationPreview(
+    frames: List<BufferedImage>,
+    frameDelayMs: Int,
+    description: String?,
+    onExportFrame: (BufferedImage) -> Unit,
+    onExportAllFrames: () -> Unit
+) {
+    var currentFrame by remember(frames) { mutableStateOf(0) }
+    var isPlaying by remember(frames) { mutableStateOf(false) }
+    var zoomLevel by remember { mutableStateOf(1) }
+
+    // Playback loop
+    LaunchedEffect(isPlaying, frameDelayMs, frames) {
+        if (isPlaying) {
+            while (true) {
+                delay(frameDelayMs.toLong())
+                currentFrame = (currentFrame + 1) % frames.size
+            }
+        }
+    }
+
+    val frame = frames[currentFrame.coerceIn(0, frames.size - 1)]
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Header row: description + zoom buttons ───────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = description ?: "Animation \u2014 ${frames.size} frames",
+                fontSize = 12.sp,
+                color = Color(0xFFAAAAAA),
+                modifier = Modifier.weight(1f)
+            )
+            ZoomButtons(current = zoomLevel, options = listOf(1, 2, 3), onSelect = { zoomLevel = it })
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        // ── Image area ───────────────────────────────────────
+        val hScroll = rememberScrollState()
+        val vScroll = rememberScrollState()
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .horizontalScroll(hScroll)
+                .verticalScroll(vScroll)
+                .padding(8.dp)
+        ) {
+            val bitmap = frame.toImageBitmap()
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Frame $currentFrame",
+                modifier = Modifier.size(
+                    (frame.width * zoomLevel).dp,
+                    (frame.height * zoomLevel).dp
+                ),
+                contentScale = ContentScale.FillBounds,
+                filterQuality = FilterQuality.None
+            )
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        // ── Playback controls ────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // First frame
+            ControlButton("|<") { isPlaying = false; currentFrame = 0 }
+
+            // Previous frame
+            ControlButton("<") {
+                isPlaying = false
+                currentFrame = if (currentFrame > 0) currentFrame - 1 else frames.size - 1
+            }
+
+            // Play / Pause
+            ControlButton(if (isPlaying) "\u23F8" else "\u25B6") {
+                isPlaying = !isPlaying
+            }
+
+            // Next frame
+            ControlButton(">") {
+                isPlaying = false
+                currentFrame = (currentFrame + 1) % frames.size
+            }
+
+            // Last frame
+            ControlButton(">|") { isPlaying = false; currentFrame = frames.size - 1 }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Frame counter
+            Text(
+                text = "Frame ${currentFrame + 1} / ${frames.size}",
+                fontSize = 12.sp,
+                color = Color(0xFFCCCCCC)
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            // Export current frame
+            ControlButton("\uD83D\uDCBE 1") { onExportFrame(frame) }
+
+            // Export all frames
+            ControlButton("\uD83D\uDCBE All") { onExportAllFrames() }
+        }
+
+        // ── Footer ───────────────────────────────────────────
+        Text(
+            text = "${frame.width} \u00D7 ${frame.height} px  \u00B7  zoom \u00D7$zoomLevel  \u00B7  ${frames.size} frames @ ${frameDelayMs}ms",
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+        )
+    }
+}
+
+@Composable
+private fun ControlButton(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .background(Color(0xFF333333), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = 13.sp, color = Color(0xFFDDDDDD))
     }
 }
 
