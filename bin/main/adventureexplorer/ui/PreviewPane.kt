@@ -41,7 +41,7 @@ fun PreviewPane(
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
         when {
-            frames != null && frames.size > 1 -> AnimationPreview(
+            frames != null && frames.isNotEmpty() -> AnimationPreview(
                 frames = frames,
                 frameDelayMs = frameDelayMs,
                 description = description,

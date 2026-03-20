@@ -499,8 +499,8 @@ end
 -- ============================================================================
 
 local IGOR_FRAME_SIZE = 1500
-local IGOR_FRAME_W    = 50
-local IGOR_FRAME_H    = 30
+local IGOR_FRAME_W    = 30
+local IGOR_FRAME_H    = 50
 
 local function render_igor_sprite_frames(sprite_data, palette, total_size)
     local num_frames = math.floor(total_size / IGOR_FRAME_SIZE)
@@ -1118,7 +1118,7 @@ function engine.load_resource(game_path, resource_id)
             animation = anim,
             delay_ms = 150,
             description = string.format(
-                "%s  |  %d frames (50x30 each)  |  %d bytes",
+                "%s  |  %d frames (30x50 each)  |  %d bytes",
                 s[1], num_frames, s[3]),
         }
     end

@@ -1049,37 +1049,7 @@ function engine.get_resources(game_path)
 end
 
 -- ============================================================================
--- Resource loading
--- ============================================================================
-
-function engine.load_resource(game_path, resource_id)
-    -- Floppy RES.PAK sub-resource
-    local sub_idx = resource_id:match("^respak_sub_(%d+)$")
-    if sub_idx then
-        return load_respak_sub_resource(game_path, tonumber(sub_idx))
-    end
-
-    local res_type, filename, index_str = resource_id:match("^(pak)_(.+)_(%d+)$")
-    if not res_type then
-        res_type, filename, index_str = resource_id:match("^(cc4)_(.+)_(%d+)$")
-    end
-    if not res_type or not filename or not index_str then
-        return { type = "text", text = "Invalid resource ID: " .. resource_id }
-    end
-
-    local res_index = tonumber(index_str)
-
-    if res_type == "pak" then
-        return load_pak_resource(game_path, filename, res_index)
-    elseif res_type == "cc4" then
-        return load_cc4_resource(game_path, filename, res_index)
-    end
-
-    return nil
-end
-
--- ============================================================================
--- PAK resource loader
+-- PAK resource loader helpers
 -- ============================================================================
 
 local function get_or_make_palette(game_path)
@@ -1194,6 +1164,36 @@ local function load_respak_sub_resource(game_path, sub_index)
     info = info .. string.format("Size: %d bytes\n\n", #data)
     info = info .. hex_dump(data)
     return { type = "text", text = info }
+end
+
+-- ============================================================================
+-- Resource loading
+-- ============================================================================
+
+function engine.load_resource(game_path, resource_id)
+    -- Floppy RES.PAK sub-resource
+    local sub_idx = resource_id:match("^respak_sub_(%d+)$")
+    if sub_idx then
+        return load_respak_sub_resource(game_path, tonumber(sub_idx))
+    end
+
+    local res_type, filename, index_str = resource_id:match("^(pak)_(.+)_(%d+)$")
+    if not res_type then
+        res_type, filename, index_str = resource_id:match("^(cc4)_(.+)_(%d+)$")
+    end
+    if not res_type or not filename or not index_str then
+        return { type = "text", text = "Invalid resource ID: " .. resource_id }
+    end
+
+    local res_index = tonumber(index_str)
+
+    if res_type == "pak" then
+        return load_pak_resource(game_path, filename, res_index)
+    elseif res_type == "cc4" then
+        return load_cc4_resource(game_path, filename, res_index)
+    end
+
+    return nil
 end
 
 function load_pak_resource(game_path, pak_name, res_index)
