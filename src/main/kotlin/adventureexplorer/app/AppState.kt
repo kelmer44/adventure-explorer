@@ -6,9 +6,11 @@ import androidx.compose.runtime.setValue
 import adventureexplorer.model.DetectionResult
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
+import adventureexplorer.model.SoundData
 import adventureexplorer.scripting.ScriptManager
 import kotlinx.coroutines.*
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.io.File
 import javax.imageio.ImageIO
 
@@ -29,6 +31,7 @@ class AppState {
     var previewText      by mutableStateOf<String?>(null)
     var previewFrames    by mutableStateOf<List<BufferedImage>?>(null)
     var previewFrameDelayMs by mutableStateOf(100)
+    var previewSoundData by mutableStateOf<SoundData?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
 
@@ -78,6 +81,7 @@ class AppState {
         previewText = null
         previewFrames = null
         previewFrameDelayMs = 100
+        previewSoundData = null
         selectedNode = null
         nodeById.clear()
         paletteCompanionOf.clear()
@@ -168,6 +172,7 @@ class AppState {
                         previewText = data.textContent
                         previewFrames = data.frames
                         previewFrameDelayMs = data.frameDelayMs
+                        previewSoundData = data.soundData
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
@@ -188,6 +193,7 @@ class AppState {
                         previewText = null
                         previewFrames = null
                         previewFrameDelayMs = 100
+                        previewSoundData = null
                         statusMessage = "Failed to load ${node.name}"
                     }
                 }
@@ -313,6 +319,37 @@ class AppState {
 
     val canExportAnimation: Boolean
         get() = !previewFrames.isNullOrEmpty()
+
+    val canExportSound: Boolean
+        get() = previewSoundData != null
+
+    fun exportSoundWav(outputPath: String) {
+        val sound = previewSoundData ?: return
+        try {
+            val file = File(outputPath)
+            file.parentFile?.mkdirs()
+            val format = javax.sound.sampled.AudioFormat(
+                sound.sampleRate.toFloat(),
+                sound.bitsPerSample,
+                sound.channels,
+                sound.signed || sound.bitsPerSample == 16,
+                false
+            )
+            val stream = javax.sound.sampled.AudioInputStream(
+                ByteArrayInputStream(sound.samples),
+                format,
+                sound.samples.size.toLong() / format.frameSize
+            )
+            javax.sound.sampled.AudioSystem.write(
+                stream,
+                javax.sound.sampled.AudioFileFormat.Type.WAVE,
+                file
+            )
+            statusMessage = "Exported to ${file.name}"
+        } catch (e: Exception) {
+            statusMessage = "Export failed: ${e.message}"
+        }
+    }
 
     // ── Internal helpers ────────────────────────────────────────────
 

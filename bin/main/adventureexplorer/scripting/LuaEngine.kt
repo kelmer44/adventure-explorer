@@ -1,5 +1,6 @@
 package adventureexplorer.scripting
 
+import adventureexplorer.model.SoundData
 import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
@@ -23,6 +24,7 @@ import javax.imageio.ImageIO
  *   list_files(path) -> table of filenames
  *   image_create_indexed(w, h, pixel_table, palette_table) -> image_handle
  *   image_create_rgb(w, h, rgb_table) -> image_handle
+ *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
  *   log_info(msg), log_warn(msg), log_error(msg)
  */
 class LuaEngine {
@@ -34,10 +36,13 @@ class LuaEngine {
     private var nextImageHandle = 1
     private val animations = mutableMapOf<Int, Pair<List<BufferedImage>, Int>>() // handle -> (frames, delayMs)
     private var nextAnimHandle = 1
+    private val sounds = mutableMapOf<Int, SoundData>() // handle -> sound data
+    private var nextSoundHandle = 1
 
     init {
         registerFileApi()
         registerImageApi()
+        registerSoundApi()
         registerBinaryApi()
         registerLogApi()
     }
@@ -196,6 +201,27 @@ class LuaEngine {
         }
     }
 
+    // ── Sound API ───────────────────────────────────────────────────
+
+    private fun registerSoundApi() {
+        // sound_create_pcm(sample_rate, bits_per_sample, channels, signed, pcm_data) -> sound_handle
+        // pcm_data: binary string of raw PCM samples
+        globals["sound_create_pcm"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val sampleRate = args.checkint(1)
+                val bitsPerSample = args.checkint(2)
+                val channels = args.checkint(3)
+                val signed = args.checkboolean(4)
+                val pcmStr = args.checkjstring(5)
+                val samples = pcmStr.toByteArray(Charsets.ISO_8859_1)
+                if (samples.isEmpty()) return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = SoundData(samples, sampleRate, bitsPerSample, channels, signed)
+                return valueOf(handle)
+            }
+        }
+    }
+
     // ── Binary utilities API ─────────────────────────────────────────
 
     private fun registerBinaryApi() {
@@ -291,6 +317,8 @@ class LuaEngine {
 
     fun getAnimation(handle: Int): Pair<List<BufferedImage>, Int>? = animations[handle]
 
+    fun getSound(handle: Int): SoundData? = sounds[handle]
+
     fun cleanup() {
         openFiles.values.forEach { runCatching { it.close() } }
         openFiles.clear()
@@ -299,6 +327,8 @@ class LuaEngine {
         nextImageHandle = 1
         animations.clear()
         nextAnimHandle = 1
+        sounds.clear()
+        nextSoundHandle = 1
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

@@ -267,6 +267,18 @@ local function build_ega_palette()
     return pal
 end
 
+-- ============================================================================
+-- STK file list (must be defined before functions that reference it)
+-- ============================================================================
+
+local STK_FILES = {
+    "DISK1.STK","DISK2.STK","DISK3.STK","DISK4.STK","DISK5.STK",
+    "INTRO.STK","MUSIC.STK",
+    "GOBLINS2.STK","GOB2.STK","GOB2CD.STK","GOBLIN2.STK",
+    "COMMUN03.STK","GOB3.STK","GOB3CD.STK","GOBLIN3.STK",
+    "PLAYTOON.STK","ADIBOU.STK",
+}
+
 -- Try to load VGA palette from a .TOT file within an STK archive
 -- TOT files have palette data at known offsets
 local function try_load_tot_palette(game_path, scene_id)
@@ -337,18 +349,6 @@ local function render_sprite(pixels, w, h, pal)
     local img = image_create_indexed(w, h, pixels, pal)
     return img
 end
-
--- ============================================================================
--- STK file list
--- ============================================================================
-
-local STK_FILES = {
-    "DISK1.STK","DISK2.STK","DISK3.STK","DISK4.STK","DISK5.STK",
-    "INTRO.STK","MUSIC.STK",
-    "GOBLINS2.STK","GOB2.STK","GOB2CD.STK","GOBLIN2.STK",
-    "COMMUN03.STK","GOB3.STK","GOB3CD.STK","GOBLIN3.STK",
-    "PLAYTOON.STK","ADIBOU.STK",
-}
 
 -- Find and return the STK raw bytes that contains ext_name_upper
 local function find_stk_with(game_path, ext_name_upper)

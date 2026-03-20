@@ -13,5 +13,6 @@ data class ResourceData(
     val paletteImage: BufferedImage? = null, // companion 256×256 palette swatch
     val paletteColors: Int = 256,    // number of meaningful colors in palette (16 or 256)
     val frames: List<BufferedImage>? = null, // non-null for animation resources
-    val frameDelayMs: Int = 100      // milliseconds per frame for animation playback
+    val frameDelayMs: Int = 100,     // milliseconds per frame for animation playback
+    val soundData: SoundData? = null // non-null for sound resources
 )

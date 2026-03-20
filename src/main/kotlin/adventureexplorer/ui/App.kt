@@ -139,6 +139,10 @@ fun App() {
                         onExportAllFrames = {
                             scope.launch(Dispatchers.IO) { showExportAllFramesDialog(appState) }
                         },
+                        soundData = appState.previewSoundData,
+                        onExportSoundWav = {
+                            scope.launch(Dispatchers.IO) { showExportSoundWavDialog(appState) }
+                        },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
@@ -330,4 +334,21 @@ private suspend fun showExportAllFramesDialog(appState: AppState) {
         }
     } ?: return
     withContext(Dispatchers.Main) { appState.exportAllFrames(chosen) }
+}
+
+private suspend fun showExportSoundWavDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Export Sound as WAV"
+            chooser.selectedFile = java.io.File("sound.wav")
+            chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("WAV files", "wav")
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                var path = chooser.selectedFile.absolutePath
+                if (!path.lowercase().endsWith(".wav")) path += ".wav"
+                path
+            } else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportSoundWav(chosen) }
 }

@@ -7,16 +7,22 @@ import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import adventureexplorer.audio.SoundPlayer
 import adventureexplorer.model.ResourceNode
+import adventureexplorer.model.SoundData
 import kotlinx.coroutines.delay
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -37,6 +43,8 @@ fun PreviewPane(
     frameDelayMs: Int,
     onExportFrame: (BufferedImage) -> Unit,
     onExportAllFrames: () -> Unit,
+    soundData: SoundData?,
+    onExportSoundWav: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
@@ -57,6 +65,11 @@ fun PreviewPane(
                 description = description,
                 canExportPalette = canExportPalette,
                 onExportPaletteBin = onExportPaletteBin
+            )
+            soundData != null -> SoundPreview(
+                soundData = soundData,
+                description = description,
+                onExportWav = onExportSoundWav
             )
             textContent != null -> TextPreview(textContent, description)
             else -> EmptyPreview()
@@ -429,6 +442,181 @@ private fun ControlButton(label: String, onClick: () -> Unit) {
     ) {
         Text(label, fontSize = 13.sp, color = Color(0xFFDDDDDD))
     }
+}
+
+// ── Sound preview ─────────────────────────────────────────────
+
+@Composable
+private fun SoundPreview(
+    soundData: SoundData,
+    description: String?,
+    onExportWav: () -> Unit
+) {
+    val player = remember { SoundPlayer() }
+
+    // Load sound when data changes
+    DisposableEffect(soundData) {
+        player.load(soundData)
+        onDispose { player.cleanup() }
+    }
+
+    var isPlaying by remember(soundData) { mutableStateOf(false) }
+    var positionMs by remember(soundData) { mutableStateOf(0L) }
+    val durationMs = soundData.durationMs
+
+    // Update position while playing
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            positionMs = player.positionMs
+            if (positionMs >= durationMs && durationMs > 0) {
+                isPlaying = false
+                positionMs = 0
+                player.stop()
+                player.load(soundData)
+            }
+            delay(50)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Header row ───────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = description ?: "Sound",
+                fontSize = 12.sp,
+                color = Color(0xFFAAAAAA),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        // ── Waveform area ────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clipToBounds()
+            ) {
+                val w = size.width
+                val h = size.height
+                val midY = h / 2f
+                val samples = soundData.samples
+                val bytesPerSample = soundData.bitsPerSample / 8
+                val totalSamples = samples.size / bytesPerSample
+
+                // Draw center line
+                drawLine(Color(0xFF444444), Offset(0f, midY), Offset(w, midY))
+
+                // Draw waveform
+                if (totalSamples > 0) {
+                    var prevY = midY
+                    for (x in 0 until w.toInt()) {
+                        val sampleIdx = (x.toLong() * totalSamples / w.toInt()).toInt().coerceIn(0, totalSamples - 1)
+                        val value = if (bytesPerSample == 1) {
+                            val raw = samples[sampleIdx].toInt() and 0xFF
+                            if (soundData.signed) (raw - 128).toFloat() / 128f
+                            else (raw - 128).toFloat() / 128f
+                        } else {
+                            val idx = sampleIdx * 2
+                            if (idx + 1 < samples.size) {
+                                val raw = (samples[idx].toInt() and 0xFF) or (samples[idx + 1].toInt() shl 8)
+                                val signed = if (raw >= 32768) raw - 65536 else raw
+                                signed.toFloat() / 32768f
+                            } else 0f
+                        }
+                        val y = midY - value * (h * 0.45f)
+                        if (x > 0) {
+                            drawLine(Color(0xFF4488FF), Offset((x - 1).toFloat(), prevY), Offset(x.toFloat(), y))
+                        }
+                        prevY = y
+                    }
+                }
+
+                // Draw playback position
+                if (durationMs > 0) {
+                    val posX = (positionMs.toFloat() / durationMs * w)
+                    drawLine(Color(0xFFFFAA00), Offset(posX, 0f), Offset(posX, h), strokeWidth = 2f)
+                }
+            }
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        // ── Playback controls ────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Play / Pause
+            ControlButton(if (isPlaying) "\u23F8" else "\u25B6") {
+                if (isPlaying) {
+                    player.pause()
+                    isPlaying = false
+                } else {
+                    player.play()
+                    isPlaying = true
+                }
+            }
+
+            // Stop
+            ControlButton("\u23F9") {
+                player.stop()
+                player.load(soundData)
+                isPlaying = false
+                positionMs = 0
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Position / Duration
+            Text(
+                text = "${formatTime(positionMs)} / ${formatTime(durationMs)}",
+                fontSize = 12.sp,
+                color = Color(0xFFCCCCCC)
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            // Export WAV
+            ControlButton("\uD83D\uDCBE WAV") { onExportWav() }
+        }
+
+        // ── Footer ───────────────────────────────────────────
+        Text(
+            text = "${soundData.sampleRate} Hz \u00B7 ${soundData.bitsPerSample}-bit \u00B7 " +
+                    "${if (soundData.channels == 1) "Mono" else "Stereo"} \u00B7 " +
+                    "${soundData.samples.size} bytes",
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+        )
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    val totalSec = ms / 1000
+    val min = totalSec / 60
+    val sec = totalSec % 60
+    val frac = (ms % 1000) / 100
+    return "%d:%02d.%d".format(min, sec, frac)
 }
 
 // ── Text preview ─────────────────────────────────────────────
