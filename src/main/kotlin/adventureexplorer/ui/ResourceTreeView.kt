@@ -52,6 +52,7 @@ fun ResourceTreeView(
     val selectedIdx = rows.indexOfFirst { it.node.id == selectedNode?.id }
 
     val listState = rememberLazyListState()
+    val hScrollState = rememberScrollState()
     val focusRequester = remember { FocusRequester() }
 
     // Scroll to keep selected item visible when navigating
@@ -59,10 +60,17 @@ fun ResourceTreeView(
         if (selectedIdx >= 0) listState.animateScrollToItem(selectedIdx)
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 10.dp)
+            .horizontalScroll(hScrollState)
+    ) {
     LazyColumn(
         state = listState,
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxHeight()
             .focusRequester(focusRequester)
             .focusTarget()
             .onKeyEvent { event ->
@@ -132,6 +140,14 @@ fun ResourceTreeView(
             )
         }
     }
+    } // close horizontalScroll Box
+    HorizontalScrollbar(
+        adapter = rememberScrollbarAdapter(hScrollState),
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .fillMaxWidth()
+    )
+    } // close outer Box
 }
 
 // ── Row model ────────────────────────────────────────────────────
@@ -173,7 +189,6 @@ private fun TreeRowItem(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
             .background(bgColor)
             .clickable(onClick = onClick)
             .padding(
@@ -186,7 +201,7 @@ private fun TreeRowItem(
         if (node.isCategory) {
             Text(
                 text = if (isExpanded) "\u25BC" else "\u25B6",
-                fontSize = 10.sp,
+                fontSize = 8.sp,
                 color = MaterialTheme.colors.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.width(16.dp)
             )
@@ -205,18 +220,19 @@ private fun TreeRowItem(
                 "palette"  -> "\uD83C\uDFA8"
                 else       -> "\uD83D\uDCC4"
             },
-            fontSize = 14.sp,
+            fontSize = 12.sp,
             modifier = Modifier.padding(end = 6.dp)
         )
 
         // Label
         Text(
             text = node.name,
-            fontSize = 13.sp,
+            fontSize = 11.sp,
             fontWeight = if (node.isCategory) FontWeight.SemiBold else FontWeight.Normal,
             color = if (isSelected) MaterialTheme.colors.primary
                     else MaterialTheme.colors.onSurface,
-            modifier = Modifier.weight(1f)
+            softWrap = false,
+            modifier = Modifier.padding(end = 8.dp)
         )
 
         // Child count badge for categories
@@ -225,7 +241,7 @@ private fun TreeRowItem(
             val displayCount = node.children.count { it.type != "palette" }
             Text(
                 text = "$displayCount",
-                fontSize = 11.sp,
+                fontSize = 9.sp,
                 color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f)
             )
         }
