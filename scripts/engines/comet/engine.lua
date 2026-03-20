@@ -831,6 +831,58 @@ local function parse_voc_info(data)
 end
 
 -- ============================================================================
+-- Decode VOC to raw PCM bytes + sample rate
+-- ============================================================================
+
+local function decode_voc_pcm(data)
+    if #data < 26 then return nil end
+    local sig_start = 2
+    local expected = "reative Voice File"
+    local found = data:sub(sig_start, sig_start + #expected - 1)
+    if found ~= expected then return nil end
+
+    local header_size = u16le(data, 21)
+    local pos = header_size + 1
+    local sample_rate = 0
+    local pcm_parts = {}
+
+    while pos <= #data do
+        local block_type = u8(data, pos)
+        if block_type == 0 then break end
+        if pos + 3 > #data then break end
+        local block_size = u8(data, pos + 1)
+            + u8(data, pos + 2) * 256
+            + u8(data, pos + 3) * 65536
+        pos = pos + 4
+
+        if block_type == 1 then
+            if pos + 1 <= #data then
+                local freq_div = u8(data, pos)
+                if sample_rate == 0 then
+                    sample_rate = math.floor(1000000 / (256 - freq_div))
+                end
+                local pcm_len = block_size - 2
+                if pcm_len > 0 and pos + 2 + pcm_len - 1 <= #data then
+                    pcm_parts[#pcm_parts + 1] = data:sub(pos + 2, pos + 2 + pcm_len - 1)
+                end
+            end
+        elseif block_type == 9 then
+            if pos + 11 <= #data then
+                sample_rate = u32le(data, pos)
+                local pcm_len = block_size - 12
+                if pcm_len > 0 and pos + 12 + pcm_len - 1 <= #data then
+                    pcm_parts[#pcm_parts + 1] = data:sub(pos + 12, pos + 12 + pcm_len - 1)
+                end
+            end
+        end
+        pos = pos + block_size
+    end
+
+    if #pcm_parts == 0 or sample_rate == 0 then return nil end
+    return table.concat(pcm_parts), sample_rate
+end
+
+-- ============================================================================
 -- Hex dump helper
 -- ============================================================================
 
@@ -1255,6 +1307,21 @@ function load_pak_resource(game_path, pak_name, res_index)
     if is_smp then
         -- Fix VOC header quirk: first byte \0 -> 'C'
         local fixed = "C" .. data:sub(2)
+        local pcm_data, sr = decode_voc_pcm(fixed)
+        if pcm_data and sr > 0 then
+            local sound = sound_create_pcm(sr, 8, 1, false, pcm_data)
+            if sound then
+                local voc_info = parse_voc_info(fixed)
+                local desc = string.format("VOC Sound - SMP.PAK[%d]", res_index)
+                if voc_info then
+                    desc = desc .. string.format(
+                        "\nFormat: Creative Voice File v%s\nSample Rate: %d Hz\nDuration: %.2f seconds",
+                        voc_info.version, voc_info.sample_rate, voc_info.duration)
+                end
+                return { type = "sound", sound = sound, description = desc }
+            end
+        end
+        -- Fallback to text info
         local voc_info = parse_voc_info(fixed)
         if voc_info then
             local info = string.format("VOC Sound Effect - SMP.PAK[%d]\n\n", res_index)

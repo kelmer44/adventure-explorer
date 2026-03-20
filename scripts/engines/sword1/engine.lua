@@ -662,6 +662,91 @@ function engine.get_resources(game_path)
         file_close(clu)
     end
 
+    -- ── General sprites (cluster 3 = general.clu) ────────────────
+    local gen_cluster = rif.clusters[2]  -- cluster 3 is 0-based index 2
+    if gen_cluster then
+        local gen_clu_path = data_dir .. "/" .. gen_cluster.label .. ".CLU"
+        local gen_clu = file_open(gen_clu_path)
+        if not gen_clu then
+            gen_clu_path = data_dir .. "/" .. string.upper(gen_cluster.label) .. ".CLU"
+            gen_clu = file_open(gen_clu_path)
+        end
+        if not gen_clu then
+            gen_clu_path = data_dir .. "/" .. string.lower(gen_cluster.label) .. ".clu"
+            gen_clu = file_open(gen_clu_path)
+        end
+        if gen_clu then
+            local gen_node = {
+                id       = "general",
+                name     = "General Sprites",
+                type     = "category",
+                children = {}
+            }
+            -- Scan all groups in general.clu
+            local grp_indices = {}
+            for gi, _ in pairs(gen_cluster.groups) do
+                grp_indices[#grp_indices + 1] = gi
+            end
+            table.sort(grp_indices)
+
+            for _, gi in ipairs(grp_indices) do
+                local group = gen_cluster.groups[gi]
+                if group then
+                    local sprite_indices = {}
+                    for ri, res in pairs(group.resources) do
+                        if res and res.length >= 24 then
+                            local header = file_read(gen_clu, res.offset, 6)
+                            if header then
+                                local ftype = ""
+                                for i = 1, 6 do
+                                    local b = header:byte(i)
+                                    if b == 0 then break end
+                                    ftype = ftype .. string.char(b)
+                                end
+                                if ftype == "Sprite" then
+                                    sprite_indices[#sprite_indices + 1] = ri
+                                end
+                            end
+                        end
+                    end
+                    table.sort(sprite_indices)
+
+                    if #sprite_indices > 0 then
+                        local grp_node = {
+                            id = string.format("gen_grp_%d", gi),
+                            name = string.format("Group %d (%d sprite%s)", gi, #sprite_indices,
+                                #sprite_indices ~= 1 and "s" or ""),
+                            type = "category",
+                            children = {}
+                        }
+                        for _, ri in ipairs(sprite_indices) do
+                            local res = group.resources[ri]
+                            local nf_data = file_read(gen_clu, res.offset + 20, 4)
+                            local nf = 0
+                            if nf_data and #nf_data >= 4 then
+                                nf = u32le(nf_data, 1)
+                            end
+                            local entry_type = "image"
+                            if nf > 1 then entry_type = "animation" end
+                            grp_node.children[#grp_node.children + 1] = {
+                                id = string.format("spr_gen_%d_%d", gi, ri),
+                                name = string.format("Sprite %d (%d frame%s, %d bytes)",
+                                    ri, nf, nf ~= 1 and "s" or "", res.length),
+                                type = entry_type
+                            }
+                        end
+                        gen_node.children[#gen_node.children + 1] = grp_node
+                    end
+                end
+            end
+            file_close(gen_clu)
+            if #gen_node.children > 0 then
+                -- Insert at beginning of resources list
+                table.insert(resources, 1, gen_node)
+            end
+        end
+    end
+
     return resources
 end
 
@@ -890,9 +975,64 @@ local function load_sprite(game_path, room_num, res_idx)
     end
 end
 
+-- ── General sprite loader (cluster 3 = general.clu) ──────────────
+
+local function load_general_sprite(game_path, grp_idx, res_idx)
+    local data_dir = find_data_dir(game_path)
+    if not data_dir then return nil end
+    local rif_file = file_open(data_dir .. "/swordres.rif")
+    if not rif_file then return nil end
+    local rif = parse_rif(rif_file)
+    file_close(rif_file)
+
+    -- Cluster 3 (1-based) → resource ID
+    local res_id = 0x03000000 + grp_idx * 0x10000 + res_idx
+    local data = read_resource(data_dir, rif, res_id)
+    if not data then return nil end
+
+    -- Use shared sprite palette (0x05000003) with a black bg palette
+    local palette = build_palette(data_dir, rif, 0x05000000, 0x05000003)
+
+    local frames, n_frames = decode_sprite(data, palette)
+    if not frames or #frames == 0 then return nil end
+
+    if #frames == 1 then
+        local f = frames[1]
+        return {
+            type = "image",
+            image = f.image,
+            description = string.format(
+                "General Sprite (group %d, resource %d) - %dx%d, tag=%s\nOffset: (%d, %d), compressed: %d bytes",
+                grp_idx, res_idx, f.width, f.height, f.tag, f.offsetX, f.offsetY, f.comp_size
+            )
+        }
+    else
+        local handles = {}
+        for i = 1, #frames do handles[i] = frames[i].image end
+        local anim = animation_create(handles, 100)
+        local f = frames[1]
+        return {
+            type = "animation",
+            image = f.image,
+            frames = handles,
+            animation = anim,
+            description = string.format(
+                "General Sprite animation (group %d, resource %d) - %d frames, %dx%d, tag=%s\nOffset: (%d, %d)",
+                grp_idx, res_idx, #frames, f.width, f.height, f.tag, f.offsetX, f.offsetY
+            )
+        }
+    end
+end
+
 -- ── Resource dispatcher ──────────────────────────────────────────
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    -- Handle general sprite IDs: "spr_gen_GROUP_RESINDEX"
+    local gen_grp, gen_ri = resource_id:match("^spr_gen_(%d+)_(%d+)$")
+    if gen_grp then
+        return load_general_sprite(game_path, tonumber(gen_grp), tonumber(gen_ri))
+    end
+
     -- Handle sprite IDs: "spr_ROOM_RESINDEX"
     local spr_room, spr_ri = resource_id:match("^spr_(%d+)_(%d+)$")
     if spr_room then

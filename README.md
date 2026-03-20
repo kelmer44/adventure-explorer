@@ -12,9 +12,10 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 - **Cross-platform**: Runs on macOS, Windows, and Linux (Compose Desktop / JVM)
 - **No recompilation**: Add new game engines by dropping Lua scripts into `scripts/engines/`
 - **Auto-detection**: Opens a game folder and automatically identifies the engine
-- **Preview**: View room backgrounds, palettes, text data, and animations
+- **Preview**: View room backgrounds, palettes, sprites, text data, and animations
+- **Sound playback**: Play VOC and raw PCM sound effects with waveform display
 - **Animation playback**: Frame-by-frame navigation, play/pause, adjustable speed
-- **Export**: Save resources as PNG — individual frames or entire animation sequences
+- **Export**: Save resources as PNG or WAV — individual frames, animation sequences, or sound files
 
 ## Supported Engines
 
@@ -24,7 +25,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 |--------|------|----|-----------|--------|
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
-| Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations | ✅ Working |
+| Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
@@ -38,8 +39,8 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
 | The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
-| Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes | ✅ Working |
-| Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes | ✅ Working |
+| Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
+| Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds | ✅ Working |
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
@@ -112,7 +113,7 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 ## Usage
 
 1. Launch the application
-2. Click **Open Folder** and select a game's data directory  
+2. Click **Open Folder** and select a game's data directory
    (e.g., the folder containing `ALFRED.1`, `JUEGO.EXE`, etc.)
 3. The app auto-detects the game engine and populates the resource tree
 4. Click on a resource to preview it

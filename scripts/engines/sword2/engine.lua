@@ -25,6 +25,50 @@ local function u32le(data, pos)
          + data:byte(pos + 3) * 16777216
 end
 
+local function i16le(data, pos)
+    local v = data:byte(pos) + data:byte(pos + 1) * 256
+    if v >= 32768 then v = v - 65536 end
+    return v
+end
+
+-- ── Sprite decompression (BS2 RLE256) ────────────────────────────
+-- From ScummVM decompressRLE256: alternating flat/raw pairs
+--   1) read flat_count: if >0, read fill_color, fill flat_count pixels
+--   2) read raw_count:  if >0, copy raw_count literal pixels
+-- Loop until all pixels produced.
+
+local function decompress_rle256(data, src, comp_size, w, h)
+    local pixels = {}
+    local n = w * h
+    for i = 1, n do pixels[i] = 0 end
+    local sp = src
+    local dp = 1
+    local src_end = src + comp_size
+    while dp <= n and sp < src_end and sp <= #data do
+        -- Flat run
+        local flat_count = data:byte(sp); sp = sp + 1
+        if flat_count > 0 then
+            if sp > #data then break end
+            local fill_val = data:byte(sp); sp = sp + 1
+            for i = 1, flat_count do
+                if dp > n then break end
+                pixels[dp] = fill_val; dp = dp + 1
+            end
+        end
+        if dp > n or sp >= src_end or sp > #data then break end
+        -- Raw run
+        local raw_count = data:byte(sp); sp = sp + 1
+        if raw_count > 0 then
+            for i = 1, raw_count do
+                if dp > n or sp > #data then break end
+                pixels[dp] = data:byte(sp); sp = sp + 1
+                dp = dp + 1
+            end
+        end
+    end
+    return pixels
+end
+
 -- ============================================================================
 -- CLU file reader: enumerate resources from a single CLU
 -- Format: data at front, index table at end
@@ -183,7 +227,16 @@ function engine.get_resources(game_path)
     end
     table.sort(clu_files)
 
+    local anim_cat = {
+        id       = "animations",
+        name     = "Animations",
+        type     = "category",
+        children = {}
+    }
+
     local screen_count = 0
+    local anim_count = 0
+
     for _, clu_name in ipairs(clu_files) do
         local clu_path = game_path .. "/" .. clu_name
         local f = file_open(clu_path)
@@ -191,17 +244,34 @@ function engine.get_resources(game_path)
             local entries = read_clu_index(f)
             if entries then
                 local clu_screens = {}
+                local clu_anims = {}
+                local first_screen_idx = nil
+
                 for _, entry in ipairs(entries) do
-                    -- Read first byte to check fileType
-                    local hdr = file_read(f, entry.offset, 1)
-                    if hdr and #hdr >= 1 and u8(hdr, 1) == 2 then
-                        -- It's a screen resource
-                        clu_screens[#clu_screens + 1] = entry
+                    -- Read first 48 bytes: ResHeader(44) + AnimHeader start (runTimeComp + noAnimFrames)
+                    local hdr = file_read(f, entry.offset, 48)
+                    if hdr and #hdr >= 1 then
+                        local ftype = u8(hdr, 1)
+                        if ftype == 2 then
+                            clu_screens[#clu_screens + 1] = entry
+                            if not first_screen_idx then
+                                first_screen_idx = entry.index
+                            end
+                        elseif ftype == 1 and #hdr >= 47 then
+                            local runtime_comp = u8(hdr, 45)
+                            local num_frames = u16le(hdr, 46)
+                            if runtime_comp <= 2 and num_frames >= 1 and num_frames <= 4096 then
+                                entry.num_frames = num_frames
+                                entry.runtime_comp = runtime_comp
+                                clu_anims[#clu_anims + 1] = entry
+                            end
+                        end
                     end
                 end
 
+                local clu_label = clu_name:match("^(.+)%.[cC][lL][uU]$") or clu_name
+
                 if #clu_screens > 0 then
-                    local clu_label = clu_name:match("^(.+)%.[cC][lL][uU]$") or clu_name
                     local clu_node = {
                         id       = "clu_" .. clu_label,
                         name     = string.format("%s (%d screens)", clu_label, #clu_screens),
@@ -212,7 +282,6 @@ function engine.get_resources(game_path)
                     for _, entry in ipairs(clu_screens) do
                         screen_count = screen_count + 1
 
-                        -- Read the name from ResHeader
                         local name_data = file_read(f, entry.offset + 10, 34)
                         local name = "Screen"
                         if name_data then
@@ -248,6 +317,45 @@ function engine.get_resources(game_path)
 
                     rooms_cat.children[#rooms_cat.children + 1] = clu_node
                 end
+
+                if #clu_anims > 0 then
+                    local anim_clu_node = {
+                        id       = "animclu_" .. clu_label,
+                        name     = string.format("%s (%d animations)", clu_label, #clu_anims),
+                        type     = "category",
+                        children = {}
+                    }
+
+                    for _, entry in ipairs(clu_anims) do
+                        anim_count = anim_count + 1
+
+                        local name_data = file_read(f, entry.offset + 10, 34)
+                        local anim_name = "Anim"
+                        if name_data then
+                            anim_name = ""
+                            for c = 1, 34 do
+                                local b = name_data:byte(c)
+                                if not b or b == 0 then break end
+                                anim_name = anim_name .. string.char(b)
+                            end
+                            if anim_name == "" then anim_name = "Anim" end
+                        end
+
+                        -- Encode first_screen_idx for palette lookup
+                        local pal_suffix = ""
+                        if first_screen_idx then
+                            pal_suffix = "_pal" .. first_screen_idx
+                        end
+
+                        anim_clu_node.children[#anim_clu_node.children + 1] = {
+                            id   = "anim_" .. clu_label .. "_" .. entry.index .. pal_suffix,
+                            name = string.format("[%d] %s (%d frames)", entry.index, anim_name, entry.num_frames),
+                            type = entry.num_frames > 1 and "animation" or "image"
+                        }
+                    end
+
+                    anim_cat.children[#anim_cat.children + 1] = anim_clu_node
+                end
             end
             file_close(f)
         end
@@ -255,31 +363,15 @@ function engine.get_resources(game_path)
 
     rooms_cat.name = string.format("Screens (%d)", screen_count)
     resources[#resources + 1] = rooms_cat
+
+    if anim_count > 0 then
+        anim_cat.name = string.format("Animations (%d)", anim_count)
+        resources[#resources + 1] = anim_cat
+    end
+
     return resources
 end
 
--- ============================================================================
--- Resource loading
--- ============================================================================
-
-function engine.load_resource(game_path, resource_id, palette_id)
-    -- Format: bg_CLUNAME_INDEX or pal_CLUNAME_INDEX
-    local prefix, clu_label, idx_str = resource_id:match("^(%a+)_(.+)_(%d+)$")
-    local idx = tonumber(idx_str)
-    if not prefix or not clu_label or not idx then return nil end
-
-    if prefix == "bg" then
-        -- Optional palette override from a different screen
-        local pal_clu, pal_idx = clu_label, idx
-        if palette_id and palette_id ~= "" then
-            local _, pc, pi = palette_id:match("^(%a+)_(.+)_(%d+)$")
-            if pc and pi then pal_clu = pc; pal_idx = tonumber(pi) end
-        end
-        return load_screen_bg(game_path, clu_label, idx, pal_clu, pal_idx)
-    end
-    if prefix == "pal" then return load_screen_pal(game_path, clu_label, idx) end
-    return nil
-end
 
 local function find_clu_file(game_path, label)
     local candidates = { label .. ".clu", label .. ".CLU",
@@ -449,6 +541,210 @@ function load_screen_pal(game_path, clu_label, res_index)
         type = "image", image = img,
         description = string.format("Screen [%s:%d] palette - 256 colors", clu_label, res_index)
     }
+end
+
+-- ============================================================================
+-- Animation/sprite decoder
+-- Format: ResHeader(44) + AnimHeader(15) + CDT(numFrames*9) [+ colorTable(16)] + Frames
+-- AnimHeader: runTimeComp(u8) + noAnimFrames(u16) + feet coords/dir + blend
+-- CDT entry: x(i16) + y(i16) + frameOffset(u32) + frameType(u8) = 9 bytes
+-- FrameHeader: compSize(u32) + width(u16) + height(u16) = 8 bytes, then pixel data
+-- runTimeComp: 0=NONE, 1=RLE256, 2=RLE16
+-- ============================================================================
+
+local function decode_bs2_animation(data, palette)
+    if not data or #data < 68 then return nil end
+
+    -- Check fileType == 1 (animation)
+    if u8(data, 1) ~= 1 then return nil end
+
+    -- AnimHeader starts at byte 45 (1-based), after 44-byte ResHeader
+    local runtime_comp = u8(data, 45)      -- 0=NONE, 1=RLE256, 2=RLE16
+    local num_frames = u16le(data, 46)     -- uint16 noAnimFrames
+    if num_frames < 1 or num_frames > 4096 then return nil end
+
+    -- CDT starts at byte 60 (1-based): offset 44 (ResHeader) + 15 (AnimHeader) = 59 (0-based)
+    local cdt_base = 60  -- Lua 1-based
+
+    -- Read CDT entries (9 bytes each): i16 x, i16 y, u32 frameOffset, u8 frameType
+    -- frameOffset is relative to start of AnimHeader (byte 45 in 1-based)
+    local cdt = {}
+    for i = 0, num_frames - 1 do
+        local cp = cdt_base + i * 9
+        if cp + 8 <= #data then
+            cdt[i + 1] = {
+                x = i16le(data, cp),
+                y = i16le(data, cp + 2),
+                frame_offset = u32le(data, cp + 4),
+                frame_type = u8(data, cp + 8)
+            }
+        end
+    end
+
+    -- Parse frames using CDT frameOffset for positioning
+    local frames = {}
+    for fi = 1, num_frames do
+        local cd = cdt[fi]
+        if not cd then break end
+
+        -- Frame position: byte 45 (AnimHeader start) + frameOffset
+        local fp = 45 + cd.frame_offset
+        if fp + 7 > #data then break end
+
+        local comp_size = u32le(data, fp)
+        local fw = u16le(data, fp + 4)
+        local fh = u16le(data, fp + 6)
+
+        if fw == 0 or fh == 0 or comp_size > #data then break end
+
+        local pixel_start = fp + 8
+        local raw_size = fw * fh
+        local pixels
+
+        if runtime_comp == 0 or comp_size == raw_size then
+            -- Uncompressed: raw pixels
+            pixels = {}
+            for i = 1, raw_size do
+                if pixel_start + i - 1 <= #data then
+                    pixels[i] = data:byte(pixel_start + i - 1)
+                else
+                    pixels[i] = 0
+                end
+            end
+        elseif runtime_comp == 1 then
+            -- RLE256 compressed
+            pixels = decompress_rle256(data, pixel_start, comp_size, fw, fh)
+        else
+            -- RLE16 or unknown compression: skip for now
+            pixels = nil
+        end
+
+        if pixels then
+            local img = image_create_indexed(fw, fh, pixels, palette)
+            if img then
+                frames[#frames + 1] = {
+                    image = img,
+                    width = fw,
+                    height = fh,
+                    offsetX = cd.x,
+                    offsetY = cd.y,
+                    comp_size = comp_size
+                }
+            end
+        end
+    end
+
+    return frames, num_frames
+end
+
+local function load_bs2_animation(game_path, clu_label, res_index, pal_clu, pal_idx)
+    local data = read_screen_resource(game_path, clu_label, res_index)
+    if not data or #data < 68 then return nil end
+
+    -- Get palette from nearest screen resource in the same CLU
+    local palette = {}
+    for i = 1, 768 do palette[i] = 0 end
+
+    -- Try to find a screen resource in the same CLU for palette
+    if pal_clu and pal_idx then
+        local pal_data = read_screen_resource(game_path, pal_clu, pal_idx)
+        if pal_data and #pal_data >= 80 and u8(pal_data, 1) == 2 then
+            local msh_base = 45
+            local pal_off = u32le(pal_data, msh_base)
+            local pal_abs = 45 + pal_off
+            if pal_abs + 1023 <= #pal_data then
+                for i = 1, 255 do
+                    local p = pal_abs + i * 4
+                    if p + 2 <= #pal_data then
+                        palette[i * 3 + 1] = u8(pal_data, p)
+                        palette[i * 3 + 2] = u8(pal_data, p + 1)
+                        palette[i * 3 + 3] = u8(pal_data, p + 2)
+                    end
+                end
+            end
+        end
+    end
+
+    local frames, total = decode_bs2_animation(data, palette)
+    if not frames or #frames == 0 then return nil end
+
+    local name = ""
+    local name_raw = data:sub(11, 44)
+    for i = 1, #name_raw do
+        local b = name_raw:byte(i)
+        if b == 0 then break end
+        name = name .. string.char(b)
+    end
+
+    if #frames == 1 then
+        return {
+            type = "image",
+            image = frames[1].image,
+            description = string.format(
+                "Animation '%s' [%s:%d] - %dx%d, %d bytes",
+                name, clu_label, res_index, frames[1].width, frames[1].height, frames[1].comp_size
+            )
+        }
+    else
+        local handles = {}
+        for i = 1, #frames do handles[i] = frames[i].image end
+        local anim = animation_create(handles, 100)
+        return {
+            type = "animation",
+            image = frames[1].image,
+            frames = handles,
+            animation = anim,
+            description = string.format(
+                "Animation '%s' [%s:%d] - %d frames, %dx%d",
+                name, clu_label, res_index, #frames, frames[1].width, frames[1].height
+            )
+        }
+    end
+end
+
+-- ============================================================================
+-- Resource loading
+-- ============================================================================
+
+function engine.load_resource(game_path, resource_id, palette_id)
+    -- Animation resources: anim_CLUNAME_INDEX[_palN]
+    local anim_clu, anim_idx_str, pal_screen = resource_id:match("^anim_(.+)_(%d+)_pal(%d+)$")
+    if not anim_clu then
+        anim_clu, anim_idx_str = resource_id:match("^anim_(.+)_(%d+)$")
+    end
+    if anim_clu and anim_idx_str then
+        local anim_idx = tonumber(anim_idx_str)
+        local pal_clu_src = nil
+        local pal_idx_src = nil
+        if pal_screen then
+            pal_clu_src = anim_clu
+            pal_idx_src = tonumber(pal_screen)
+        end
+        if palette_id and palette_id ~= "" then
+            local _, pc, pi = palette_id:match("^(%a+)_(.+)_(%d+)$")
+            if pc and pi then
+                pal_clu_src = pc
+                pal_idx_src = tonumber(pi)
+            end
+        end
+        return load_bs2_animation(game_path, anim_clu, anim_idx, pal_clu_src, pal_idx_src)
+    end
+
+    -- Screen resources: bg_CLUNAME_INDEX or pal_CLUNAME_INDEX
+    local prefix, clu_label, idx_str = resource_id:match("^(%a+)_(.+)_(%d+)$")
+    local idx = tonumber(idx_str)
+    if not prefix or not clu_label or not idx then return nil end
+
+    if prefix == "bg" then
+        local pal_clu, pal_idx = clu_label, idx
+        if palette_id and palette_id ~= "" then
+            local _, pc, pi = palette_id:match("^(%a+)_(.+)_(%d+)$")
+            if pc and pi then pal_clu = pc; pal_idx = tonumber(pi) end
+        end
+        return load_screen_bg(game_path, clu_label, idx, pal_clu, pal_idx)
+    end
+    if prefix == "pal" then return load_screen_pal(game_path, clu_label, idx) end
+    return nil
 end
 
 return engine
