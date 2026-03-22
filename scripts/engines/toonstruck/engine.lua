@@ -502,10 +502,10 @@ function decode_lzss_image(raw, name)
         log_warn(string.format("LZSS: Only decompressed %d of %d bytes", pixel_count, dst_size))
     end
 
-    -- Palette is always 768 bytes (256×3, 6-bit VGA) at end of decompressed data
-    local pal_bytes = 768
+    -- Palette location: last (dst_size % 2048) bytes of decompressed data (ScummVM convention)
+    local pal_bytes = dst_size % 2048
+    local pal_entries = math.floor(pal_bytes / 3)
     local pixel_bytes = dst_size - pal_bytes
-    local pal_entries = 256
 
     -- Determine width: 1280 for scrolling backgrounds, 640 for normal
     local width = 640
@@ -524,24 +524,26 @@ function decode_lzss_image(raw, name)
     if height > 480 then height = 480 end
     if height < 1 then height = 1 end
 
-    -- Build palette (at end of decompressed data)
+    -- Build palette (8-bit RGB, at end of decompressed data)
     local palette = {}
-    if pal_entries == 256 then
+    if pal_entries > 0 then
         local pal_start = pixel_bytes + 1
-        for i = 0, 255 do
+        -- Partial palette (< 256 entries): start at index 1
+        -- Full palette (>= 256 entries): start at index 0
+        local color_start = (pal_entries < 256) and 1 or 0
+        -- Initialize all to black
+        for i = 0, 255 do palette[i*3+1]=0; palette[i*3+2]=0; palette[i*3+3]=0 end
+        for i = 0, math.min(pal_entries, 256) - 1 do
             local idx = pal_start + i * 3
-            if idx + 2 <= pixel_count then
-                palette[i * 3 + 1] = math.min((pixels[idx] or 0) * 4, 255)
-                palette[i * 3 + 2] = math.min((pixels[idx + 1] or 0) * 4, 255)
-                palette[i * 3 + 3] = math.min((pixels[idx + 2] or 0) * 4, 255)
-            else
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
+            local ci = color_start + i
+            if ci <= 255 and idx + 2 <= pixel_count then
+                palette[ci * 3 + 1] = pixels[idx] or 0
+                palette[ci * 3 + 2] = pixels[idx + 1] or 0
+                palette[ci * 3 + 3] = pixels[idx + 2] or 0
             end
         end
     else
-        -- No full palette; use greyscale
+        -- No palette; use greyscale
         for i = 0, 255 do
             palette[i * 3 + 1] = i
             palette[i * 3 + 2] = i
@@ -581,25 +583,19 @@ function decode_spcn_image(raw, name)
     local pal_byte_count = u16le(raw, 15)
     local pal_entries = math.floor(pal_byte_count / 3)
 
-    -- Read palette (starts at offset 16)
+    -- Read palette (8-bit RGB, starts at offset 16)
     local palette = {}
     local pal_start = 17  -- 1-indexed, byte 16 in 0-indexed
-    for i = 0, 255 do
-        if i < pal_entries then
-            local idx = pal_start + i * 3
-            if idx + 2 <= #raw then
-                palette[i * 3 + 1] = math.min(raw:byte(idx) * 4, 255)
-                palette[i * 3 + 2] = math.min(raw:byte(idx + 1) * 4, 255)
-                palette[i * 3 + 3] = math.min(raw:byte(idx + 2) * 4, 255)
-            else
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-        else
-            palette[i * 3 + 1] = i
-            palette[i * 3 + 2] = i
-            palette[i * 3 + 3] = i
+    -- Partial palette: start at index 1; Full: start at 0
+    local color_start = (pal_entries < 256) and 1 or 0
+    for i = 0, 255 do palette[i*3+1]=0; palette[i*3+2]=0; palette[i*3+3]=0 end
+    for i = 0, math.min(pal_entries, 256) - 1 do
+        local idx = pal_start + i * 3
+        local ci = color_start + i
+        if ci <= 255 and idx + 2 <= #raw then
+            palette[ci * 3 + 1] = raw:byte(idx)
+            palette[ci * 3 + 2] = raw:byte(idx + 1)
+            palette[ci * 3 + 3] = raw:byte(idx + 2)
         end
     end
 
@@ -724,9 +720,9 @@ function decode_caf_image(raw, name)
     end
     local fd_str = table.concat(fd_chars)
 
-    -- Find first frame with actual pixel data
+    -- Decode ALL frames for animation
     local fd_pos = 1  -- 1-based position in fd_str
-    local best_frame = nil
+    local decoded_frames = {}  -- table of {pixels, w, h, x1, y1}
 
     for fr = 0, num_frames - 1 do
         if fd_pos + frame_header_size > #fd_str then break end
@@ -751,66 +747,84 @@ function decode_caf_image(raw, name)
 
         local fw = fx2 - fx1
         local fh = fy2 - fy1
-
-        -- ref == -1 (0xFFFFFFFF unsigned) means own data, decomp_sz > 0 means has pixels
         local pixel_off = fd_pos + frame_header_size
 
         if ref == 0xFFFFFFFF and decomp_sz > 0 and fw > 0 and fh > 0 then
             -- This frame has its own pixel data
             local pix_data
             if comp_sz < decomp_sz then
-                -- LZSS compressed frame pixels
                 local comp_str = fd_str:sub(pixel_off, pixel_off + comp_sz - 1)
                 pix_data, _ = decompress_lzss(comp_str, decomp_sz)
             else
-                -- Uncompressed
                 pix_data = {}
                 for i = 1, decomp_sz do
                     local p = pixel_off + i - 1
                     pix_data[i] = (p <= #fd_str) and fd_str:byte(p) or 0
                 end
             end
-
-            best_frame = { pixels = pix_data, w = fw, h = fh, x1 = fx1, y1 = fy1, index = fr }
-            break
+            decoded_frames[#decoded_frames + 1] = { pixels = pix_data, w = fw, h = fh, x1 = fx1, y1 = fy1 }
+        elseif ref ~= 0xFFFFFFFF then
+            -- Reference frame: reuse an earlier decoded frame
+            local ref_idx = ref + 1
+            if ref_idx >= 1 and ref_idx <= #decoded_frames then
+                decoded_frames[#decoded_frames + 1] = decoded_frames[ref_idx]
+            end
         end
 
         -- Advance to next frame
         fd_pos = pixel_off + comp_sz
     end
 
-    if not best_frame then
+    if #decoded_frames == 0 then
         return {
             type = "text",
-            text = string.format("CAF: %s\n%d frames, no decodable frame found\nGlobal bbox: %d,%d → %d,%d",
+            text = string.format("CAF: %s\n%d frames, no decodable frame found\nGlobal bbox: %d,%d - %d,%d",
                 name, num_frames, glob_x1, glob_y1, glob_x2, glob_y2),
-            description = string.format("%s — CAF (%d frames)", name, num_frames)
+            description = string.format("%s - CAF (%d frames)", name, num_frames)
         }
     end
 
-    -- Render the frame with transparency (index 0 = transparent → render as magenta)
-    local w, h = best_frame.w, best_frame.h
-    local total = w * h
-    local img_pixels = {}
-    for i = 1, total do
-        img_pixels[i] = best_frame.pixels[i] or 0
-    end
-
-    -- Set palette index 0 to magenta for transparency indication
+    -- Set palette index 0 to magenta for transparency
     palette[1] = 255
     palette[2] = 0
     palette[3] = 255
 
-    local img = image_create_indexed(w, h, img_pixels, palette)
+    -- Render all frames as images
+    local frame_images = {}
+    for i, frame in ipairs(decoded_frames) do
+        local total = frame.w * frame.h
+        local img_pixels = {}
+        for j = 1, total do
+            img_pixels[j] = frame.pixels[j] or 0
+        end
+        frame_images[i] = image_create_indexed(frame.w, frame.h, img_pixels, palette)
+    end
 
+    local delay_ms = (fps > 0) and math.floor(1000 / fps) or 100
+
+    if #frame_images == 1 then
+        return {
+            type = "image",
+            image = frame_images[1],
+            width = decoded_frames[1].w,
+            height = decoded_frames[1].h,
+            description = string.format(
+                "%s - CAF, 1 frame, %dx%d, %d palette entries",
+                name, decoded_frames[1].w, decoded_frames[1].h, pal_entries
+            )
+        }
+    end
+
+    -- Multiple frames: create animation
+    local anim = animation_create(frame_images, delay_ms)
     return {
-        type = "image",
-        image = img,
-        width = w,
-        height = h,
+        type = "animation",
+        animation = anim,
+        image = frame_images[1],
+        frames = frame_images,
         description = string.format(
-            "%s — CAF, frame %d/%d, %dx%d, %d palette entries, %d fps",
-            name, best_frame.index + 1, num_frames, w, h, pal_entries, fps
+            "%s - CAF, %d frames, %dx%d, %d palette entries, %d fps",
+            name, #frame_images, decoded_frames[1].w, decoded_frames[1].h, pal_entries, fps
         )
     }
 end
