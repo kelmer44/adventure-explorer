@@ -19,3 +19,6 @@ out/
 adventure-explorer.code-workspace
 .github/.vscode
 SKILLS.md
+
+# other
+bin/
