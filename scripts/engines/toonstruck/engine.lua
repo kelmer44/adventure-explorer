@@ -537,9 +537,9 @@ function decode_lzss_image(raw, name)
             local idx = pal_start + i * 3
             local ci = color_start + i
             if ci <= 255 and idx + 2 <= pixel_count then
-                palette[ci * 3 + 1] = pixels[idx] or 0
-                palette[ci * 3 + 2] = pixels[idx + 1] or 0
-                palette[ci * 3 + 3] = pixels[idx + 2] or 0
+                palette[ci * 3 + 1] = pixels[idx] * 4
+                palette[ci * 3 + 2] = pixels[idx + 1] * 4
+                palette[ci * 3 + 3] = pixels[idx + 2] * 4
             end
         end
     else
