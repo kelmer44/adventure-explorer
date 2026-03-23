@@ -109,25 +109,43 @@ local function read_scene_tables(f)
     return offsets, sizes
 end
 
--- ── Palette reader (from scene resource, block 1) ────────────────
+-- ── Palette reader (from scene resource) ─────────────────────────
+-- The palette entry index varies per scene: it can be entry 1, 2, etc.
+-- Find it by searching for an entry with exactly 768 bytes (full palette)
+-- or a partial palette (<= 768 bytes, divisible by 3).
 
-local function read_palette_from_scene(f, offsets, sizes)
-    local pal_offset = offsets[1]
-    local pal_size = sizes[1]
-    if pal_offset == 0 or pal_size == 0 then
-        -- Fallback: palette immediately after background
-        pal_offset = offsets[0] + sizes[0]
-        pal_size = PALETTE_SIZE
+local function find_palette_in_entries(offsets, sizes, base_idx)
+    base_idx = base_idx or 0
+    -- First: look for exact 768-byte palette
+    for i = base_idx + 1, base_idx + ENTRIES_PER_VARIANT - 1 do
+        if i < TABLE_ENTRIES and offsets[i] and offsets[i] > 0
+           and sizes[i] and sizes[i] == PALETTE_SIZE then
+            return i
+        end
     end
+    -- Second: partial palette (multiple of 3, <= 768, > 0)
+    for i = base_idx + 1, base_idx + ENTRIES_PER_VARIANT - 1 do
+        if i < TABLE_ENTRIES and offsets[i] and offsets[i] > 0
+           and sizes[i] and sizes[i] > 0
+           and sizes[i] < PALETTE_SIZE and sizes[i] % 3 == 0 then
+            return i
+        end
+    end
+    return nil
+end
+
+local function read_palette_from_entry(f, offsets, sizes, entry_idx)
+    local pal_offset = offsets[entry_idx]
+    local pal_size = sizes[entry_idx]
     if pal_size > PALETTE_SIZE then pal_size = PALETTE_SIZE end
 
     local pal_raw = file_read(f, pal_offset, pal_size)
-    if not pal_raw or #pal_raw < pal_size then return nil end
+    if not pal_raw or #pal_raw < 3 then return nil end
 
     local palette = {}
     for i = 0, 255 do
         if i * 3 + 3 <= #pal_raw then
-            -- VGA 6-bit → 8-bit: multiply by 4, clamp to 255
+            -- VGA 6-bit to 8-bit: multiply by 4, clamp to 255
             palette[i * 3 + 1] = math.min(pal_raw:byte(i * 3 + 1) * 4, 255)
             palette[i * 3 + 2] = math.min(pal_raw:byte(i * 3 + 2) * 4, 255)
             palette[i * 3 + 3] = math.min(pal_raw:byte(i * 3 + 3) * 4, 255)
@@ -140,27 +158,64 @@ local function read_palette_from_scene(f, offsets, sizes)
     return palette
 end
 
+local function read_palette_from_scene(f, offsets, sizes)
+    local pal_idx = find_palette_in_entries(offsets, sizes, 0)
+    if pal_idx then
+        return read_palette_from_entry(f, offsets, sizes, pal_idx)
+    end
+    -- Fallback: grayscale palette
+    local palette = {}
+    for i = 0, 255 do
+        palette[i * 3 + 1] = i
+        palette[i * 3 + 2] = i
+        palette[i * 3 + 3] = i
+    end
+    return palette
+end
+
 -- ── Background loader (from scene resource, block 0) ─────────────
 -- Background is stored as raw 8bpp with 1024-byte stride.
 -- Height varies per scene (typically 480, but can be 320, 400, 940, etc.)
--- We extract only the 640-pixel-wide visible portion.
+-- Scrolling scenes use more than 640 columns of the 1024-byte stride.
+-- We extract the full stride and return actual dimensions.
 
 local function load_bg_pixels(f, offsets, sizes)
     local bg_offset = offsets[0]
     local bg_size   = sizes[0]
-    if bg_size == 0 or bg_size < STRIDE then return nil, 0 end
+    if bg_size == 0 or bg_size < STRIDE then return nil, 0, 0 end
 
     local raw = file_read(f, bg_offset, bg_size)
-    if not raw or #raw < STRIDE then return nil, 0 end
+    if not raw or #raw < STRIDE then return nil, 0, 0 end
 
     local actual_h = math.floor(bg_size / STRIDE)
-    if actual_h == 0 then return nil, 0 end
+    if actual_h == 0 then return nil, 0, 0 end
 
+    -- Scan all rows to find the used column range (auto-crop horizontal padding)
+    local min_col = STRIDE - 1
+    local max_col = 0
+    for row = 0, actual_h - 1 do
+        local row_start = row * STRIDE
+        for col = 0, STRIDE - 1 do
+            local pos = row_start + col + 1
+            if pos <= #raw and raw:byte(pos) ~= 0 then
+                if col < min_col then min_col = col end
+                if col > max_col then max_col = col end
+            end
+        end
+    end
+
+    -- If entire image is zeros, default to standard screen width
+    if max_col < min_col then
+        min_col = 0
+        max_col = SCREEN_W - 1
+    end
+
+    local img_w = max_col - min_col + 1
     local pixels = {}
     local n = 0
     for row = 0, actual_h - 1 do
         local row_start = row * STRIDE
-        for col = 0, SCREEN_W - 1 do
+        for col = min_col, max_col do
             n = n + 1
             local pos = row_start + col + 1
             if pos <= #raw then
@@ -171,7 +226,7 @@ local function load_bg_pixels(f, offsets, sizes)
         end
     end
 
-    return pixels, actual_h
+    return pixels, actual_h, img_w
 end
 
 -- ── Z-buffer RLE decompressor ────────────────────────────────────
@@ -252,7 +307,8 @@ function engine.get_resources(game_path)
                     if vo and vs then
                         for var = 1, 6 do
                             local base = var * ENTRIES_PER_VARIANT
-                            if base < TABLE_ENTRIES and vo[base] > 0 and vs[base] >= STRIDE then
+                            if base < TABLE_ENTRIES and vo[base] > 0 and vs[base] >= STRIDE
+                               and vs[base] % STRIDE == 0 then
                                 scene_children[#scene_children + 1] = {
                                     id   = "varbg_" .. scene_id .. "_" .. var,
                                     name = string.format("Variant %d", var),
@@ -376,7 +432,7 @@ function load_background(game_path, scene_id, palette_id)
         return nil
     end
 
-    local pixels, actual_h = load_bg_pixels(f, offsets, sizes)
+    local pixels, actual_h, img_w = load_bg_pixels(f, offsets, sizes)
 
     -- If a palette override is specified, use it
     local palette
@@ -407,13 +463,13 @@ function load_background(game_path, scene_id, palette_id)
 
     if not pixels or not palette then return nil end
 
-    local img = image_create_indexed(SCREEN_W, actual_h, pixels, palette)
+    local img = image_create_indexed(img_w, actual_h, pixels, palette)
     return {
         type = "image",
         image = img,
         description = string.format(
             "Scene %s background - %dx%d, 256 colors (VGA 6-bit)",
-            scene_id, SCREEN_W, actual_h
+            scene_id, img_w, actual_h
         )
     }
 end
@@ -437,7 +493,7 @@ function load_variant_background(game_path, scene_id, variant_idx)
         return nil
     end
 
-    -- Variant's sections start at index (variant_idx × ENTRIES_PER_VARIANT)
+    -- Variant's sections start at index (variant_idx * ENTRIES_PER_VARIANT)
     local base = variant_idx * ENTRIES_PER_VARIANT
     if base >= TABLE_ENTRIES then file_close(f); return nil end
 
@@ -445,25 +501,22 @@ function load_variant_background(game_path, scene_id, variant_idx)
     local bg_size   = sizes[base]
     if bg_offset == 0 or bg_size == 0 then file_close(f); return nil end
 
-    local raw = file_read(f, bg_offset, bg_size)
-
-    -- Palette: try variant's palette, fall back to variant 0
-    local pal_offset = offsets[base + 1]
-    local pal_size   = sizes[base + 1]
-    local palette
-
-    if pal_offset and pal_offset > 0 and pal_size and pal_size > 0 then
-        local pal_raw = file_read(f, pal_offset, math.min(pal_size, PALETTE_SIZE))
-        if pal_raw and #pal_raw >= PALETTE_SIZE then
-            palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = math.min(pal_raw:byte(i * 3 + 1) * 4, 255)
-                palette[i * 3 + 2] = math.min(pal_raw:byte(i * 3 + 2) * 4, 255)
-                palette[i * 3 + 3] = math.min(pal_raw:byte(i * 3 + 3) * 4, 255)
-            end
-        end
+    -- Only raw framebuffers (size divisible by STRIDE) can be rendered
+    if bg_size % STRIDE ~= 0 then
+        file_close(f)
+        return { type = "text", text = string.format(
+            "Variant %d: compressed overlay (%d bytes, not raw framebuffer)",
+            variant_idx, bg_size) }
     end
 
+    local raw = file_read(f, bg_offset, bg_size)
+
+    -- Palette: search variant's entries, fall back to base scene palette
+    local palette
+    local pal_idx = find_palette_in_entries(offsets, sizes, base)
+    if pal_idx then
+        palette = read_palette_from_entry(f, offsets, sizes, pal_idx)
+    end
     if not palette then
         palette = read_palette_from_scene(f, offsets, sizes)
     end
@@ -472,32 +525,45 @@ function load_variant_background(game_path, scene_id, variant_idx)
 
     if not raw or not palette then return nil end
 
-    -- Extract 640 pixels per row from 1024-stride data
     local actual_h = math.floor(bg_size / STRIDE)
-    if actual_h == 0 then
-        -- Tiny data: not a renderable background
-        file_close(f)
-        return { type = "text", text = string.format("Variant %d: data too small (%d bytes)", variant_idx, bg_size) }
+
+    -- Auto-crop horizontal padding (same as main background)
+    local min_col = STRIDE - 1
+    local max_col = 0
+    for row = 0, actual_h - 1 do
+        local row_start = row * STRIDE
+        for col = 0, STRIDE - 1 do
+            local pos = row_start + col + 1
+            if pos <= #raw and raw:byte(pos) ~= 0 then
+                if col < min_col then min_col = col end
+                if col > max_col then max_col = col end
+            end
+        end
+    end
+    if max_col < min_col then
+        min_col = 0
+        max_col = SCREEN_W - 1
     end
 
+    local img_w = max_col - min_col + 1
     local pixels = {}
     local n = 0
     for row = 0, actual_h - 1 do
         local row_start = row * STRIDE
-        for col = 0, SCREEN_W - 1 do
+        for col = min_col, max_col do
             n = n + 1
             local pos = row_start + col + 1
             pixels[n] = (pos <= #raw) and raw:byte(pos) or 0
         end
     end
 
-    local img = image_create_indexed(SCREEN_W, actual_h, pixels, palette)
+    local img = image_create_indexed(img_w, actual_h, pixels, palette)
     return {
         type = "image",
         image = img,
         description = string.format(
             "Scene %s variant %d - %dx%d, 256 colors",
-            scene_id, variant_idx, SCREEN_W, actual_h
+            scene_id, variant_idx, img_w, actual_h
         )
     }
 end
@@ -569,15 +635,42 @@ function load_zbuffer(game_path, scene_id)
 
     if not zbuf_raw or #zbuf_raw < 3 then return nil end
 
-    -- Decompress RLE
+    -- Decompress RLE into the full STRIDE*SCREEN_H buffer
     local zbuf_pixels = decompress_zbuffer_rle(zbuf_raw)
 
-    -- Extract 640-wide visible portion from 1024-stride data
+    -- Determine actual background dimensions from block 0
+    local bg_size = sizes[0]
+    local actual_h = SCREEN_H
+    if bg_size > 0 then
+        actual_h = math.floor(bg_size / STRIDE)
+    end
+    if actual_h == 0 then actual_h = SCREEN_H end
+
+    -- Scan for used column range in z-buffer
+    local min_col = STRIDE - 1
+    local max_col = 0
+    for row = 0, actual_h - 1 do
+        local row_start = row * STRIDE
+        for col = 0, STRIDE - 1 do
+            local idx = row_start + col + 1
+            local val = zbuf_pixels[idx] or 0
+            if val ~= 0 then
+                if col < min_col then min_col = col end
+                if col > max_col then max_col = col end
+            end
+        end
+    end
+    if max_col < min_col then
+        min_col = 0
+        max_col = SCREEN_W - 1
+    end
+
+    local img_w = max_col - min_col + 1
     local pixels = {}
     local n = 0
-    for row = 0, SCREEN_H - 1 do
+    for row = 0, actual_h - 1 do
         local row_start = row * STRIDE
-        for col = 0, SCREEN_W - 1 do
+        for col = min_col, max_col do
             n = n + 1
             local idx = row_start + col + 1
             local val = zbuf_pixels[idx] or 0
@@ -594,13 +687,13 @@ function load_zbuffer(game_path, scene_id)
         gray_palette[i * 3 + 3] = i
     end
 
-    local img = image_create_indexed(SCREEN_W, SCREEN_H, pixels, gray_palette)
+    local img = image_create_indexed(img_w, actual_h, pixels, gray_palette)
     return {
         type = "image",
         image = img,
         description = string.format(
-            "Scene %s z-buffer - %dx%d, RLE compressed (%d → %d bytes)",
-            scene_id, SCREEN_W, SCREEN_H, zbuf_size, FB_SIZE
+            "Scene %s z-buffer - %dx%d, RLE compressed (%d bytes)",
+            scene_id, img_w, actual_h, zbuf_size
         )
     }
 end
@@ -659,13 +752,8 @@ local function load_speech_clip(game_path, chapter_idx, clip_idx)
 
     if not pcm_data or #pcm_data < 2 then return nil end
 
-    -- Convert unsigned 8-bit to signed for playback
-    local signed_data = {}
-    for i = 1, #pcm_data do
-        signed_data[i] = pcm_data:byte(i)
-    end
-
-    local snd = sound_create_pcm(SPEECH_SAMPLE_RATE, 8, 1, false, signed_data)
+    -- PCM data is unsigned 8-bit; pass binary string directly
+    local snd = sound_create_pcm(SPEECH_SAMPLE_RATE, 8, 1, false, pcm_data)
     local duration_ms = math.floor(clip_size * 1000 / SPEECH_SAMPLE_RATE)
     return {
         type = "sound",
