@@ -123,6 +123,10 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 game in ags/QUEEN
 
 
+### lgop2
+Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
+
+game in ags/LGOP2
 
 
 

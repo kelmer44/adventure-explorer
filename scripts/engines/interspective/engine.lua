@@ -76,19 +76,17 @@ local function decode_rle(data, start_pos, total_pixels)
         pixels[n] = 0
     end
 
-    return pixels
+    return pixels, pos
 end
 
 -- ============================================================================
--- Read palette from end of file (0x0C + 768 bytes)
+-- Read palette: tries position after pixel data first, then scans for 0x0C
+-- marker near that position, then falls back to EOF palette.
 -- ============================================================================
 
-local function read_palette_from_data(data)
+local function read_palette_at_pos(data, marker_pos)
     local palette = {}
-    for i = 0, 767 do palette[i + 1] = 0 end
-
-    if #data >= 769 then
-        local marker_pos = #data - 768
+    if marker_pos >= 1 and marker_pos + 768 <= #data then
         local marker = data:byte(marker_pos)
         if marker == 0x0C then
             for i = 0, 255 do
@@ -96,9 +94,32 @@ local function read_palette_from_data(data)
                 palette[i * 3 + 2] = data:byte(marker_pos + 2 + i * 3) or 0
                 palette[i * 3 + 3] = data:byte(marker_pos + 3 + i * 3) or 0
             end
+            return palette
         end
     end
+    return nil
+end
 
+local function read_palette_from_data(data, after_pixels_pos)
+    -- Try reading palette right after the pixel data
+    if after_pixels_pos then
+        local pal = read_palette_at_pos(data, after_pixels_pos)
+        if pal then return pal end
+    end
+
+    -- Fallback: palette at end of file (0x0C + 768 bytes)
+    if #data >= 769 then
+        local pal = read_palette_at_pos(data, #data - 768)
+        if pal then return pal end
+    end
+
+    -- Last resort: grayscale palette
+    local palette = {}
+    for i = 0, 255 do
+        palette[i * 3 + 1] = i
+        palette[i * 3 + 2] = i
+        palette[i * 3 + 3] = i
+    end
     return palette
 end
 
@@ -117,8 +138,8 @@ local function decode_background(data)
     end
 
     local total = w * h
-    local pixels = decode_rle(data, 5, total)
-    local palette = read_palette_from_data(data)
+    local pixels, end_pos = decode_rle(data, 5, total)
+    local palette = read_palette_from_data(data, end_pos)
 
     return {
         width   = w,
@@ -144,7 +165,12 @@ local function decode_subimage(data, offset, palette)
     end
 
     local total = w * h
-    local pixels = decode_rle(data, pos + 4, total)
+    local pixels, end_pos = decode_rle(data, pos + 4, total)
+
+    -- Use palette passed in, or try to read from after pixel data
+    if not palette then
+        palette = read_palette_from_data(data, end_pos)
+    end
 
     return {
         width   = w,
@@ -239,52 +265,37 @@ local function scan_backgrounds(game_path, prefix)
     local backgrounds = {}
     local prefix_upper = prefix:upper()
 
-    if prefix_upper == "VIC_" then
-        -- GENE: look for _S files (VIC_000S.DAT, VIC_001S.DAT, etc.)
-        for _, f in ipairs(files) do
-            local fu = f:upper()
-            local num = fu:match("^VIC_(%d%d%d)S%.DAT$")
-            if num then
-                backgrounds[#backgrounds + 1] = {
-                    filename = f,
-                    scene    = num,
-                    label    = "Scene " .. num
-                }
-            end
-        end
-    else
-        -- IUC, GBG, ORION: scan all DAT files and check first 4 bytes for valid w/h
-        for _, f in ipairs(files) do
-            local fu = f:upper()
-            if fu:sub(1, #prefix_upper) == prefix_upper and fu:match("%.DAT$") then
-                -- Skip non-scene files (GRAF, MAIN, F*, S*, A*, SDFX, TUNE)
-                local suffix = fu:sub(#prefix_upper + 1)
-                if not suffix:match("^GRAF") and not suffix:match("^MAIN")
-                   and not suffix:match("^F%d") and not suffix:match("^S%d")
-                   and not suffix:match("^SDFX") and not suffix:match("^TUNE")
-                   and not suffix:match("^A%d") then
-                    -- Read first 4 bytes to check dimensions
-                    local path = game_path .. "/" .. f
-                    local fh = file_open(path)
-                    if fh then
-                        local hdr = file_read(fh, 0, 4)
-                        file_close(fh)
-                        if hdr and #hdr >= 4 then
-                            local w = u16le(hdr, 1)
-                            local h = u16le(hdr, 3)
-                            if w >= 100 and w <= 2000 and h >= 100 and h <= 1200 then
-                                -- Extract scene number
-                                local num = suffix:match("^(%d%d%d)")
-                                local letter = suffix:match("^%d%d%d(%a)") or ""
-                                local scene = num or suffix:match("^(.-)%.DAT$") or ""
-                                backgrounds[#backgrounds + 1] = {
-                                    filename = f,
-                                    scene    = scene .. letter,
-                                    label    = "Scene " .. scene .. (letter ~= "" and (" (" .. letter .. ")") or ""),
-                                    width    = w,
-                                    height   = h
-                                }
-                            end
+    -- Scan all DAT files with matching prefix and check first 4 bytes for valid w/h
+    for _, f in ipairs(files) do
+        local fu = f:upper()
+        if fu:sub(1, #prefix_upper) == prefix_upper and fu:match("%.DAT$") then
+            -- Skip non-scene files (GRAF, MAIN, F*, S*, A*, SDFX, TUNE)
+            local suffix = fu:sub(#prefix_upper + 1)
+            if not suffix:match("^GRAF") and not suffix:match("^MAIN")
+               and not suffix:match("^F%d") and not suffix:match("^S%d")
+               and not suffix:match("^SDFX") and not suffix:match("^TUNE")
+               and not suffix:match("^A%d") then
+                -- Read first 4 bytes to check dimensions
+                local path = game_path .. "/" .. f
+                local fh = file_open(path)
+                if fh then
+                    local hdr = file_read(fh, 0, 4)
+                    file_close(fh)
+                    if hdr and #hdr >= 4 then
+                        local w = u16le(hdr, 1)
+                        local h = u16le(hdr, 3)
+                        if w >= 16 and w <= 2000 and h >= 16 and h <= 1200 then
+                            -- Extract scene number and optional letter suffix
+                            local num = suffix:match("^(%d%d%d)")
+                            local letter = suffix:match("^%d%d%d(%a)") or ""
+                            local scene = num or suffix:match("^(.-)%.DAT$") or ""
+                            backgrounds[#backgrounds + 1] = {
+                                filename = f,
+                                scene    = scene .. letter,
+                                label    = "Scene " .. scene .. (letter ~= "" and (" (" .. letter .. ")") or ""),
+                                width    = w,
+                                height   = h
+                            }
                         end
                     end
                 end
@@ -494,7 +505,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         if ov_idx + 1 > #group then return nil end
         local offset = group[ov_idx + 1]
 
-        -- Read the background data first to get the palette
+        -- Read the file data to get the palette from the background image
         local path = game_path .. "/" .. ov_file
         local fh = file_open(path)
         if not fh then return nil end
@@ -502,8 +513,21 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local data = file_read(fh, 0, sz)
         file_close(fh)
 
-        local palette = read_palette_from_data(data)
-        local sub = decode_subimage(data, offset, palette)
+        -- Get palette from the background (offset 0) if it has valid dims
+        local bg_palette = nil
+        if #data >= 4 then
+            local bw = u16le(data, 1)
+            local bh = u16le(data, 3)
+            if bw >= 16 and bw <= 2000 and bh >= 16 and bh <= 1200 then
+                local _, bg_end = decode_rle(data, 5, bw * bh)
+                bg_palette = read_palette_from_data(data, bg_end)
+            end
+        end
+        if not bg_palette then
+            bg_palette = read_palette_from_data(data, nil)
+        end
+
+        local sub = decode_subimage(data, offset, bg_palette)
         if not sub then return nil end
 
         local img = image_create_indexed(sub.width, sub.height, sub.pixels, sub.palette)
