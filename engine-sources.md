@@ -105,6 +105,23 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 extra tooling in ags/tools/st25thjr
 
 
+### INTERSPECTIVE
+Interspective branch on this scummvm fork https://github.com/bluegr/scummvm/tree/interspective
+
+games are:
+- Innocent until caught
+- Guilty
+- The orion conspiracy
+- The Gene Machine
+
+games in ags/interspective/
+
+### Queen
+Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
+
+
+game in ags/QUEEN
+
 
 
 
