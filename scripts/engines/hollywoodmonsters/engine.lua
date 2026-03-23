@@ -57,6 +57,9 @@ local TABLE_SIZE   = 160    -- 40 × uint32le = offset/size table
 local TABLE_ENTRIES = 40
 local PALETTE_SIZE = 768    -- 256 × 3 bytes
 local ENTRIES_PER_VARIANT = 6  -- bg, pal, extra, z, res, layers
+local SPEECH_INDEX_ENTRIES = 1000
+local SPEECH_INDEX_SIZE    = SPEECH_INDEX_ENTRIES * 4  -- 4000 bytes
+local SPEECH_SAMPLE_RATE   = 11025
 
 -- ── Chapter definitions ──────────────────────────────────────────
 -- Each chapter maps a letter to a range of scene numbers (e.g. A00–A09)
@@ -109,11 +112,13 @@ end
 -- ── Palette reader (from scene resource, block 1) ────────────────
 
 local function read_palette_from_scene(f, offsets, sizes)
-    -- Palette is at offset = 2 × TABLE_SIZE + sizes[0] (right after background)
-    -- But we can compute from the file position: tables (320 bytes) + bg (sizes[0])
-    local pal_offset = TABLE_SIZE * 2 + sizes[0]
+    local pal_offset = offsets[1]
     local pal_size = sizes[1]
-    if pal_size == 0 then pal_size = PALETTE_SIZE end
+    if pal_offset == 0 or pal_size == 0 then
+        -- Fallback: palette immediately after background
+        pal_offset = offsets[0] + sizes[0]
+        pal_size = PALETTE_SIZE
+    end
     if pal_size > PALETTE_SIZE then pal_size = PALETTE_SIZE end
 
     local pal_raw = file_read(f, pal_offset, pal_size)
@@ -136,53 +141,37 @@ local function read_palette_from_scene(f, offsets, sizes)
 end
 
 -- ── Background loader (from scene resource, block 0) ─────────────
--- Background is stored as raw 8bpp with 1024-byte stride, 480 lines.
+-- Background is stored as raw 8bpp with 1024-byte stride.
+-- Height varies per scene (typically 480, but can be 320, 400, 940, etc.)
 -- We extract only the 640-pixel-wide visible portion.
 
 local function load_bg_pixels(f, offsets, sizes)
-    local bg_offset = TABLE_SIZE * 2  -- starts immediately after the two tables
+    local bg_offset = offsets[0]
     local bg_size   = sizes[0]
-    if bg_size == 0 then return nil end
+    if bg_size == 0 or bg_size < STRIDE then return nil, 0 end
 
     local raw = file_read(f, bg_offset, bg_size)
-    if not raw or #raw < 1 then return nil end
+    if not raw or #raw < STRIDE then return nil, 0 end
+
+    local actual_h = math.floor(bg_size / STRIDE)
+    if actual_h == 0 then return nil, 0 end
 
     local pixels = {}
     local n = 0
-
-    if bg_size >= FB_SIZE then
-        -- Full 1024-stride framebuffer: extract 640 pixels per row
-        for row = 0, SCREEN_H - 1 do
-            local row_start = row * STRIDE
-            for col = 0, SCREEN_W - 1 do
-                n = n + 1
-                local pos = row_start + col + 1
-                if pos <= #raw then
-                    pixels[n] = raw:byte(pos)
-                else
-                    pixels[n] = 0
-                end
-            end
-        end
-    else
-        -- Compact storage (640-byte stride or smaller): use raw directly
-        local raw_stride = math.floor(bg_size / SCREEN_H)
-        if raw_stride < SCREEN_W then raw_stride = SCREEN_W end
-        for row = 0, SCREEN_H - 1 do
-            local row_start = row * raw_stride
-            for col = 0, SCREEN_W - 1 do
-                n = n + 1
-                local pos = row_start + col + 1
-                if pos <= #raw then
-                    pixels[n] = raw:byte(pos)
-                else
-                    pixels[n] = 0
-                end
+    for row = 0, actual_h - 1 do
+        local row_start = row * STRIDE
+        for col = 0, SCREEN_W - 1 do
+            n = n + 1
+            local pos = row_start + col + 1
+            if pos <= #raw then
+                pixels[n] = raw:byte(pos)
+            else
+                pixels[n] = 0
             end
         end
     end
 
-    return pixels
+    return pixels, actual_h
 end
 
 -- ── Z-buffer RLE decompressor ────────────────────────────────────
@@ -249,21 +238,86 @@ function engine.get_resources(game_path)
             if fpath then
                 has_scenes = true
                 local scene_id = string.format("%s%02d", chapter.letter, scene_num)
+                local scene_children = {
+                    { id = "bg_"   .. scene_id, name = "Background", type = "image"   },
+                    { id = "pal_"  .. scene_id, name = "Palette",    type = "palette" },
+                    { id = "zbuf_" .. scene_id, name = "Z-Buffer",   type = "image"   },
+                }
+
+                -- Check for variant backgrounds
+                local vf = file_open(fpath)
+                if vf then
+                    local vo, vs = read_scene_tables(vf)
+                    file_close(vf)
+                    if vo and vs then
+                        for var = 1, 6 do
+                            local base = var * ENTRIES_PER_VARIANT
+                            if base < TABLE_ENTRIES and vo[base] > 0 and vs[base] >= STRIDE then
+                                scene_children[#scene_children + 1] = {
+                                    id   = "varbg_" .. scene_id .. "_" .. var,
+                                    name = string.format("Variant %d", var),
+                                    type = "image"
+                                }
+                            end
+                        end
+                    end
+                end
+
                 chapter_node.children[#chapter_node.children + 1] = {
                     id       = "scene_" .. scene_id,
                     name     = string.format("Scene %s%02d", chapter.letter, scene_num),
                     type     = "category",
-                    children = {
-                        { id = "bg_"   .. scene_id, name = "Background", type = "image"   },
-                        { id = "pal_"  .. scene_id, name = "Palette",    type = "palette" },
-                        { id = "zbuf_" .. scene_id, name = "Z-Buffer",   type = "image"   },
-                    }
+                    children = scene_children
                 }
             end
         end
 
         if has_scenes then
             resources[#resources + 1] = chapter_node
+        end
+    end
+
+    -- Add speech categories
+    for ch_idx, chapter in ipairs(CHAPTERS) do
+        local speech_fname = string.format("RESOURCE.S%02d", ch_idx)
+        local speech_path = find_file(game_path, speech_fname)
+        if speech_path then
+            local sf = file_open(speech_path)
+            if sf then
+                local sf_size = file_size(sf)
+                local idx_raw = file_read(sf, 0, SPEECH_INDEX_SIZE)
+                file_close(sf)
+
+                if idx_raw and #idx_raw >= SPEECH_INDEX_SIZE then
+                    local speech_children = {}
+                    for i = 0, SPEECH_INDEX_ENTRIES - 1 do
+                        local off = u32le(idx_raw, i * 4 + 1)
+                        if off > 0 and off < sf_size then
+                            -- Find next valid offset
+                            local next_off = sf_size
+                            for j = i + 1, SPEECH_INDEX_ENTRIES - 1 do
+                                local no = u32le(idx_raw, j * 4 + 1)
+                                if no > off then next_off = no; break end
+                            end
+                            if next_off - off > 1 then
+                                speech_children[#speech_children + 1] = {
+                                    id   = string.format("speech_%d_%d", ch_idx, i),
+                                    name = string.format("Clip %d", i),
+                                    type = "sound"
+                                }
+                            end
+                        end
+                    end
+                    if #speech_children > 0 then
+                        resources[#resources + 1] = {
+                            id   = "speech_ch_" .. chapter.letter,
+                            name = string.format("Speech %s (%d clips)", chapter.name, #speech_children),
+                            type = "category",
+                            children = speech_children
+                        }
+                    end
+                end
+            end
         end
     end
 
@@ -294,6 +348,13 @@ function engine.load_resource(game_path, resource_id, palette_id)
         return load_variant_background(game_path, var_scene, tonumber(var_idx))
     end
 
+    -- Speech clip: speech_1_42
+
+    local sp_ch, sp_clip = resource_id:match("^speech_(%d+)_(%d+)$")
+    if sp_ch and sp_clip then
+        return load_speech_clip(game_path, tonumber(sp_ch), tonumber(sp_clip))
+    end
+
     return nil
 end
 
@@ -315,7 +376,7 @@ function load_background(game_path, scene_id, palette_id)
         return nil
     end
 
-    local pixels = load_bg_pixels(f, offsets, sizes)
+    local pixels, actual_h = load_bg_pixels(f, offsets, sizes)
 
     -- If a palette override is specified, use it
     local palette
@@ -346,13 +407,13 @@ function load_background(game_path, scene_id, palette_id)
 
     if not pixels or not palette then return nil end
 
-    local img = image_create_indexed(SCREEN_W, SCREEN_H, pixels, palette)
+    local img = image_create_indexed(SCREEN_W, actual_h, pixels, palette)
     return {
         type = "image",
         image = img,
         description = string.format(
             "Scene %s background - %dx%d, 256 colors (VGA 6-bit)",
-            scene_id, SCREEN_W, SCREEN_H
+            scene_id, SCREEN_W, actual_h
         )
     }
 end
@@ -412,36 +473,31 @@ function load_variant_background(game_path, scene_id, variant_idx)
     if not raw or not palette then return nil end
 
     -- Extract 640 pixels per row from 1024-stride data
+    local actual_h = math.floor(bg_size / STRIDE)
+    if actual_h == 0 then
+        -- Tiny data: not a renderable background
+        file_close(f)
+        return { type = "text", text = string.format("Variant %d: data too small (%d bytes)", variant_idx, bg_size) }
+    end
+
     local pixels = {}
     local n = 0
-    if bg_size >= FB_SIZE then
-        for row = 0, SCREEN_H - 1 do
-            local row_start = row * STRIDE
-            for col = 0, SCREEN_W - 1 do
-                n = n + 1
-                local pos = row_start + col + 1
-                pixels[n] = (pos <= #raw) and raw:byte(pos) or 0
-            end
-        end
-    else
-        local raw_stride = math.max(math.floor(bg_size / SCREEN_H), SCREEN_W)
-        for row = 0, SCREEN_H - 1 do
-            local row_start = row * raw_stride
-            for col = 0, SCREEN_W - 1 do
-                n = n + 1
-                local pos = row_start + col + 1
-                pixels[n] = (pos <= #raw) and raw:byte(pos) or 0
-            end
+    for row = 0, actual_h - 1 do
+        local row_start = row * STRIDE
+        for col = 0, SCREEN_W - 1 do
+            n = n + 1
+            local pos = row_start + col + 1
+            pixels[n] = (pos <= #raw) and raw:byte(pos) or 0
         end
     end
 
-    local img = image_create_indexed(SCREEN_W, SCREEN_H, pixels, palette)
+    local img = image_create_indexed(SCREEN_W, actual_h, pixels, palette)
     return {
         type = "image",
         image = img,
         description = string.format(
             "Scene %s variant %d - %dx%d, 256 colors",
-            scene_id, variant_idx, SCREEN_W, SCREEN_H
+            scene_id, variant_idx, SCREEN_W, actual_h
         )
     }
 end
@@ -503,11 +559,10 @@ function load_zbuffer(game_path, scene_id)
     local offsets, sizes = read_scene_tables(f)
     if not offsets or not sizes then file_close(f); return nil end
 
-    -- Z-buffer is block 3; compute its file offset
-    -- Sequential: tables (320) + block0 (sizes[0]) + block1 (sizes[1]) + block2 (sizes[2])
-    local zbuf_offset = TABLE_SIZE * 2 + sizes[0] + sizes[1] + sizes[2]
+    -- Z-buffer is block 3; use offset from the table
+    local zbuf_offset = offsets[3]
     local zbuf_size   = sizes[3]
-    if zbuf_size == 0 then file_close(f); return nil end
+    if zbuf_offset == 0 or zbuf_size == 0 then file_close(f); return nil end
 
     local zbuf_raw = file_read(f, zbuf_offset, zbuf_size)
     file_close(f)
@@ -546,6 +601,78 @@ function load_zbuffer(game_path, scene_id)
         description = string.format(
             "Scene %s z-buffer - %dx%d, RLE compressed (%d → %d bytes)",
             scene_id, SCREEN_W, SCREEN_H, zbuf_size, FB_SIZE
+        )
+    }
+end
+
+-- ── Speech support ────────────────────────────────────────────────
+-- Speech files: RESOURCE.S01–S09 (one per chapter A–I)
+-- Format: 1000 × u32le offset index, then raw unsigned 8-bit PCM data
+-- Entries with zero or diff-of-1 consecutive offsets are empty
+
+local function load_speech_clip(game_path, chapter_idx, clip_idx)
+    local fname = string.format("RESOURCE.S%02d", chapter_idx)
+    local fpath = find_file(game_path, fname)
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local fsize = file_size(f)
+
+    -- Read the offset index
+    local idx_raw = file_read(f, 0, SPEECH_INDEX_SIZE)
+    if not idx_raw or #idx_raw < SPEECH_INDEX_SIZE then
+        file_close(f)
+        return nil
+    end
+
+    -- Parse offsets
+    local clip_offsets = {}
+    for i = 0, SPEECH_INDEX_ENTRIES - 1 do
+        clip_offsets[i] = u32le(idx_raw, i * 4 + 1)
+    end
+
+    local clip_off = clip_offsets[clip_idx]
+    if clip_off == 0 or clip_off >= fsize then
+        file_close(f)
+        return { type = "text", text = string.format("Empty speech clip %d", clip_idx) }
+    end
+
+    -- Find the end of this clip (next valid offset or end of file)
+    local clip_end = fsize
+    for i = clip_idx + 1, SPEECH_INDEX_ENTRIES - 1 do
+        if clip_offsets[i] > clip_off then
+            clip_end = clip_offsets[i]
+            break
+        end
+    end
+
+    local clip_size = clip_end - clip_off
+    if clip_size <= 1 then
+        file_close(f)
+        return { type = "text", text = string.format("Empty speech clip %d", clip_idx) }
+    end
+
+    local pcm_data = file_read(f, clip_off, clip_size)
+    file_close(f)
+
+    if not pcm_data or #pcm_data < 2 then return nil end
+
+    -- Convert unsigned 8-bit to signed for playback
+    local signed_data = {}
+    for i = 1, #pcm_data do
+        signed_data[i] = pcm_data:byte(i)
+    end
+
+    local snd = sound_create_pcm(SPEECH_SAMPLE_RATE, 8, 1, false, signed_data)
+    local duration_ms = math.floor(clip_size * 1000 / SPEECH_SAMPLE_RATE)
+    return {
+        type = "sound",
+        sound = snd,
+        description = string.format(
+            "Speech clip %d - %d bytes, %d ms @ %d Hz, 8-bit unsigned PCM",
+            clip_idx, clip_size, duration_ms, SPEECH_SAMPLE_RATE
         )
     }
 end

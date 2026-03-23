@@ -15,6 +15,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,7 +67,19 @@ fun ResourceTreeView(
         modifier = Modifier
             .fillMaxSize()
             .padding(bottom = 10.dp)
-            .horizontalScroll(hScrollState)
+            .pointerInput(hScrollState) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Scroll) {
+                            val delta = event.changes.firstOrNull()?.scrollDelta ?: continue
+                            if (delta.x != 0f) {
+                                hScrollState.dispatchRawDelta(delta.x * 30f)
+                            }
+                        }
+                    }
+                }
+            }
     ) {
     LazyColumn(
         state = listState,
