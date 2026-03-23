@@ -212,8 +212,9 @@ class LuaEngine {
                 val bitsPerSample = args.checkint(2)
                 val channels = args.checkint(3)
                 val signed = args.checkboolean(4)
-                val pcmStr = args.checkjstring(5)
-                val samples = pcmStr.toByteArray(Charsets.ISO_8859_1)
+                val luaStr = args.checkstring(5)
+                val samples = ByteArray(luaStr.length())
+                luaStr.copyInto(0, samples, 0, samples.size)
                 if (samples.isEmpty()) return NIL
                 val handle = nextSoundHandle++
                 sounds[handle] = SoundData(samples, sampleRate, bitsPerSample, channels, signed)
@@ -230,7 +231,8 @@ class LuaEngine {
         globals["zlib_decompress"] = object : TwoArgFunction() {
             override fun call(data: LuaValue, expectedSize: LuaValue): LuaValue {
                 val bytes = try {
-                    data.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    val ls = data.checkstring()
+                    ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
                 } catch (e: Exception) { return NIL }
                 val outSize = expectedSize.checkint()
                 // Try standard zlib (with header) first, then raw deflate.
@@ -253,7 +255,8 @@ class LuaEngine {
         globals["image_load_png"] = object : OneArgFunction() {
             override fun call(data: LuaValue): LuaValue {
                 return try {
-                    val bytes = data.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    val ls = data.checkstring()
+                    val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
                     val src = ImageIO.read(ByteArrayInputStream(bytes)) ?: return NIL
                     val image = BufferedImage(src.width, src.height, BufferedImage.TYPE_INT_RGB)
                     val g2d = image.createGraphics()
@@ -271,8 +274,10 @@ class LuaEngine {
         globals["xor_bytes"] = object : TwoArgFunction() {
             override fun call(data: LuaValue, key: LuaValue): LuaValue {
                 return try {
-                    val input = data.checkjstring().toByteArray(Charsets.ISO_8859_1)
-                    val keyBytes = key.checkjstring().toByteArray(Charsets.ISO_8859_1)
+                    val lsData = data.checkstring()
+                    val input = ByteArray(lsData.length()).also { lsData.copyInto(0, it, 0, it.size) }
+                    val lsKey = key.checkstring()
+                    val keyBytes = ByteArray(lsKey.length()).also { lsKey.copyInto(0, it, 0, it.size) }
                     if (keyBytes.isEmpty()) return data
                     val output = ByteArray(input.size) { i ->
                         (input[i].toInt() and 0xFF xor (keyBytes[i % keyBytes.size].toInt() and 0xFF)).toByte()
