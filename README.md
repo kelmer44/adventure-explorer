@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-27 game engines are currently supported via Lua scripts — no recompilation needed.
+30 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -31,9 +31,10 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
-| Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds | ✅ Working |
+| Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Speech | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations | ✅ Working |
+| Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
 | The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -48,7 +49,9 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
-| Sierra SCI (SCI0) | 1988-96 | `sci` | Sprites, Cursors | ✅ Working |
+| Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound | ✅ Working |
+| Flight of the Amazon Queen | 1995 | `queen` | Backgrounds | ✅ Working |
+| Sierra SCI (SCI0/SCI1/SCI1.1) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Palettes | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 
 > \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file

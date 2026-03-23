@@ -123,13 +123,10 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 game in ags/QUEEN
 
 
-### lgop2
-Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
+### LGOP2 (Leather Goddesses of Phobos 2)
+ScummVM source code - MADE engine (/scummvm-fork/engines/made/ or http://github.com/scummvm/scummvm)
+Key files: resource.cpp, graphics.cpp, sound.cpp, made.cpp
 
 game in ags/LGOP2
-
-
-
-
 
 
