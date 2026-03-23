@@ -28,7 +28,7 @@ local engine = {}
 engine.name        = "Igor: Objective Uikokahonia"
 engine.id          = "igor"
 engine.description = "Pendulo Studios (1994) - DOS floppy & CD"
-engine.version     = "6.0"
+engine.version     = "7.0"
 
 -- ============================================================================
 -- Binary helpers (no bit32 in LuaJ 3.0.1)
@@ -119,29 +119,25 @@ end
 -- ============================================================================
 
 -- ===== CD version (Spanish) - offsets into IGOR.EXE 9,115,648 bytes =====
--- Named rooms from scummvm-create-igortbl/resource_sp_cdrom.h (27 rooms).
--- Additional rooms found by scanning IGOR.EXE NE segments for 46080-byte
--- image blocks followed by valid VGA palettes (50 rooms, no text data).
+-- Named rooms from scummvm-create-igortbl/resource_sp_cdrom.h (31 rooms).
+-- Additional rooms found by scanning IGOR.EXE for 46080-byte image blocks
+-- followed by valid VGA palettes (42 rooms, no text data).
 local CD_ROOMS = {
-    {"Room 1",                                0x007ea4, 46080, 0x0132a4, 768,  0,       0,    0x0135a4, 1280, 0,       0},
-    {"Room 2",                                0x01a966, 46080, 0x025d66, 768,  0,       0,    0,       0,    0,       0},
     {"Room 3",                                0x02a76e, 46080, 0x035b6e, 768,  0,       0,    0,       0,    0,       0},
-    {"Room 4",                                0x03a565, 46080, 0x045965, 768,  0,       0,    0,       0,    0,       0},
-    {"Room 5",                                0x0499b2, 46080, 0x054db2, 768,  0,       0,    0x0550b2, 1280, 0,       0},
-    {"Room 6",                                0x05a16b, 46080, 0x06556b, 768,  0,       0,    0,       0,    0,       0},
-    {"Room 7",                                0x069f36, 46080, 0x075336, 768,  0,       0,    0,       0,    0,       0},
-    {"Room 8",                                0x0cd174, 46080, 0x0d8574, 768,  0,       0,    0,       0,    0,       0},
     {"Room 9",                                0x1046e7, 46080, 0x10fae7, 624,  0x10fd57, 2718, 0x1107f5, 1280, 0,       0},
     {"Room 10",                               0x134175, 46080, 0x13f575, 768,  0x13f875,    3, 0x13f878, 1280, 0,       0},
-    {"Room 11",                               0x165846, 46080, 0x170c46, 624,  0,       0,    0x170eb6, 1280, 0,       0},
+    {"Room 11",                               0x165847, 46080, 0x170c47, 624,  0,       0,    0x170eb7, 1280, 0,       0},
     {"Room 12",                               0x18ddea, 46080, 0x1991ea, 624,  0x19945a, 2760, 0x199f22, 1280, 0,       0},
     {"Philip's Room",                         0x1a4f1c, 46080, 0x1b031c, 768,  0x1b061c,    3, 0x1b061f, 1280, 0x1a4a75, 1191},
     {"Room 14",                               0x1b168a, 46080, 0x1bca8a, 624,  0,       0,    0,       0,    0,       0},
     {"Room 15",                               0x1c2718, 46080, 0x1cdb18, 768,  0x1cde18,    3, 0x1cde1b, 1280, 0,       0},
     {"Room 16",                               0x1d2a9f, 46080, 0x1dde9f, 624,  0x1de10f,  636, 0x1de38b, 1280, 0,       0},
-    {"Room 17",                               0x1efc38, 46080, 0x1fb038, 624,  0,       0,    0x1fb2a8, 1280, 0,       0},
+    {"Church Mosaic",                         0x1eb513, 46080, 0x1f6913, 720,  0x1f6be3, 2445, 0,       0,    0,       0},
+    {"Church Puzzle",                         0x2054e3, 46080, 0x2108e3, 624,  0x210b53, 1992, 0x21131b, 1280, 0x204eb0, 1587},
     {"Room 18",                               0x206f01, 46080, 0x212301, 624,  0x212571, 5325, 0x213a3e, 1280, 0,       0},
+    {"Inside Church",                         0x21765f, 46080, 0x222a5f, 624,  0x222ccf, 2352, 0x2235ff, 1280, 0x217231, 1070},
     {"Room 19",                               0x22a238, 46080, 0x235638, 624,  0x2358a8, 3546, 0x236682, 1280, 0,       0},
+    {"Outside Church",                        0x23ae4f, 46080, 0x24624f, 624,  0x2464bf, 3264, 0x24717f, 1280, 0x23a8bc, 1427},
     {"Room 20",                               0x23df9c, 46080, 0x24939c, 624,  0x24960c, 2511, 0x249fdb, 1280, 0,       0},
     {"Room 21",                               0x2625df, 46080, 0x26d9df, 624,  0,       0,    0x26dc4f, 1280, 0,       0},
     {"Room 22",                               0x276236, 46080, 0x281636, 768,  0,       0,    0x281936, 1280, 0,       0},
