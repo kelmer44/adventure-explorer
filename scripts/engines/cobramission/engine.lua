@@ -374,7 +374,7 @@ local function decode_gc(data)
             if b > ch then ch = b end
         end
     end
-    if cw < 1 or ch < 1 or cw > 1024 or ch > 1024 then return nil end
+    if cw < 1 or ch < 1 or cw > 4096 or ch > 4096 then return nil end
 
     local canvas = {}
     for i = 1, cw * ch do canvas[i] = 0 end
