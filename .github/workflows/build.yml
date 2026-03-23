@@ -3,11 +3,31 @@ name: Build Executables
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
+  build-scripts:
+    name: Package Engine Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create scripts archive
+        run: |
+          cd scripts
+          zip -r ../engine-scripts.zip engines/
+
+      - name: Upload scripts artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-scripts
+          path: engine-scripts.zip
+          if-no-files-found: error
+
   build-macos:
     name: Build macOS (DMG)
     runs-on: macos-latest
@@ -76,3 +96,25 @@ jobs:
           name: adventure-explorer-windows
           path: build/compose/binaries/main/msi/*.msi
           if-no-files-found: error
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-scripts, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/engine-scripts/engine-scripts.zip
+            artifacts/adventure-explorer-macos/*.dmg
+            artifacts/adventure-explorer-windows/*.msi
+          generate_release_notes: true
