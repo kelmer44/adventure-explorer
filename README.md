@@ -29,7 +29,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
-| Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes | ✅ Working |
+| Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Speech | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |

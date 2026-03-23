@@ -268,9 +268,148 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = floppy_pals
     end
 
+    -- Scan for .NSP sprite files (in root for floppy, ROOM/ for CD)
+    local nsp_dir = game_path
+    if is_cd then
+        local try_room = game_path .. "/ROOM"
+        if file_exists(try_room .. "/ROOM0.NSP") or file_exists(try_room .. "/room0.nsp") then
+            nsp_dir = try_room
+        end
+    end
+
+    local nsp_files = list_files(nsp_dir)
+    if nsp_files and #nsp_files > 0 then
+        local cat = {
+            id = "sprites",
+            name = "Sprites (NSP)",
+            type = "category",
+            children = {},
+        }
+        for _, fname in ipairs(nsp_files) do
+            local base = fname:match("^(.+)%.[Nn][Ss][Pp]$")
+            if base then
+                cat.children[#cat.children + 1] = {
+                    id   = "nsp_" .. base:upper(),
+                    name = base:upper(),
+                    type = "animation",
+                }
+            end
+        end
+        table.sort(cat.children, function(a, b) return a.name < b.name end)
+        if #cat.children > 0 then
+            cat.name = string.format("Sprites (%d NSP files)", #cat.children)
+            resources[#resources + 1] = cat
+        end
+    end
+
     return resources
 end
 
+-- ── NSP sprite loader ────────────────────────────────────────────
+-- NSP format (ScummVM darkseed/nsp.cpp):
+--   192 bytes: 96 x (u8 width, u8 height) frame headers
+--   Then: 96 pixel data blocks, nibble-packed (high nibble first)
+--     pitch = width + (width & 1)   -- always even
+--     For 1x1 sprite: 1 byte with only high nibble used
+--     Otherwise: (pitch * height / 2) bytes per frame
+--   Palette index 0xF (15) = transparent
+
+local function load_nsp(nsp_path, pal_path)
+    local f = file_open(nsp_path)
+    if not f then return nil, "Cannot open NSP" end
+    local fsize = file_size(f)
+    local data  = file_read(f, 0, fsize)
+    file_close(f)
+    if not data or fsize < 192 then return nil, "NSP too small" end
+
+    -- Load palette (6-bit VGA, already scaled x4 by load_palette)
+    local palette
+    if pal_path then palette = load_palette(pal_path) end
+    if not palette then palette = ega_palette() end
+    -- Index 15 = transparent: display as magenta so outlines are visible
+    palette[15 * 3 + 1] = 255
+    palette[15 * 3 + 2] = 0
+    palette[15 * 3 + 3] = 255
+
+    -- Read 96 frame headers
+    local frames = {}
+    for i = 0, 95 do
+        local w = data:byte(i * 2 + 1)
+        local h = data:byte(i * 2 + 2)
+        local p = w + (w % 2)   -- pitch (even-padded)
+        frames[i] = { w = w, h = h, p = p }
+    end
+
+    -- Decode pixel data starting at byte offset 192 (Lua pos 193)
+    local pos = 193
+    local handles = {}
+
+    for i = 0, 95 do
+        local fr = frames[i]
+        if fr.w > 0 and fr.h > 0 then
+            local total = fr.p * fr.h
+            local pixels = {}
+            for j = 1, total do pixels[j] = 0 end
+
+            if fr.w == 1 and fr.h == 1 then
+                -- Special case: 1 byte, only high nibble used
+                if pos <= #data then
+                    pixels[1] = math.floor(data:byte(pos) / 16)
+                    pos = pos + 1
+                end
+            else
+                -- Normal case: total nibbles = total pixels (always even because pitch is even)
+                local byte_count = total / 2
+                for j = 0, total - 1 do
+                    local bp = pos + math.floor(j / 2)
+                    if bp <= #data then
+                        local b = data:byte(bp)
+                        if j % 2 == 0 then
+                            pixels[j + 1] = math.floor(b / 16)  -- high nibble
+                        else
+                            pixels[j + 1] = b % 16              -- low nibble
+                        end
+                    end
+                end
+                pos = pos + byte_count
+            end
+
+            handles[#handles + 1] = image_create_indexed(fr.p, fr.h, pixels, palette)
+        end
+    end
+
+    if #handles == 0 then return nil, "No non-empty frames" end
+    return handles
+end
+
+-- Find a palette for an NSP sprite by name (ROOMN.NSP -> ROOMN.PAL)
+local function find_nsp_palette(game_path, nsp_base, is_cd)
+    -- Try exact match in same directory
+    local function try(dir, base)
+        local p = find_file(dir, base .. ".pal")
+        if p then return p end
+        p = dir .. "/" .. base .. ".PAL"
+        if file_exists(p) then return p end
+        return nil
+    end
+
+    if is_cd then
+        local room_dir = game_path .. "/ROOM"
+        local p = try(room_dir, nsp_base)
+        if p then return p end
+        -- Try PICTURE/ directory
+        local pic_dir = game_path .. "/PICTURE"
+        if not file_exists(pic_dir) then pic_dir = game_path .. "/picture" end
+        p = try(pic_dir, nsp_base)
+        if p then return p end
+    else
+        local p = try(game_path, nsp_base)
+        if p then return p end
+    end
+    return nil
+end
+
+-- ── Background image loader ──────────────────────────────────────
 -- Load a .PIC background image with optional .PAL palette
 local function load_pic_image(pic_path, pal_path, label)
     local fp = file_open(pic_path)
@@ -430,6 +569,45 @@ function engine.load_resource(game_path, resource_id, palette_id)
             end
         end
         return { type = "text", text = "Palette not found: " .. pal_arg }
+    end
+
+    -- NSP sprite resource
+    local nsp_base = resource_id:match("^nsp_(.+)$")
+    if nsp_base then
+        local nsp_dir = game_path
+        if is_cd then
+            local try_room = game_path .. "/ROOM"
+            if file_exists(try_room .. "/" .. nsp_base .. ".NSP") or
+               file_exists(try_room .. "/" .. nsp_base:lower() .. ".nsp") then
+                nsp_dir = try_room
+            end
+        end
+        local nsp_path = find_file(nsp_dir, nsp_base .. ".nsp")
+        if not nsp_path then
+            return { type = "text", text = "NSP file not found: " .. nsp_base }
+        end
+        local pal_path = find_nsp_palette(game_path, nsp_base, is_cd)
+
+        local handles, err = load_nsp(nsp_path, pal_path)
+        if not handles then
+            return { type = "text", text = "Failed to load NSP: " .. (err or "unknown error") }
+        end
+
+        local pal_info = pal_path and pal_path:match("[^/]+$") or "EGA fallback"
+        if #handles == 1 then
+            return {
+                type = "image",
+                image = handles[1],
+                description = string.format("%s - 1 frame, palette: %s", nsp_base, pal_info),
+            }
+        else
+            local anim = animation_create(handles, 150)
+            return {
+                type = "animation",
+                animation = anim,
+                description = string.format("%s - %d frames, palette: %s", nsp_base, #handles, pal_info),
+            }
+        end
     end
 
     return nil
