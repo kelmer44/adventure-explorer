@@ -234,6 +234,11 @@ class AppState {
                     if (bgData?.image != null) {
                         previewImage = bgData.image
                         previewDesc = bgData.description ?: previewDesc
+                        // Also update animation frames if the re-render returned an animation
+                        if (bgData.frames != null) {
+                            previewFrames = bgData.frames
+                            previewFrameDelayMs = bgData.frameDelayMs
+                        }
                     }
                     statusMessage = "Palette: ${palNode.name}"
                 }
