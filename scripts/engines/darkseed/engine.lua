@@ -586,7 +586,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         if not nsp_path then
             return { type = "text", text = "NSP file not found: " .. nsp_base }
         end
-        local pal_path = find_nsp_palette(game_path, nsp_base, is_cd)
+        local pal_path = get_override_pal_path() or find_nsp_palette(game_path, nsp_base, is_cd)
 
         local handles, err = load_nsp(nsp_path, pal_path)
         if not handles then
