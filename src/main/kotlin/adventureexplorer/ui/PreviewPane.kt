@@ -53,6 +53,12 @@ fun PreviewPane(
                 frames = frames,
                 frameDelayMs = frameDelayMs,
                 description = description,
+                paletteImage = paletteImage,
+                paletteOptions = paletteOptions,
+                selectedPaletteIndex = selectedPaletteIndex,
+                onPaletteSelected = onPaletteSelected,
+                canExportPalette = canExportPalette,
+                onExportPaletteBin = onExportPaletteBin,
                 onExportFrame = onExportFrame,
                 onExportAllFrames = onExportAllFrames
             )
@@ -306,6 +312,12 @@ private fun AnimationPreview(
     frames: List<BufferedImage>,
     frameDelayMs: Int,
     description: String?,
+    paletteImage: BufferedImage?,
+    paletteOptions: List<ResourceNode>,
+    selectedPaletteIndex: Int,
+    onPaletteSelected: (Int) -> Unit,
+    canExportPalette: Boolean,
+    onExportPaletteBin: () -> Unit,
     onExportFrame: (BufferedImage) -> Unit,
     onExportAllFrames: () -> Unit
 ) {
@@ -345,13 +357,16 @@ private fun AnimationPreview(
 
         Divider(color = Color(0xFF333333))
 
+        // ── Content row: animation + optional palette pane ───
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+
         // ── Image area ───────────────────────────────────────
         val hScroll = rememberScrollState()
         val vScroll = rememberScrollState()
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
+                .fillMaxHeight()
                 .horizontalScroll(hScroll)
                 .verticalScroll(vScroll)
                 .padding(8.dp)
@@ -368,6 +383,25 @@ private fun AnimationPreview(
                 filterQuality = FilterQuality.None
             )
         }
+
+        // Palette side pane
+        if (paletteImage != null || paletteOptions.isNotEmpty()) {
+            Divider(
+                modifier = Modifier.fillMaxHeight().width(1.dp),
+                color = Color(0xFF333333)
+            )
+            PalettePane(
+                paletteImage = paletteImage,
+                paletteOptions = paletteOptions,
+                selectedPaletteIndex = selectedPaletteIndex,
+                onPaletteSelected = onPaletteSelected,
+                canExport = canExportPalette,
+                onExportBin = onExportPaletteBin,
+                modifier = Modifier.width(220.dp).fillMaxHeight()
+            )
+        }
+
+        } // end content Row
 
         Divider(color = Color(0xFF333333))
 

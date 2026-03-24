@@ -170,8 +170,8 @@ class AppState {
                         previewImage = bgWithPal?.image ?: data.image
                         previewDesc = bgWithPal?.description ?: data.description
                         previewText = data.textContent
-                        previewFrames = data.frames
-                        previewFrameDelayMs = data.frameDelayMs
+                        previewFrames = bgWithPal?.frames ?: data.frames
+                        previewFrameDelayMs = bgWithPal?.frameDelayMs?.takeIf { it > 0 } ?: data.frameDelayMs
                         previewSoundData = data.soundData
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
