@@ -1,0 +1,45 @@
+name: Release Engine Scripts
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  release-scripts:
+    name: Publish Engine Scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create scripts archive
+        run: |
+          cd scripts
+          zip -r ../engine-scripts.zip engines/
+
+      - name: Publish dated release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE_TAG="$(date +'%Y-%m-%d')"
+          DATE_LONG="$(date +'%B %-d, %Y')"
+
+          # Force-update the date tag so the latest push always wins
+          git tag -f "$DATE_TAG"
+          git push origin "refs/tags/$DATE_TAG" --force
+
+          # Delete any existing release for this date, then recreate it
+          gh release delete "$DATE_TAG" --yes 2>/dev/null || true
+
+          gh release create "$DATE_TAG" \
+            --title "Engine Scripts $DATE_TAG" \
+            --notes "Automated snapshot of engine scripts published on $DATE_LONG.
+
+## Contents
+- \`engine-scripts.zip\` — all Lua engine scripts from \`scripts/engines/\`
+
+Extract and place the \`engines/\` folder next to the Adventure Explorer app binary." \
+            engine-scripts.zip
