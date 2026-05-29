@@ -210,13 +210,17 @@ local function read_palette(data, pos)
         palette[i * 3 + 1] = 0; palette[i * 3 + 2] = 0; palette[i * 3 + 3] = 0
     end
 
+    -- FGND_DAC_INDEX = 1: the first palette color is placed at DAC index 1.
+    -- Pixel value 0 = DAC 0 = transparent background black (already zeroed).
+    -- Pixel value 1 = DAC 1 = palette color 0, pixel value N = palette color N-1.
+    -- So write color i at palette slot (i+1) to match DAC layout.
     for i = 0, num_colors - 1 do
         local p = pos + 4 + i * 4
         if p + 3 > #data then break end
         local colorref = u32le(data, p)
-        palette[i * 3 + 1] = colorref % 256                        -- R
-        palette[i * 3 + 2] = math.floor(colorref / 256) % 256      -- G
-        palette[i * 3 + 3] = math.floor(colorref / 65536) % 256    -- B
+        palette[(i + 1) * 3 + 1] = colorref % 256                        -- R
+        palette[(i + 1) * 3 + 2] = math.floor(colorref / 256) % 256      -- G
+        palette[(i + 1) * 3 + 3] = math.floor(colorref / 65536) % 256    -- B
     end
 
     return palette
@@ -242,8 +246,10 @@ local function decode_dw1_background(bits_data, bits_off, img_w, img_h)
     -- Tile map starts at bits_off within the file
     local tile_map_pos = bits_off + 1  -- 1-based
 
-    local tiles_w = math.floor(img_w / 4)
-    local tiles_h = math.floor(img_h / 4)
+    -- Use ceiling division (matches ScummVM: (width + 3) >> 2)
+    -- so non-multiples-of-4 get the extra partial tile column/row
+    local tiles_w = math.floor((img_w + 3) / 4)
+    local tiles_h = math.floor((img_h + 3) / 4)
     local num_tiles = tiles_w * tiles_h
 
     if tile_map_pos + num_tiles * 2 - 1 > #bits_data then return nil end
@@ -335,9 +341,11 @@ function engine.get_resources(game_path)
         end
     end
 
-    -- Minimum dimensions: DW2 has composited backgrounds so show more images
-    local min_w = dw2 and 100 or 300
-    local min_h = dw2 and 80 or 100
+    -- Thresholds for classifying backgrounds vs sprites
+    local bg_min_w = dw2 and 100 or 300
+    local bg_min_h = dw2 and 80  or 100
+    local sp_min_w = 8
+    local sp_min_h = 8
 
     local resources = {}
 
@@ -363,12 +371,15 @@ function engine.get_resources(game_path)
                     -- Scan for IMAGE chunks
                     local images = scan_for_images(data)
 
-                    -- Filter for background-sized images
                     local bg_images = {}
+                    local sp_images = {}
                     for _, img in ipairs(images) do
-                        if img.width >= min_w and img.height >= min_h
-                           and img.hImgBits ~= 0 then
-                            bg_images[#bg_images + 1] = img
+                        if img.hImgBits ~= 0 then
+                            if img.width >= bg_min_w and img.height >= bg_min_h then
+                                bg_images[#bg_images + 1] = img
+                            elseif img.width >= sp_min_w and img.height >= sp_min_h then
+                                sp_images[#sp_images + 1] = img
+                            end
                         end
                     end
 
@@ -380,6 +391,24 @@ function engine.get_resources(game_path)
                             type = "category", children = {}
                         }
                         for _, img in ipairs(bg_images) do
+                            cat.children[#cat.children + 1] = {
+                                id = string.format("img_%s_%d", df.name, img.pos_1based),
+                                name = string.format("%dx%d (bits=0x%X, pal=0x%X)",
+                                    img.width, img.height, img.hImgBits, img.hImgPal),
+                                type = "image"
+                            }
+                        end
+                        resources[#resources + 1] = cat
+                    end
+
+                    if #sp_images > 0 then
+                        local cat = {
+                            id = "sprites_" .. df.name,
+                            name = string.format("%s - %s sprites (%d)",
+                                game_label, df.name, #sp_images),
+                            type = "category", children = {}
+                        }
+                        for _, img in ipairs(sp_images) do
                             cat.children[#cat.children + 1] = {
                                 id = string.format("img_%s_%d", df.name, img.pos_1based),
                                 name = string.format("%dx%d (bits=0x%X, pal=0x%X)",
