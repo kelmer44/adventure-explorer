@@ -163,33 +163,41 @@ local function scan_for_images(data)
         local found = data:find(CHUNK_IMAGE, start, true)
         if not found then break end
 
-        -- IMAGE struct starts 8 bytes after chunk marker (past {type, next_offset})
-        local img_pos = found + 8  -- 1-based position of IMAGE struct
+        -- Chunk header: type (4 bytes at found), next_chunk_abs_offset (4 bytes at found+4).
+        -- next_chunk_abs_offset is a 0-based absolute file offset; the chunk data begins at
+        -- found+8 (1-based). In Lua's 1-based indexing the last byte of this chunk's data
+        -- is at position next_abs (since 0-based offset next_abs-1 = 1-based next_abs).
+        local next_abs = u32le(data, found + 4)  -- 0-based absolute offset to next chunk
+        local chunk_end = (next_abs > 0) and next_abs or #data  -- last data byte, 1-based
 
-        if img_pos + 15 <= #data then
-            local raw_w = i16le(data, img_pos)
+        -- Iterate ALL 16-byte IMAGE structs packed consecutively in this chunk block.
+        local img_pos = found + 8  -- 1-based, start of first IMAGE struct
+        while img_pos + 15 <= chunk_end do
+            local w     = i16le(data, img_pos)
             local raw_h = u16le(data, img_pos + 2)
-            local w = raw_w
-            local h = raw_h % 16384  -- strip C16 flags (& 0x3FFF)
+            local h     = raw_h % 16384  -- strip C16 flags (bits 14-15)
 
-            if w > 0 and h > 0 and w <= 1024 and h <= 768 then
+            if w > 0 and h > 0 and w <= 2000 and h <= 2000 then
                 local hImgBits = u32le(data, img_pos + 8)
                 local hImgPal  = u32le(data, img_pos + 12)
-
-                results[#results + 1] = {
-                    pos_1based = img_pos,
-                    width      = w,
-                    height     = h,
-                    raw_height = raw_h,
-                    anioffX    = i16le(data, img_pos + 4),
-                    anioffY    = i16le(data, img_pos + 6),
-                    hImgBits   = hImgBits,
-                    hImgPal    = hImgPal
-                }
+                if hImgBits ~= 0 then
+                    results[#results + 1] = {
+                        pos_1based = img_pos,
+                        width      = w,
+                        height     = h,
+                        raw_height = raw_h,
+                        anioffX    = i16le(data, img_pos + 4),
+                        anioffY    = i16le(data, img_pos + 6),
+                        hImgBits   = hImgBits,
+                        hImgPal    = hImgPal
+                    }
+                end
             end
+            img_pos = img_pos + 16
         end
 
-        start = found + 4  -- advance past this match
+        -- Advance past this chunk to avoid re-scanning its data as a new marker
+        start = (next_abs > 0) and (next_abs + 1) or (#data + 1)
     end
 
     return results
@@ -546,7 +554,17 @@ function engine.get_resources(game_path)
                     if is_cdp then
                         -- CDP files hold character sprites exclusively
                         sp_images[#sp_images + 1] = img
+                    elseif dw2 then
+                        -- DW2: c16==0 (raw 8bpp WrtAll) + wide → background;
+                        -- c16!=0 (t2WrtNonZero RLE) → sprite
+                        local c16 = math.floor(img.raw_height / 16384) % 4
+                        if c16 == 0 and img.width >= 300 then
+                            bg_images[#bg_images + 1] = img
+                        elseif img.width >= 4 and img.height >= 4 then
+                            sp_images[#sp_images + 1] = img
+                        end
                     elseif img.width >= 300 and img.height >= 80 then
+                        -- DW1: use size heuristic (no reliable c16 distinction)
                         bg_images[#bg_images + 1] = img
                     elseif img.width >= 4 and img.height >= 4 then
                         sp_images[#sp_images + 1] = img
@@ -554,12 +572,41 @@ function engine.get_resources(game_path)
                 end
             end
 
-            -- Backgrounds: always individual resources (no animation grouping)
-            for _, img in ipairs(bg_images) do
-                all_bg[#all_bg + 1] = {
-                    id   = string.format("img_%s_%d", df.name, img.pos_1based),
-                    name = string.format("%s - %dx%d", df.name, img.width, img.height),
-                }
+            -- Backgrounds: group same-dimension images within the same file as animation frames.
+            -- This handles wide scrolling backgrounds stored as multiple layers.
+            if #bg_images > 0 then
+                local bg_groups = {}
+                local bg_order  = {}
+                for _, img in ipairs(bg_images) do
+                    local key = img.width .. "x" .. img.height
+                    if not bg_groups[key] then
+                        bg_groups[key] = {}
+                        bg_order[#bg_order + 1] = key
+                    end
+                    bg_groups[key][#bg_groups[key] + 1] = img
+                end
+                for _, key in ipairs(bg_order) do
+                    local group = bg_groups[key]
+                    local first = group[1]
+                    local entry
+                    if #group == 1 then
+                        entry = {
+                            id   = string.format("img_%s_%d", df.name, first.pos_1based),
+                            name = string.format("%s - %dx%d", df.name, first.width, first.height),
+                        }
+                    else
+                        local parts = {}
+                        for _, img in ipairs(group) do
+                            parts[#parts + 1] = df.name .. ":" .. img.pos_1based
+                        end
+                        entry = {
+                            id   = "anim_" .. table.concat(parts, "|"),
+                            name = string.format("%s - %dx%d \xc3\x97 %d layers",
+                                df.name, first.width, first.height, #group),
+                        }
+                    end
+                    all_bg[#all_bg + 1] = entry
+                end
             end
 
             if is_cdp then
@@ -623,7 +670,8 @@ function engine.get_resources(game_path)
     if #all_bg > 0 then
         local bg_children = {}
         for _, bg in ipairs(all_bg) do
-            bg_children[#bg_children + 1] = { id = bg.id, name = bg.name, type = "image" }
+            local bg_type = bg.id:sub(1, 5) == "anim_" and "animation" or "image"
+            bg_children[#bg_children + 1] = { id = bg.id, name = bg.name, type = bg_type }
         end
         table.insert(resources, 1, {
             id       = "cat_backgrounds",
