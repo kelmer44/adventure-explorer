@@ -1,12 +1,17 @@
 -- ============================================================================
--- Adventure Explorer - Engine Script: Simon the Sorcerer 1
+-- Adventure Explorer - Engine Script: Simon the Sorcerer 1 & 2 (AGOS)
 -- ============================================================================
--- Adventure Soft, 1993. 320x200 (view: 320x134), 32-color backgrounds.
--- VGA file pairs (file1=palettes, file2=images) packed in simon.gme archive.
+-- Adventure Soft, 1993 / 1995. AGOS engine. VGA file pairs packed in .gme.
+--
+-- Simon 1: simon.gme, GAMEPC detection, 32-color palette (32 x 3 bytes at +6).
+-- Simon 2: simon2.gme, GSPTR30 detection, 256-color palette (256 x 3 bytes at +6).
 --
 -- Image formats (vgaFile2):
---   Background (w=320, h=134/135/200, flags=0x80):
---     5-bit packed rows: 8 pixels per 5 bytes, 200 bytes/row, values 0-31.
+--   Background 320-wide (w=320, h=134/135/200, flags=0x80):
+--     5-bit packed rows: 8 pixels per 5 bytes, values 0-31.
+--   Background 640-wide (Simon 2 only, w=640, flags=0x00):
+--     decodeColumn: table of (w/8) BE 4-byte relative offsets, then
+--     column-group RLE (signed count byte; 1 byte per pixel, full 8-bit index).
 --   Sprite compressed (flags=0x80, not background):
 --     Column-by-column signed-byte RLE; each decoded byte = 2 nibble pixels;
 --     draw_width = w/2 columns; values 0-15.
@@ -14,14 +19,14 @@
 --     w/2 bytes per row; each byte = 2 nibble pixels; values 0-15.
 --
 -- Palette (vgaFile1):
---   Offset 6 from start: 32 colors x 3 bytes (R,G,B), 6-bit VGA -> 8-bit via *4.
+--   Offset 6: Simon 1 = 32 colors, Simon 2 = 256 colors. 6-bit VGA -> 8-bit *4.
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Simon the Sorcerer"
 engine.id          = "agos"
-engine.description = "Simon the Sorcerer 1 (1993, Adventure Soft)"
-engine.version     = "3.0"
+engine.description = "Simon the Sorcerer 1 & 2 (AGOS, Adventure Soft)"
+engine.version     = "4.0"
 
 -- ============================================================================
 -- Binary helpers
@@ -109,6 +114,7 @@ local function parse_image_table(data)
             local compressed    = (flags % 256 >= 128)
             local is_background = (width == 320
                 and (height == 134 or height == 135 or height == 200))
+                                or (width == 640)
 
             images[#images + 1] = {
                 index         = i,
@@ -164,6 +170,68 @@ local function decode_background(data, offset, width, height)
                 n = n + 1; pixels[n] = bits2 % 32                         -- bits 4-0
             end
             pos = pos + 5
+        end
+    end
+
+    return pixels
+end
+
+-- ============================================================================
+-- Background decoder: 640-wide scrolling (Simon 2 only)
+--
+-- Format: table of (w/8) big-endian 4-byte offsets (relative to each entry).
+-- Each entry's column data: decodeColumn-style RLE for an 8-pixel-wide group.
+--   reps >= 0: run of (reps+1) copies of the next color byte (full 8-bit index).
+--   reps <  0: abs(reps) literal bytes.
+-- Pixels advance down the column first, then right across 8 sub-columns.
+-- ============================================================================
+
+local function decode_background_wide(data, offset, w, h)
+    local pixels = {}
+    for i = 1, w * h do pixels[i] = 0 end
+
+    local total_groups = math.floor(w / 8)
+
+    for g = 0, total_groups - 1 do
+        local entry_pos = offset + g * 4  -- 0-based byte offset into data
+        if entry_pos + 4 > #data then break end
+
+        local be_off   = u32be(data, entry_pos + 1)  -- 1-based Lua read
+        local col_pos  = entry_pos + be_off + 1       -- Lua 1-based position
+
+        local row = 0
+        local sub = 0  -- sub-column within this 8-wide group (0..7)
+
+        while sub < 8 do
+            if col_pos > #data then break end
+            local reps = data:byte(col_pos); col_pos = col_pos + 1
+            if reps >= 128 then reps = reps - 256 end  -- signed
+
+            if reps >= 0 then
+                if col_pos > #data then break end
+                local color = data:byte(col_pos); col_pos = col_pos + 1
+                for _ = 1, reps + 1 do
+                    local px = row * w + g * 8 + sub + 1
+                    if px >= 1 and px <= w * h then pixels[px] = color end
+                    row = row + 1
+                    if row >= h then
+                        row = 0; sub = sub + 1
+                        if sub >= 8 then break end
+                    end
+                end
+            else
+                for _ = 1, -reps do
+                    if col_pos > #data then break end
+                    local color = data:byte(col_pos); col_pos = col_pos + 1
+                    local px = row * w + g * 8 + sub + 1
+                    if px >= 1 and px <= w * h then pixels[px] = color end
+                    row = row + 1
+                    if row >= h then
+                        row = 0; sub = sub + 1
+                        if sub >= 8 then break end
+                    end
+                end
+            end
         end
     end
 
@@ -351,8 +419,13 @@ local function is_simon1(game_path)
         or file_exists(game_path .. "/GAMEPC")
 end
 
+local function is_simon2(game_path)
+    return file_exists(game_path .. "/GSPTR30")
+        or file_exists(game_path .. "/gsptr30")
+end
+
 function engine.detect(game_path)
-    return is_simon1(game_path)
+    return is_simon1(game_path) or is_simon2(game_path)
 end
 
 -- ============================================================================
@@ -362,7 +435,7 @@ end
 -- ============================================================================
 
 local function get_zone_data(game_path, zone, file_type)
-    local gme_names = { "simon.gme", "SIMON.GME" }
+    local gme_names = { "simon.gme", "SIMON.GME", "simon2.gme", "SIMON2.GME" }
     local gme_f = nil
     for _, gme_name in ipairs(gme_names) do
         local path = game_path .. "/" .. gme_name
@@ -410,7 +483,7 @@ end
 
 function engine.get_resources(game_path)
     local max_zone = 0
-    local gme_names = { "simon.gme", "SIMON.GME" }
+    local gme_names = { "simon.gme", "SIMON.GME", "simon2.gme", "SIMON2.GME" }
     local gme_f = nil
     for _, gme_name in ipairs(gme_names) do
         local path = game_path .. "/" .. gme_name
@@ -431,8 +504,9 @@ function engine.get_resources(game_path)
     end
 
     local resources = {}
+    local game_label = is_simon2(game_path) and "Simon 2" or "Simon 1"
     local zones_cat = {
-        id = "zones", name = "Simon 1 Zones",
+        id = "zones", name = game_label .. " Zones",
         type = "category", children = {}
     }
 
@@ -492,7 +566,7 @@ function engine.get_resources(game_path)
     end
 
     zones_cat.name = string.format(
-        "Simon 1 Zones (%d backgrounds, %d sprites)", total_bg, total_sp)
+        "%s Zones (%d backgrounds, %d sprites)", game_label, total_bg, total_sp)
 
     if #zones_cat.children > 0 then
         resources[#resources + 1] = zones_cat
@@ -525,9 +599,10 @@ function engine.load_resource(game_path, resource_id)
 
     local w = target.width
     local h = target.height
+    local s2 = is_simon2(game_path)
 
     local file1   = get_zone_data(game_path, zone, 1)
-    local palette = file1 and read_palette(file1, 0, 32) or nil
+    local palette = file1 and read_palette(file1, 0, s2 and 256 or 32) or nil
 
     if not palette then
         palette = {}
@@ -548,9 +623,15 @@ function engine.load_resource(game_path, resource_id)
     local desc
 
     if target.is_background then
-        pixels = decode_background(file2, target.offset + 1, w, h)
-        desc = string.format("Zone %d background %d - %dx%d (5-bit packed)",
-                             zone, img_idx, w, h)
+        if w == 640 then
+            pixels = decode_background_wide(file2, target.offset, w, h)
+            desc = string.format("Zone %d wide background %d - %dx%d (decodeColumn RLE)",
+                                 zone, img_idx, w, h)
+        else
+            pixels = decode_background(file2, target.offset + 1, w, h)
+            desc = string.format("Zone %d background %d - %dx%d (5-bit packed)",
+                                 zone, img_idx, w, h)
+        end
 
     elseif target.compressed then
         pixels = decode_sprite_compressed(file2, target.offset + 1, w, h)
