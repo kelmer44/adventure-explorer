@@ -31,7 +31,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
-| Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Speech | ✅ Working |
+| Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations, Music | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |

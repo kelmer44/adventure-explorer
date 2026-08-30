@@ -1,11 +1,20 @@
 -- ============================================================================
 -- Adventure Explorer - Engine Script: Hollywood Monsters (Pendulo Studios, 1997)
 -- ============================================================================
--- Resource file format:
---   RESOURCE.000  : Main game data (globals, screen pages, verb icons)
---   RESOURCE.003  : Walk data & actor overlays (scene-indexed, XOR-encrypted)
---   RESOURCE.004  : Additional data
+-- Resource file format (cross-checked against ScummVM's in-progress
+-- "hollywood" engine, PR scummvm/scummvm#7868):
+--   RESOURCE.000     : Shared UI data (options/menu framebuffer, inventory
+--                       pages, object palette) + 16 resident sound effects.
+--                       1-byte header, then a 100-entry offset/size table.
+--   RESOURCE.003     : Walk data & actor overlays (scene-indexed, XOR-encrypted)
+--   RESOURCE.004     : Monolithic voice-speech archive shared by all chapters
+--                       (4000-entry sequential cue table; PCM encoding is
+--                       language-dependent - see SPEECH_ES/IT constants).
 --   RESOURCE.A00–I18 : Chapter scene files (A=Ch1..I=Ch9)
+--   RESOURCE.S01–S09 : Per-chapter ambient/SFX "sound bank" (not speech;
+--                       1000-entry sequential cue table, 8-bit unsigned PCM).
+--   RESOURCE.M01–M09 : Per-chapter music cue archive (100-entry sequential
+--                       cue table, 16-bit signed LE PCM).
 --
 -- Scene resource file layout (RESOURCE.Xxx):
 --   Bytes 0–159  : Offset table (40 × uint32le, byte offsets within file)
@@ -13,10 +22,21 @@
 --   Then sequential data blocks:
 --     Block 0: Background image (raw 8bpp, 1024-byte stride × 480 lines)
 --     Block 1: Palette (768 bytes = 256 × 3, VGA 6-bit RGB 0–63)
---     Block 2: Extra screen data (RLE z-masks, overlays, etc.)
---     Block 3: Z-order / transparency mask
---     Block 4: Combined resource buffer (sprites, hotspots, etc.)
+--     Block 2: Extra screen data (overlay layer: raw framebuffer, or a
+--              self-describing sprite/icon block list, see below)
+--     Block 3: Z-order / transparency mask (RLE)
+--     Block 4: Combined resource buffer - a fixed-layout metadata region
+--              (pathfinding, palette and verb/relation tables, ending at
+--              SCENE_METADATA_END = 0x610a) followed by per-scene sprite/
+--              icon pixel data in the same block-list format.
 --     Blocks 5+: Additional overlay layers
+--
+-- Sprite/icon block-list format (used for block 2 overlays, the block 4
+-- sprite region, and some RESOURCE.000 UI resources):
+--   u16 block_count; per block: u32 packed (x = low16, y = high16), u16
+--   size, then `size` raw indexed pixel bytes (one horizontal scanline run
+--   at column x, row y). Self-terminating and bounds-checked, so it is only
+--   accepted when it fully validates against the source buffer.
 --
 -- Offset table groups: 6 entries per scene variant (bg, pal, extra, z, res, layers)
 -- Multiple variants per file support different room states
@@ -57,9 +77,50 @@ local TABLE_SIZE   = 160    -- 40 × uint32le = offset/size table
 local TABLE_ENTRIES = 40
 local PALETTE_SIZE = 768    -- 256 × 3 bytes
 local ENTRIES_PER_VARIANT = 6  -- bg, pal, extra, z, res, layers
-local SPEECH_INDEX_ENTRIES = 1000
-local SPEECH_INDEX_SIZE    = SPEECH_INDEX_ENTRIES * 4  -- 4000 bytes
-local SPEECH_SAMPLE_RATE   = 11025
+
+-- RESOURCE.Sxx "sound bank 0" (per-chapter ambient/SFX archive, not voice
+-- speech - see ScummVM's SoundBank0Player). Sequential [off[i], off[i+1])
+-- cue pairs, 8-bit unsigned PCM @ 11025 Hz.
+local SOUNDBANK_CUE_ENTRIES = 1000
+local SOUNDBANK_CUE_TABLE_SIZE = SOUNDBANK_CUE_ENTRIES * 4  -- 4000 bytes
+local SOUNDBANK_SAMPLE_RATE = 11025
+
+-- RESOURCE.004: monolithic voice-speech archive shared by all chapters, one
+-- cue table for the whole game (see ScummVM's SpeechPlayer). PCM encoding
+-- differs by localized release; both interpretations are exposed since the
+-- game files alone don't unambiguously identify the language.
+local SPEECH004_CUE_ENTRIES = 4000
+local SPEECH004_CUE_TABLE_SIZE = SPEECH004_CUE_ENTRIES * 4  -- 16000 bytes
+local SPEECH004_ENTRIES_PER_GROUP = 200
+local SPEECH_ES_SAMPLE_RATE = 22050  -- Spanish: 8-bit unsigned
+local SPEECH_IT_SAMPLE_RATE = 11025  -- Italian: 16-bit signed LE
+
+-- RESOURCE.M0x: per-chapter music cue archive (see ScummVM's MusicPlayer).
+-- Sequential [off[i], off[i+1]) cue pairs, 16-bit signed LE PCM @ 11025 Hz.
+local MUSIC_CUE_ENTRIES = 100
+local MUSIC_CUE_TABLE_SIZE = MUSIC_CUE_ENTRIES * 4  -- 400 bytes
+local MUSIC_SAMPLE_RATE = 11025
+
+-- RESOURCE.000 has its own 1-byte header before its offset/size table (100
+-- entries instead of 40), holding shared UI resources and 16 resident sound
+-- effects (see ScummVM's Resource000FallbackEntry / kResidentSoundResourceEntries).
+local R000_HEADER_SIZE     = 1
+local R000_TABLE_ENTRIES   = 100
+local R000_TABLE_SIZE      = R000_TABLE_ENTRIES * 4  -- 400 bytes
+local R000_ENTRY_OPTIONS_FB      = 0x2a  -- main menu / options framebuffer
+local R000_ENTRY_INVENTORY_PAGES = 0x2b  -- inventory page framebuffer(s)
+local R000_ENTRY_OBJECT_PALETTE  = 0x31  -- 32-color inventory item palette
+local R000_OBJECT_PALETTE_COLORS = 32
+local RESIDENT_SOUND_ENTRIES = {
+    0x55, 0x56, 0x57, 0x58, 0x55, 0x59, 0x55, 0x5a,
+    0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62
+}
+local RESIDENT_SOUND_RATE = 11025  -- 16-bit signed LE
+
+-- Known end of the fixed per-scene metadata region within block 4 (the
+-- "combined resource buffer") - pathfinding/palette/verb/relation tables.
+-- Any bytes after this point are candidate sprite/overlay pixel data.
+local SCENE_METADATA_END = 0x610a
 
 -- ── Chapter definitions ──────────────────────────────────────────
 -- Each chapter maps a letter to a range of scene numbers (e.g. A00–A09)
@@ -105,6 +166,23 @@ local function read_scene_tables(f)
     for i = 0, TABLE_ENTRIES - 1 do
         offsets[i] = u32le(raw, i * 4 + 1)
         sizes[i]   = u32le(raw, TABLE_SIZE + i * 4 + 1)
+    end
+    return offsets, sizes
+end
+
+-- ── Read RESOURCE.000's offset/size table ─────────────────────────
+-- Same layout as read_scene_tables, but with a 1-byte header and 100
+-- entries (400-byte tables) instead of 40.
+
+local function read_r000_tables(f)
+    local raw = file_read(f, R000_HEADER_SIZE, R000_TABLE_SIZE * 2)
+    if not raw or #raw < R000_TABLE_SIZE * 2 then return nil, nil end
+
+    local offsets = {}
+    local sizes   = {}
+    for i = 0, R000_TABLE_ENTRIES - 1 do
+        offsets[i] = u32le(raw, i * 4 + 1)
+        sizes[i]   = u32le(raw, R000_TABLE_SIZE + i * 4 + 1)
     end
     return offsets, sizes
 end
@@ -179,15 +257,13 @@ end
 -- Scrolling scenes use more than 640 columns of the 1024-byte stride.
 -- We extract the full stride and return actual dimensions.
 
-local function load_bg_pixels(f, offsets, sizes)
-    local bg_offset = offsets[0]
-    local bg_size   = sizes[0]
-    if bg_size == 0 or bg_size < STRIDE then return nil, 0, 0 end
-
-    local raw = file_read(f, bg_offset, bg_size)
+-- Decodes any raw 8bpp/1024-stride framebuffer blob (autocrops horizontal
+-- padding). Reused for scene backgrounds, scene overlay layers, and the
+-- shared RESOURCE.000 UI framebuffers (options menu, inventory pages).
+local function decode_framebuffer_blob(raw)
     if not raw or #raw < STRIDE then return nil, 0, 0 end
 
-    local actual_h = math.floor(bg_size / STRIDE)
+    local actual_h = math.floor(#raw / STRIDE)
     if actual_h == 0 then return nil, 0, 0 end
 
     -- Scan all rows to find the used column range (auto-crop horizontal padding)
@@ -227,6 +303,101 @@ local function load_bg_pixels(f, offsets, sizes)
     end
 
     return pixels, actual_h, img_w
+end
+
+local function load_bg_pixels(f, offsets, sizes)
+    local bg_offset = offsets[0]
+    local bg_size   = sizes[0]
+    if bg_size == 0 or bg_size < STRIDE then return nil, 0, 0 end
+
+    local raw = file_read(f, bg_offset, bg_size)
+    return decode_framebuffer_blob(raw)
+end
+
+-- ── Sequential cue-table helpers ──────────────────────────────────
+-- Music (RESOURCE.M0x), speech (RESOURCE.004) and the sound bank
+-- (RESOURCE.Sxx) all share the same simple layout: entry_count × u32le
+-- offsets, where cue N spans [offsets[N], offsets[N+1]). This matches
+-- ScummVM's MusicPlayer/SpeechPlayer/SoundBank0Player::read*Span().
+
+local function read_cue_offsets(f, entry_count, byte_offset)
+    byte_offset = byte_offset or 0
+    local raw = file_read(f, byte_offset, entry_count * 4)
+    if not raw or #raw < entry_count * 4 then return nil end
+    local offs = {}
+    for i = 0, entry_count - 1 do
+        offs[i] = u32le(raw, i * 4 + 1)
+    end
+    return offs
+end
+
+local function cue_span(offsets, cue_idx, file_size_bytes)
+    local start_off = offsets[cue_idx]
+    local end_off   = offsets[cue_idx + 1]
+    if not start_off or not end_off then return nil, nil end
+    if start_off >= end_off or end_off > file_size_bytes then return nil, nil end
+    return start_off, end_off - start_off
+end
+
+-- ── Resource block-list decoder ───────────────────────────────────
+-- Self-describing sprite/UI block format (see ScummVM's drawResourceBlockList):
+--   u16 block_count
+--   per block: u32 packed_xy (x = low16, y = high16), u16 size, then `size`
+--              raw indexed pixel bytes (one scanline run at column x, row y)
+-- Strictly validated: only accepted when every block's bounds are sane and
+-- fit within the source buffer, so a wrong offset simply fails to parse.
+
+local function try_decode_block_list(raw, base_offset)
+    base_offset = base_offset or 0
+    if not raw or base_offset < 0 or base_offset + 2 > #raw then return nil end
+
+    local block_count = u16le(raw, base_offset + 1)
+    if block_count == 0 or block_count > 8192 then return nil end
+
+    local cursor = base_offset + 2
+    local entries = {}
+    for _ = 1, block_count do
+        if cursor + 6 > #raw then return nil end
+        local packed = u32le(raw, cursor + 1)
+        local size   = u16le(raw, cursor + 5)
+        cursor = cursor + 6
+        if size == 0 or cursor + size - 1 > #raw then return nil end
+
+        local x = packed % 65536
+        local y = math.floor(packed / 65536)
+        if x < 0 or x > 4096 or y < 0 or y > 4096 then return nil end
+
+        entries[#entries + 1] = { x = x, y = y, size = size, data_offset = cursor }
+        cursor = cursor + size
+    end
+
+    if #entries == 0 then return nil end
+    return entries
+end
+
+-- Composites decoded block-list entries onto a single indexed canvas sized
+-- to their bounding box (each block is one horizontal pixel run).
+local function render_block_list_image(raw, entries, palette)
+    local max_x, max_y = 0, 0
+    for _, e in ipairs(entries) do
+        if e.x + e.size > max_x then max_x = e.x + e.size end
+        if e.y + 1 > max_y then max_y = e.y + 1 end
+    end
+    if max_x == 0 or max_y == 0 or max_x * max_y > 4000000 then return nil end
+
+    local pixels = {}
+    for i = 1, max_x * max_y do pixels[i] = 0 end
+    for _, e in ipairs(entries) do
+        local row_base = e.y * max_x
+        for col = 0, e.size - 1 do
+            local src_pos = e.data_offset + col
+            if src_pos <= #raw then
+                pixels[row_base + e.x + col + 1] = raw:byte(src_pos)
+            end
+        end
+    end
+
+    return image_create_indexed(max_x, max_y, pixels, palette), max_x, max_y
 end
 
 -- ── Z-buffer RLE decompressor ────────────────────────────────────
@@ -299,7 +470,7 @@ function engine.get_resources(game_path)
                     { id = "zbuf_" .. scene_id, name = "Z-Buffer",   type = "image"   },
                 }
 
-                -- Check for variant backgrounds
+                -- Check for variant backgrounds, overlay data, and sprite data
                 local vf = file_open(fpath)
                 if vf then
                     local vo, vs = read_scene_tables(vf)
@@ -315,6 +486,25 @@ function engine.get_resources(game_path)
                                     type = "image"
                                 }
                             end
+                        end
+
+                        -- Block 2: extra screen data (overlay layer / RLE masks)
+                        if vo[2] and vo[2] > 0 and vs[2] and vs[2] > 0 then
+                            scene_children[#scene_children + 1] = {
+                                id   = "overlay_" .. scene_id,
+                                name = "Overlay",
+                                type = "image"
+                            }
+                        end
+
+                        -- Block 4: combined resource buffer - anything past the
+                        -- fixed per-scene metadata region is candidate sprite data
+                        if vo[4] and vo[4] > 0 and vs[4] and vs[4] > SCENE_METADATA_END then
+                            scene_children[#scene_children + 1] = {
+                                id   = "sprites_" .. scene_id,
+                                name = "Sprites",
+                                type = "image"
+                            }
                         end
                     end
                 end
@@ -333,45 +523,194 @@ function engine.get_resources(game_path)
         end
     end
 
-    -- Add speech categories
+    -- Add sound bank categories (RESOURCE.Sxx - ambient/SFX, not speech)
     for ch_idx, chapter in ipairs(CHAPTERS) do
-        local speech_fname = string.format("RESOURCE.S%02d", ch_idx)
-        local speech_path = find_file(game_path, speech_fname)
-        if speech_path then
-            local sf = file_open(speech_path)
+        local sb_fname = string.format("RESOURCE.S%02d", ch_idx)
+        local sb_path = find_file(game_path, sb_fname)
+        if sb_path then
+            local sf = file_open(sb_path)
             if sf then
                 local sf_size = file_size(sf)
-                local idx_raw = file_read(sf, 0, SPEECH_INDEX_SIZE)
+                local offs = read_cue_offsets(sf, SOUNDBANK_CUE_ENTRIES)
                 file_close(sf)
 
-                if idx_raw and #idx_raw >= SPEECH_INDEX_SIZE then
-                    local speech_children = {}
-                    for i = 0, SPEECH_INDEX_ENTRIES - 1 do
-                        local off = u32le(idx_raw, i * 4 + 1)
-                        if off > 0 and off < sf_size then
-                            -- Find next valid offset
-                            local next_off = sf_size
-                            for j = i + 1, SPEECH_INDEX_ENTRIES - 1 do
-                                local no = u32le(idx_raw, j * 4 + 1)
-                                if no > off then next_off = no; break end
-                            end
-                            if next_off - off > 1 then
-                                speech_children[#speech_children + 1] = {
-                                    id   = string.format("speech_%d_%d", ch_idx, i),
-                                    name = string.format("Clip %d", i),
+                if offs then
+                    local sb_children = {}
+                    for cue = 0, SOUNDBANK_CUE_ENTRIES - 2 do
+                        local _, size = cue_span(offs, cue, sf_size)
+                        if size and size > 1 then
+                            sb_children[#sb_children + 1] = {
+                                id   = string.format("soundbank_%d_%d", ch_idx, cue),
+                                name = string.format("Clip %d", cue),
+                                type = "sound"
+                            }
+                        end
+                    end
+                    if #sb_children > 0 then
+                        resources[#resources + 1] = {
+                            id   = "soundbank_ch_" .. chapter.letter,
+                            name = string.format("Sound Bank %s (%d clips)", chapter.name, #sb_children),
+                            type = "category",
+                            children = sb_children
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Add music categories (RESOURCE.M0x)
+    for ch_idx, chapter in ipairs(CHAPTERS) do
+        local mfname = string.format("RESOURCE.M%02d", ch_idx)
+        local mpath = find_file(game_path, mfname)
+        if mpath then
+            local mf = file_open(mpath)
+            if mf then
+                local mf_size = file_size(mf)
+                local offs = read_cue_offsets(mf, MUSIC_CUE_ENTRIES)
+                file_close(mf)
+
+                if offs then
+                    local music_children = {}
+                    for cue = 0, MUSIC_CUE_ENTRIES - 2 do
+                        local _, size = cue_span(offs, cue, mf_size)
+                        if size and size > 1 then
+                            music_children[#music_children + 1] = {
+                                id   = string.format("music_%d_%d", ch_idx, cue),
+                                name = string.format("Cue %d", cue),
+                                type = "sound"
+                            }
+                        end
+                    end
+                    if #music_children > 0 then
+                        resources[#resources + 1] = {
+                            id   = "music_ch_" .. chapter.letter,
+                            name = string.format("Music %s (%d cues)", chapter.name, #music_children),
+                            type = "category",
+                            children = music_children
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Add speech categories (RESOURCE.004 - monolithic voice archive).
+    -- The PCM encoding is language-dependent and can't be told apart from the
+    -- game files alone, so both known encodings are exposed side by side.
+    local speech004_path = find_file(game_path, "RESOURCE.004")
+    if speech004_path then
+        local sf = file_open(speech004_path)
+        if sf then
+            local sf_size = file_size(sf)
+            local offs = read_cue_offsets(sf, SPEECH004_CUE_ENTRIES)
+            file_close(sf)
+
+            if offs then
+                local valid_cues = {}
+                for cue = 0, SPEECH004_CUE_ENTRIES - 2 do
+                    local _, size = cue_span(offs, cue, sf_size)
+                    if size and size > 1 then
+                        valid_cues[#valid_cues + 1] = cue
+                    end
+                end
+
+                if #valid_cues > 0 then
+                    local variants = {
+                        { key = "es8",  label = "Spanish, 8-bit unsigned @ 22050 Hz" },
+                        { key = "it16", label = "Italian, 16-bit signed @ 11025 Hz" },
+                    }
+                    for _, variant in ipairs(variants) do
+                        local groups = {}
+                        for gstart = 1, #valid_cues, SPEECH004_ENTRIES_PER_GROUP do
+                            local gend = math.min(gstart + SPEECH004_ENTRIES_PER_GROUP - 1, #valid_cues)
+                            local group_children = {}
+                            for k = gstart, gend do
+                                local cue = valid_cues[k]
+                                group_children[#group_children + 1] = {
+                                    id   = string.format("speech004_%s_%d", variant.key, cue),
+                                    name = string.format("Clip %d", cue),
                                     type = "sound"
                                 }
                             end
+                            groups[#groups + 1] = {
+                                id       = string.format("speech004grp_%s_%d", variant.key, gstart),
+                                name     = string.format("Clips %d–%d", valid_cues[gstart], valid_cues[gend]),
+                                type     = "category",
+                                children = group_children
+                            }
                         end
-                    end
-                    if #speech_children > 0 then
                         resources[#resources + 1] = {
-                            id   = "speech_ch_" .. chapter.letter,
-                            name = string.format("Speech %s (%d clips)", chapter.name, #speech_children),
-                            type = "category",
-                            children = speech_children
+                            id       = "speech004_cat_" .. variant.key,
+                            name     = string.format("Speech (%s, %d clips)", variant.label, #valid_cues),
+                            type     = "category",
+                            children = groups
                         }
                     end
+                end
+            end
+        end
+    end
+
+    -- Add shared RESOURCE.000 UI resources and resident sound effects
+    local r000_path = find_file(game_path, "RESOURCE.000")
+    if r000_path then
+        local rf = file_open(r000_path)
+        if rf then
+            local ro, rs = read_r000_tables(rf)
+            file_close(rf)
+
+            if ro and rs then
+                local main_children = {}
+
+                if ro[R000_ENTRY_OPTIONS_FB] and ro[R000_ENTRY_OPTIONS_FB] > 0
+                   and rs[R000_ENTRY_OPTIONS_FB] and rs[R000_ENTRY_OPTIONS_FB] % STRIDE == 0
+                   and rs[R000_ENTRY_OPTIONS_FB] >= STRIDE then
+                    main_children[#main_children + 1] = {
+                        id = "r000_optionsfb", name = "Options Menu Background", type = "image"
+                    }
+                end
+
+                if ro[R000_ENTRY_INVENTORY_PAGES] and ro[R000_ENTRY_INVENTORY_PAGES] > 0
+                   and rs[R000_ENTRY_INVENTORY_PAGES] and rs[R000_ENTRY_INVENTORY_PAGES] % STRIDE == 0
+                   and rs[R000_ENTRY_INVENTORY_PAGES] >= STRIDE then
+                    main_children[#main_children + 1] = {
+                        id = "r000_invpages", name = "Inventory Pages", type = "image"
+                    }
+                end
+
+                if ro[R000_ENTRY_OBJECT_PALETTE] and ro[R000_ENTRY_OBJECT_PALETTE] > 0
+                   and rs[R000_ENTRY_OBJECT_PALETTE] and rs[R000_ENTRY_OBJECT_PALETTE] > 0 then
+                    main_children[#main_children + 1] = {
+                        id = "r000_objpal", name = "Object Palette", type = "palette"
+                    }
+                end
+
+                local sfx_children = {}
+                for effect_id = 1, #RESIDENT_SOUND_ENTRIES do
+                    local entry = RESIDENT_SOUND_ENTRIES[effect_id]
+                    if ro[entry] and ro[entry] > 0 and rs[entry] and rs[entry] > 1 then
+                        sfx_children[#sfx_children + 1] = {
+                            id = "r000_sfx_" .. effect_id,
+                            name = string.format("Effect %d", effect_id),
+                            type = "sound"
+                        }
+                    end
+                end
+                if #sfx_children > 0 then
+                    main_children[#main_children + 1] = {
+                        id = "r000_sfx_cat",
+                        name = string.format("Resident Sound Effects (%d)", #sfx_children),
+                        type = "category",
+                        children = sfx_children
+                    }
+                end
+
+                if #main_children > 0 then
+                    resources[#resources + 1] = {
+                        id = "r000_cat", name = "Main Data (RESOURCE.000)",
+                        type = "category", children = main_children
+                    }
                 end
             end
         end
@@ -404,15 +743,54 @@ function engine.load_resource(game_path, resource_id, palette_id)
         return load_variant_background(game_path, var_scene, tonumber(var_idx))
     end
 
-    -- Speech clip: speech_1_42
+    -- Overlay layer (block 2): overlay_A01
+    if resource_id:match("^overlay_%u%d%d$") then
+        return load_scene_overlay(game_path, resource_id:sub(9))
+    end
 
-    local sp_ch, sp_clip = resource_id:match("^speech_(%d+)_(%d+)$")
-    if sp_ch and sp_clip then
-        return load_speech_clip(game_path, tonumber(sp_ch), tonumber(sp_clip))
+    -- Sprite/icon block list (block 4 trailing data): sprites_A01
+    if resource_id:match("^sprites_%u%d%d$") then
+        return load_scene_sprites(game_path, resource_id:sub(9))
+    end
+
+    -- Sound bank clip: soundbank_1_42
+    local sb_ch, sb_clip = resource_id:match("^soundbank_(%d+)_(%d+)$")
+    if sb_ch and sb_clip then
+        return load_soundbank_clip(game_path, tonumber(sb_ch), tonumber(sb_clip))
+    end
+
+    -- Music cue: music_1_13
+    local mus_ch, mus_cue = resource_id:match("^music_(%d+)_(%d+)$")
+    if mus_ch and mus_cue then
+        return load_music_cue(game_path, tonumber(mus_ch), tonumber(mus_cue))
+    end
+
+    -- Speech clip (RESOURCE.004): speech004_es8_123, speech004_it16_123
+    local sp_variant, sp_cue = resource_id:match("^speech004_(%a+%d*)_(%d+)$")
+    if sp_variant and sp_cue then
+        return load_speech004_clip(game_path, sp_variant, tonumber(sp_cue))
+    end
+
+    -- RESOURCE.000 shared UI resources
+    if resource_id == "r000_optionsfb" then
+        return load_r000_framebuffer(game_path, R000_ENTRY_OPTIONS_FB, "Options Menu Background")
+    end
+    if resource_id == "r000_invpages" then
+        return load_r000_framebuffer(game_path, R000_ENTRY_INVENTORY_PAGES, "Inventory Pages")
+    end
+    if resource_id == "r000_objpal" then
+        return load_r000_object_palette(game_path)
+    end
+
+    -- Resident sound effect: r000_sfx_3
+    local sfx_id = resource_id:match("^r000_sfx_(%d+)$")
+    if sfx_id then
+        return load_r000_resident_sfx(game_path, tonumber(sfx_id))
     end
 
     return nil
 end
+
 
 -- ── Background loader ─────────────────────────────────────────────
 
@@ -698,12 +1076,11 @@ function load_zbuffer(game_path, scene_id)
     }
 end
 
--- ── Speech support ────────────────────────────────────────────────
--- Speech files: RESOURCE.S01–S09 (one per chapter A–I)
--- Format: 1000 × u32le offset index, then raw unsigned 8-bit PCM data
--- Entries with zero or diff-of-1 consecutive offsets are empty
+-- ── Sound bank support (RESOURCE.Sxx) ──────────────────────────────
+-- Per-chapter ambient/SFX archive (ScummVM's SoundBank0Player), not voice
+-- speech. 1000-entry sequential cue table, 8-bit unsigned PCM @ 11025 Hz.
 
-local function load_speech_clip(game_path, chapter_idx, clip_idx)
+function load_soundbank_clip(game_path, chapter_idx, clip_idx)
     local fname = string.format("RESOURCE.S%02d", chapter_idx)
     local fpath = find_file(game_path, fname)
     if not fpath then return nil end
@@ -712,57 +1089,365 @@ local function load_speech_clip(game_path, chapter_idx, clip_idx)
     if not f then return nil end
 
     local fsize = file_size(f)
+    local offs = read_cue_offsets(f, SOUNDBANK_CUE_ENTRIES)
+    if not offs then file_close(f); return nil end
 
-    -- Read the offset index
-    local idx_raw = file_read(f, 0, SPEECH_INDEX_SIZE)
-    if not idx_raw or #idx_raw < SPEECH_INDEX_SIZE then
+    local clip_off, clip_size = cue_span(offs, clip_idx, fsize)
+    if not clip_off or clip_size <= 1 then
         file_close(f)
-        return nil
-    end
-
-    -- Parse offsets
-    local clip_offsets = {}
-    for i = 0, SPEECH_INDEX_ENTRIES - 1 do
-        clip_offsets[i] = u32le(idx_raw, i * 4 + 1)
-    end
-
-    local clip_off = clip_offsets[clip_idx]
-    if clip_off == 0 or clip_off >= fsize then
-        file_close(f)
-        return { type = "text", text = string.format("Empty speech clip %d", clip_idx) }
-    end
-
-    -- Find the end of this clip (next valid offset or end of file)
-    local clip_end = fsize
-    for i = clip_idx + 1, SPEECH_INDEX_ENTRIES - 1 do
-        if clip_offsets[i] > clip_off then
-            clip_end = clip_offsets[i]
-            break
-        end
-    end
-
-    local clip_size = clip_end - clip_off
-    if clip_size <= 1 then
-        file_close(f)
-        return { type = "text", text = string.format("Empty speech clip %d", clip_idx) }
+        return { type = "text", text = string.format("Empty sound bank clip %d", clip_idx) }
     end
 
     local pcm_data = file_read(f, clip_off, clip_size)
     file_close(f)
-
     if not pcm_data or #pcm_data < 2 then return nil end
 
-    -- PCM data is unsigned 8-bit; pass binary string directly
-    local snd = sound_create_pcm(SPEECH_SAMPLE_RATE, 8, 1, false, pcm_data)
-    local duration_ms = math.floor(clip_size * 1000 / SPEECH_SAMPLE_RATE)
+    local snd = sound_create_pcm(SOUNDBANK_SAMPLE_RATE, 8, 1, false, pcm_data)
+    local duration_ms = math.floor(clip_size * 1000 / SOUNDBANK_SAMPLE_RATE)
     return {
         type = "sound",
         sound = snd,
         description = string.format(
-            "Speech clip %d - %d bytes, %d ms @ %d Hz, 8-bit unsigned PCM",
-            clip_idx, clip_size, duration_ms, SPEECH_SAMPLE_RATE
+            "Sound bank clip %d (chapter %d) - %d bytes, %d ms @ %d Hz, 8-bit unsigned PCM",
+            clip_idx, chapter_idx, clip_size, duration_ms, SOUNDBANK_SAMPLE_RATE
+        )
+    }
+end
+
+-- ── Music support (RESOURCE.M0x) ───────────────────────────────────
+-- Per-chapter music cue archive (ScummVM's MusicPlayer). 100-entry
+-- sequential cue table, 16-bit signed little-endian PCM @ 11025 Hz.
+
+function load_music_cue(game_path, chapter_idx, cue_idx)
+    local fname = string.format("RESOURCE.M%02d", chapter_idx)
+    local fpath = find_file(game_path, fname)
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local fsize = file_size(f)
+    local offs = read_cue_offsets(f, MUSIC_CUE_ENTRIES)
+    if not offs then file_close(f); return nil end
+
+    local cue_off, cue_size = cue_span(offs, cue_idx, fsize)
+    if not cue_off or cue_size <= 1 then
+        file_close(f)
+        return { type = "text", text = string.format("Empty music cue %d", cue_idx) }
+    end
+
+    local pcm_data = file_read(f, cue_off, cue_size)
+    file_close(f)
+    if not pcm_data or #pcm_data < 2 then return nil end
+    if #pcm_data % 2 == 1 then pcm_data = pcm_data:sub(1, #pcm_data - 1) end
+
+    local snd = sound_create_pcm(MUSIC_SAMPLE_RATE, 16, 1, true, pcm_data)
+    local duration_ms = math.floor(#pcm_data * 1000 / (MUSIC_SAMPLE_RATE * 2))
+    return {
+        type = "sound",
+        sound = snd,
+        description = string.format(
+            "Music cue %d (chapter %d) - %d bytes, %d ms @ %d Hz, 16-bit signed PCM",
+            cue_idx, chapter_idx, #pcm_data, duration_ms, MUSIC_SAMPLE_RATE
+        )
+    }
+end
+
+-- ── Speech support (RESOURCE.004) ───────────────────────────────────
+-- Monolithic voice-speech archive shared across all chapters (ScummVM's
+-- SpeechPlayer). 4000-entry sequential cue table; PCM encoding depends on
+-- the localized release, so both known encodings are offered:
+--   es8  = Spanish, 8-bit unsigned PCM  @ 22050 Hz
+--   it16 = Italian, 16-bit signed LE PCM @ 11025 Hz
+
+function load_speech004_clip(game_path, variant, cue_idx)
+    local fpath = find_file(game_path, "RESOURCE.004")
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local fsize = file_size(f)
+    local offs = read_cue_offsets(f, SPEECH004_CUE_ENTRIES)
+    if not offs then file_close(f); return nil end
+
+    local cue_off, cue_size = cue_span(offs, cue_idx, fsize)
+    if not cue_off or cue_size <= 1 then
+        file_close(f)
+        return { type = "text", text = string.format("Empty speech clip %d", cue_idx) }
+    end
+
+    local pcm_data = file_read(f, cue_off, cue_size)
+    file_close(f)
+    if not pcm_data or #pcm_data < 1 then return nil end
+
+    if variant == "it16" then
+        if #pcm_data % 2 == 1 then pcm_data = pcm_data:sub(1, #pcm_data - 1) end
+        if #pcm_data < 2 then return nil end
+        local snd = sound_create_pcm(SPEECH_IT_SAMPLE_RATE, 16, 1, true, pcm_data)
+        local duration_ms = math.floor(#pcm_data * 1000 / (SPEECH_IT_SAMPLE_RATE * 2))
+        return {
+            type = "sound",
+            sound = snd,
+            description = string.format(
+                "Speech clip %d (Italian) - %d bytes, %d ms @ %d Hz, 16-bit signed PCM",
+                cue_idx, #pcm_data, duration_ms, SPEECH_IT_SAMPLE_RATE
+            )
+        }
+    end
+
+    local snd = sound_create_pcm(SPEECH_ES_SAMPLE_RATE, 8, 1, false, pcm_data)
+    local duration_ms = math.floor(#pcm_data * 1000 / SPEECH_ES_SAMPLE_RATE)
+    return {
+        type = "sound",
+        sound = snd,
+        description = string.format(
+            "Speech clip %d (Spanish) - %d bytes, %d ms @ %d Hz, 8-bit unsigned PCM",
+            cue_idx, #pcm_data, duration_ms, SPEECH_ES_SAMPLE_RATE
+        )
+    }
+end
+
+-- ── Scene overlay loader (block 2) ─────────────────────────────────
+-- Extra screen data: either a raw framebuffer overlay layer, or a
+-- self-describing sprite/icon block list.
+
+function load_scene_overlay(game_path, scene_id)
+    local letter = scene_id:sub(1, 1)
+    local num    = tonumber(scene_id:sub(2))
+    local fname  = scene_filename(letter, num)
+    local fpath  = find_file(game_path, fname)
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local offsets, sizes = read_scene_tables(f)
+    if not offsets or not sizes or not offsets[2] or offsets[2] == 0 or not sizes[2] or sizes[2] == 0 then
+        file_close(f)
+        return nil
+    end
+
+    local raw = file_read(f, offsets[2], sizes[2])
+    local palette = read_palette_from_scene(f, offsets, sizes)
+    file_close(f)
+
+    if not raw or not palette then return nil end
+
+    if #raw % STRIDE == 0 and #raw >= STRIDE then
+        local pixels, h, w = decode_framebuffer_blob(raw)
+        if pixels then
+            local img = image_create_indexed(w, h, pixels, palette)
+            return {
+                type = "image",
+                image = img,
+                description = string.format(
+                    "Scene %s overlay - %dx%d raw framebuffer (%d bytes)",
+                    scene_id, w, h, #raw
+                )
+            }
+        end
+    end
+
+    local entries = try_decode_block_list(raw, 0)
+    if entries then
+        local img, w, h = render_block_list_image(raw, entries, palette)
+        if img then
+            return {
+                type = "image",
+                image = img,
+                description = string.format(
+                    "Scene %s overlay - %d blocks composited into %dx%d (%d bytes)",
+                    scene_id, #entries, w, h, #raw
+                )
+            }
+        end
+    end
+
+    return { type = "text", text = string.format(
+        "Scene %s overlay - unrecognized format (%d bytes)", scene_id, #raw) }
+end
+
+-- ── Scene sprite loader (block 4 trailing data) ────────────────────
+-- Block 4 starts with a fixed-layout metadata region (pathfinding, palette
+-- and verb/relation tables); anything after SCENE_METADATA_END is candidate
+-- sprite/icon pixel data in the same self-describing block-list format.
+
+function load_scene_sprites(game_path, scene_id)
+    local letter = scene_id:sub(1, 1)
+    local num    = tonumber(scene_id:sub(2))
+    local fname  = scene_filename(letter, num)
+    local fpath  = find_file(game_path, fname)
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local offsets, sizes = read_scene_tables(f)
+    if not offsets or not sizes or not offsets[4] or offsets[4] == 0
+       or not sizes[4] or sizes[4] <= SCENE_METADATA_END then
+        file_close(f)
+        return nil
+    end
+
+    local raw = file_read(f, offsets[4], sizes[4])
+    local palette = read_palette_from_scene(f, offsets, sizes)
+    file_close(f)
+
+    if not raw or not palette then return nil end
+
+    local entries = try_decode_block_list(raw, SCENE_METADATA_END)
+    if not entries then
+        return { type = "text", text = string.format(
+            "Scene %s sprites - unrecognized format past metadata (%d bytes total)",
+            scene_id, #raw) }
+    end
+
+    local img, w, h = render_block_list_image(raw, entries, palette)
+    if not img then return nil end
+
+    return {
+        type = "image",
+        image = img,
+        description = string.format(
+            "Scene %s sprites - %d blocks composited into %dx%d",
+            scene_id, #entries, w, h
+        )
+    }
+end
+
+-- ── RESOURCE.000 shared UI resources ───────────────────────────────
+
+function load_r000_framebuffer(game_path, entry_idx, label)
+    local fpath = find_file(game_path, "RESOURCE.000")
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local offsets, sizes = read_r000_tables(f)
+    if not offsets or not sizes or not offsets[entry_idx] or offsets[entry_idx] == 0
+       or not sizes[entry_idx] or sizes[entry_idx] == 0 then
+        file_close(f)
+        return nil
+    end
+
+    local raw = file_read(f, offsets[entry_idx], sizes[entry_idx])
+
+    -- Prefer a full 768-byte VGA palette entry anywhere in the table; fall
+    -- back to the small 32-color object palette, then plain grayscale.
+    local palette
+    for i = 0, R000_TABLE_ENTRIES - 1 do
+        if offsets[i] and offsets[i] > 0 and sizes[i] == PALETTE_SIZE then
+            palette = read_palette_from_entry(f, offsets, sizes, i)
+            break
+        end
+    end
+    if not palette and offsets[R000_ENTRY_OBJECT_PALETTE] and offsets[R000_ENTRY_OBJECT_PALETTE] > 0
+       and sizes[R000_ENTRY_OBJECT_PALETTE] and sizes[R000_ENTRY_OBJECT_PALETTE] > 0 then
+        palette = read_palette_from_entry(f, offsets, sizes, R000_ENTRY_OBJECT_PALETTE)
+    end
+    file_close(f)
+
+    if not raw then return nil end
+    if not palette then
+        palette = {}
+        for i = 0, 255 do
+            palette[i * 3 + 1] = i; palette[i * 3 + 2] = i; palette[i * 3 + 3] = i
+        end
+    end
+
+    local pixels, h, w = decode_framebuffer_blob(raw)
+    if not pixels then return nil end
+
+    local img = image_create_indexed(w, h, pixels, palette)
+    return {
+        type = "image",
+        image = img,
+        description = string.format("%s - %dx%d, 256 colors", label, w, h)
+    }
+end
+
+function load_r000_object_palette(game_path)
+    local fpath = find_file(game_path, "RESOURCE.000")
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local offsets, sizes = read_r000_tables(f)
+    if not offsets or not sizes or not offsets[R000_ENTRY_OBJECT_PALETTE]
+       or offsets[R000_ENTRY_OBJECT_PALETTE] == 0 then
+        file_close(f)
+        return nil
+    end
+
+    local pal_size = sizes[R000_ENTRY_OBJECT_PALETTE]
+    local pal_raw = file_read(f, offsets[R000_ENTRY_OBJECT_PALETTE], pal_size)
+    file_close(f)
+    if not pal_raw or #pal_raw < 3 then return nil end
+
+    local num_colors = math.min(math.floor(#pal_raw / 3), R000_OBJECT_PALETTE_COLORS)
+    local CELL, GRID = 32, 8
+    local W, H = CELL * GRID, CELL * math.ceil(num_colors / GRID)
+
+    local rgb = {}
+    local n = 0
+    for py = 0, H - 1 do
+        for px = 0, W - 1 do
+            local ci = math.floor(py / CELL) * GRID + math.floor(px / CELL)
+            local r, g, b = 0, 0, 0
+            if ci < num_colors then
+                r = math.min(pal_raw:byte(ci * 3 + 1) * 4, 255)
+                g = math.min(pal_raw:byte(ci * 3 + 2) * 4, 255)
+                b = math.min(pal_raw:byte(ci * 3 + 3) * 4, 255)
+            end
+            n = n + 1; rgb[n] = r
+            n = n + 1; rgb[n] = g
+            n = n + 1; rgb[n] = b
+        end
+    end
+
+    local img = image_create_rgb(W, H, rgb)
+    return {
+        type = "image",
+        image = img,
+        description = string.format("Object palette - %d colors (VGA 6-bit ×4)", num_colors)
+    }
+end
+
+function load_r000_resident_sfx(game_path, effect_id)
+    if effect_id < 1 or effect_id > #RESIDENT_SOUND_ENTRIES then return nil end
+    local fpath = find_file(game_path, "RESOURCE.000")
+    if not fpath then return nil end
+
+    local f = file_open(fpath)
+    if not f then return nil end
+
+    local offsets, sizes = read_r000_tables(f)
+    local entry = RESIDENT_SOUND_ENTRIES[effect_id]
+    if not offsets or not sizes or not offsets[entry] or offsets[entry] == 0
+       or not sizes[entry] or sizes[entry] < 2 then
+        file_close(f)
+        return nil
+    end
+
+    local pcm_data = file_read(f, offsets[entry], sizes[entry])
+    file_close(f)
+    if not pcm_data or #pcm_data < 2 then return nil end
+    if #pcm_data % 2 == 1 then pcm_data = pcm_data:sub(1, #pcm_data - 1) end
+
+    local snd = sound_create_pcm(RESIDENT_SOUND_RATE, 16, 1, true, pcm_data)
+    local duration_ms = math.floor(#pcm_data * 1000 / (RESIDENT_SOUND_RATE * 2))
+    return {
+        type = "sound",
+        sound = snd,
+        description = string.format(
+            "Resident sound effect %d - %d bytes, %d ms @ %d Hz, 16-bit signed PCM",
+            effect_id, #pcm_data, duration_ms, RESIDENT_SOUND_RATE
         )
     }
 end
 
 return engine
+
