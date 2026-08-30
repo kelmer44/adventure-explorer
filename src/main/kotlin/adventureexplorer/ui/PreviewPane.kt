@@ -562,7 +562,7 @@ private fun SoundPreview(
                         val sampleIdx = (x.toLong() * totalSamples / w.toInt()).toInt().coerceIn(0, totalSamples - 1)
                         val value = if (bytesPerSample == 1) {
                             val raw = samples[sampleIdx].toInt() and 0xFF
-                            if (soundData.signed) (raw - 128).toFloat() / 128f
+                            if (soundData.signed) samples[sampleIdx].toInt().toFloat() / 128f
                             else (raw - 128).toFloat() / 128f
                         } else {
                             val idx = sampleIdx * 2

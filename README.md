@@ -30,7 +30,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
-| Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds | ✅ Working |
+| Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Speech | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations | ✅ Working |
@@ -206,6 +206,13 @@ return engine
 - `image_handles`: Lua table of image handles (from `image_create_*` calls)
 - `delay_ms`: Frame delay in milliseconds (default: 100)
 
+#### Sound
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `sound_create_pcm(rate, bits, channels, signed, data)` | handle | Create playable raw PCM audio |
+| `sound_create_gob_adl(data)` | handle | Render Coktel Vision ADL/OPL music to PCM |
+
 #### Data Helpers
 
 | Function | Returns | Description |
@@ -289,7 +296,7 @@ adventure-explorer/
 ## Roadmap
 
 - [x] Animation playback (sprite frames) with frame navigation and export
-- [ ] Sound/music preview and export (OGG/WAV)
+- [x] Sound/music preview and WAV export
 - [x] Zoom for image and animation preview
 - [ ] Sprite sheet viewer
 - [x] More engine scripts (SCI, AITD, Harvester, Cobra Mission)

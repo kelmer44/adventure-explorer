@@ -1,6 +1,7 @@
 package adventureexplorer.scripting
 
 import adventureexplorer.model.SoundData
+import adventureexplorer.audio.GobAdlDecoder
 import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
@@ -25,6 +26,7 @@ import javax.imageio.ImageIO
  *   image_create_indexed(w, h, pixel_table, palette_table) -> image_handle
  *   image_create_rgb(w, h, rgb_table) -> image_handle
  *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
+ *   sound_create_gob_adl(data) -> sound_handle
  *   log_info(msg), log_warn(msg), log_error(msg)
  */
 class LuaEngine {
@@ -218,6 +220,23 @@ class LuaEngine {
                 if (samples.isEmpty()) return NIL
                 val handle = nextSoundHandle++
                 sounds[handle] = SoundData(samples, sampleRate, bitsPerSample, channels, signed)
+                return valueOf(handle)
+            }
+        }
+
+        // sound_create_gob_adl(data) -> sound_handle
+        // Renders Coktel Vision ADL/OPL event data to signed 16-bit PCM.
+        globals["sound_create_gob_adl"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = try {
+                    val luaStr = data.checkstring()
+                    ByteArray(luaStr.length()).also { luaStr.copyInto(0, it, 0, it.size) }
+                } catch (_: Exception) {
+                    return NIL
+                }
+                val sound = GobAdlDecoder.decode(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
                 return valueOf(handle)
             }
         }

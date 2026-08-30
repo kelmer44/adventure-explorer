@@ -8,7 +8,7 @@ data class SoundData(
     val sampleRate: Int,
     val bitsPerSample: Int,   // 8 or 16
     val channels: Int,        // 1 (mono) or 2 (stereo)
-    val signed: Boolean       // false for 8-bit unsigned, true for 16-bit signed
+    val signed: Boolean       // whether PCM samples use signed representation
 ) {
     val durationMs: Long
         get() {

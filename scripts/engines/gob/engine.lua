@@ -10,7 +10,7 @@ local engine = {}
 engine.name        = "Gobliiins Series"
 engine.id          = "gob"
 engine.description = "Gobliiins / Gobliins 2 / Goblins Quest 3 (Coktel Vision)"
-engine.version     = "3.0"
+engine.version     = "4.0"
 
 -- ============================================================================
 -- Binary helpers (all positions are 1-based string indices)
@@ -30,6 +30,7 @@ end
 local function u32le(d, p)
     return d:byte(p) + d:byte(p+1)*256 + d:byte(p+2)*65536 + d:byte(p+3)*16777216
 end
+local function u16be(d, p) return d:byte(p)*256 + d:byte(p+1) end
 local function i32le(d, p)
     local v = u32le(d, p)
     return v < 2147483648 and v or v - 4294967296
@@ -70,6 +71,8 @@ local function parse_stk(raw)
         end
         if #name > 0 then
             entries[name:upper()] = {
+                name        = name:upper(),
+                index       = i,
                 size        = u32le(raw, base + 13),
                 offset      = u32le(raw, base + 17),
                 compression = u8(raw, base + 21)
@@ -77,15 +80,6 @@ local function parse_stk(raw)
         end
     end
     return entries
-end
-
--- Extract a named file from pre-loaded STK bytes
-local function stk_extract(stk_raw, file_name)
-    local entries = parse_stk(stk_raw)
-    if not entries then return nil end
-    local info = entries[file_name:upper()]
-    if not info then return nil end
-    return stk_raw:sub(info.offset + 1, info.offset + info.size)
 end
 
 -- ============================================================================
@@ -101,6 +95,14 @@ local function lzss_decompress(data, start_pos, output_size)
     local window   = {}
     for i = 0, 4095 do window[i] = 0x20 end
     local wpos     = 4078
+    local extended_len_cmd = -1
+    if start_pos + 3 <= len and u16le(data, start_pos) == 0x1234
+            and u16le(data, start_pos + 2) == 0x5678 then
+        start_pos = start_pos + 4
+        pos = start_pos
+        wpos = 273
+        extended_len_cmd = 18
+    end
     local cmd_val  = 0
     local cmd_bits = 0
 
@@ -119,6 +121,11 @@ local function lzss_decompress(data, start_pos, output_size)
             local lo = data:byte(pos); local hi = data:byte(pos+1); pos = pos + 2
             local src  = bor(lo, lshift(band(hi, 0xF0), 4))
             local rlen = band(hi, 0x0F) + 3
+            if rlen == extended_len_cmd then
+                if pos > len then break end
+                rlen = data:byte(pos) + 18
+                pos = pos + 1
+            end
             for _ = 1, rlen do
                 local b = window[band(src, 0xFFF)]
                 n = n + 1; out[n] = b
@@ -129,6 +136,27 @@ local function lzss_decompress(data, start_pos, output_size)
         cmd_val = rshift(cmd_val, 1); cmd_bits = cmd_bits - 1
     end
     return string.char(table.unpack(out))
+end
+
+-- Extract a named file from pre-loaded STK bytes. Compression type 1 is the
+-- same Coktel LZSS stream used by packed EXT resources: u32le output size,
+-- followed by a standard or extended LZSS chunk.
+local function stk_extract(stk_raw, file_name)
+    local entries = parse_stk(stk_raw)
+    if not entries then return nil end
+    local info = entries[file_name:upper()]
+    if not info then return nil end
+    local data = stk_raw:sub(info.offset + 1, info.offset + info.size)
+    if info.compression == 1 then
+        if #data < 5 then return nil end
+        local unpacked_size = u32le(data, 1)
+        if unpacked_size <= 0 or unpacked_size > 64 * 1024 * 1024 then return nil end
+        data = lzss_decompress(data, 5, unpacked_size)
+    elseif info.compression ~= 0 then
+        -- Chunked compression (type 2) is not used by Gob1/2/3 assets.
+        return nil
+    end
+    return data
 end
 
 -- ============================================================================
@@ -273,11 +301,38 @@ end
 
 local STK_FILES = {
     "DISK1.STK","DISK2.STK","DISK3.STK","DISK4.STK","DISK5.STK",
-    "INTRO.STK","MUSIC.STK",
+    "INTRO.STK","MUSIC.STK","EXT.STK","TOT.STK",
     "GOBLINS2.STK","GOB2.STK","GOB2CD.STK","GOBLIN2.STK",
     "COMMUN03.STK","GOB3.STK","GOB3CD.STK","GOBLIN3.STK",
     "PLAYTOON.STK","ADIBOU.STK",
 }
+
+local function read_stk(game_path, stk_file)
+    return read_file_all(game_path .. "/" .. stk_file)
+        or read_file_all(game_path .. "/" .. stk_file:lower())
+end
+
+local function sorted_entry_names(entries)
+    local names = {}
+    for name, _ in pairs(entries or {}) do names[#names + 1] = name end
+    table.sort(names)
+    return names
+end
+
+-- Read a loose file or the first matching member in one of the known STKs.
+local function read_game_file(game_path, file_name)
+    local loose = read_file_all(game_path .. "/" .. file_name)
+        or read_file_all(game_path .. "/" .. file_name:lower())
+    if loose then return loose end
+    for _, stk_file in ipairs(STK_FILES) do
+        local raw = read_stk(game_path, stk_file)
+        if raw then
+            local data = stk_extract(raw, file_name)
+            if data then return data end
+        end
+    end
+    return nil
+end
 
 -- Try to load VGA palette from a .TOT file within an STK archive
 -- TOT files have palette data at known offsets
@@ -369,15 +424,23 @@ end
 -- Load COMMUN.EX1 (with simple cache)
 -- ============================================================================
 
-local _commun_raw  = nil
-local _commun_path = nil
+local _commun_cache = {}
 
-local function load_commun(game_path)
-    local p = game_path .. "/COMMUN.EX1"
-    if _commun_path == p then return _commun_raw end
-    _commun_raw  = read_file_all(p) or read_file_all(game_path .. "/commun.ex1")
-    _commun_path = p
-    return _commun_raw
+local function commun_name_for_stk(stk_file)
+    local disk = stk_file:upper():match("^DISK(%d+)%.STK$")
+    if disk == "2" or disk == "3" then return "COMMUN.EX" .. disk end
+    return "COMMUN.EX1"
+end
+
+local function load_commun(game_path, stk_file)
+    local name = commun_name_for_stk(stk_file or "INTRO.STK")
+    local key = game_path .. "/" .. name
+    if _commun_cache[key] ~= nil then
+        return _commun_cache[key] ~= false and _commun_cache[key] or nil
+    end
+    local raw = read_game_file(game_path, name)
+    _commun_cache[key] = raw or false
+    return raw
 end
 
 -- ============================================================================
@@ -385,9 +448,9 @@ end
 -- ============================================================================
 
 local function load_entry_pixels(entry, ext_raw, commun_raw)
+    local blob = nil
     local off = entry.data_off + 1   -- convert to 1-based
     local sz  = entry.size
-    local blob
     if entry.ex_type then
         if not commun_raw then return nil end
         if off + sz - 1 > #commun_raw then return nil end
@@ -397,6 +460,147 @@ local function load_entry_pixels(entry, ext_raw, commun_raw)
         blob = ext_raw:sub(off, off + sz - 1)
     end
     return decode_sprite(blob, entry.w, entry.h, entry.packed)
+end
+
+-- Return the decoded bytes for any EXT resource, including non-image data.
+local function load_entry_blob(entry, ext_raw, commun_raw)
+    local source = entry.ex_type and commun_raw or ext_raw
+    if not source then return nil end
+    local off = entry.data_off + 1
+    if entry.size <= 0 or off < 1 or off + entry.size - 1 > #source then return nil end
+    local blob = source:sub(off, off + entry.size - 1)
+    if entry.packed then
+        if #blob < 5 then return nil end
+        local unpacked_size = u32le(blob, 1)
+        if unpacked_size <= 0 or unpacked_size > 64 * 1024 * 1024 then return nil end
+        blob = lzss_decompress(blob, 5, unpacked_size)
+    end
+    return blob
+end
+
+-- Gob SND: byte 0 contains flags, bytes 0..3 become a BE sample count after
+-- the flags byte is cleared, bytes 4..5 are the BE playback rate, then signed
+-- 8-bit mono PCM. This mirrors SoundDesc::loadSND in the Gob engine.
+local function parse_snd(data)
+    if not data or #data <= 6 then return nil end
+    local sample_count = data:byte(2) * 65536 + data:byte(3) * 256 + data:byte(4)
+    local sample_rate = math.max(u16be(data, 5), 4700)
+    if sample_count <= 0 or sample_count ~= #data - 6 then return nil end
+    if sample_rate < 4700 or sample_rate > 65535 then return nil end
+    return {
+        pcm = data:sub(7, 6 + sample_count),
+        sample_count = sample_count,
+        sample_rate = sample_rate,
+    }
+end
+
+-- Validate the structure of a Coktel ADL event stream. A structural check is
+-- needed because Gob2/3 can store music in anonymous EXT resource slots.
+local function parse_adl_info(data)
+    if not data or #data < 60 then return nil end
+    local timbre_count = data:byte(2) + 1
+    if timbre_count < 1 or timbre_count > 256 then return nil end
+    local pos = 4 + timbre_count * 56
+    if pos > #data then return nil end
+
+    local first_delay = data:byte(pos)
+    pos = pos + (band(first_delay, 0x80) ~= 0 and 2 or 1)
+    local events, duration = 0, 0
+    local modify_instrument = -1
+    while pos <= #data and events < 100000 do
+        local cmd = data:byte(pos); pos = pos + 1
+        if cmd == 0xFF then
+            if events < 8 or duration < 500 then return nil end
+            return { events = events, duration_ms = duration, timbres = timbre_count }
+        end
+        if cmd == 0xFE then
+            if pos > #data then return nil end
+            modify_instrument = data:byte(pos); pos = pos + 1
+        end
+        if cmd >= 0xD0 then
+            if modify_instrument < 0 or pos + 1 > #data then return nil end
+            pos = pos + 2
+        else
+            local voice = band(cmd, 0x0F)
+            local op = band(cmd, 0xF0)
+            if voice > 10 then return nil end
+            if op == 0x00 then pos = pos + 2
+            elseif op == 0x90 or op == 0xA0 or op == 0xB0 or op == 0xC0 then pos = pos + 1
+            elseif op ~= 0x80 then return nil end
+            if pos > #data + 1 then return nil end
+        end
+        if pos > #data then return nil end
+        local delay = data:byte(pos); pos = pos + 1
+        if band(delay, 0x80) ~= 0 then
+            if pos > #data then return nil end
+            delay = lshift(band(delay, 3), 8) + data:byte(pos)
+            pos = pos + 1
+        end
+        duration = duration + delay
+        events = events + 1
+        if duration > 10 * 60 * 1000 then return nil end
+    end
+    return nil
+end
+
+local function decode_wav_pcm(data)
+    if not data or #data < 44 or data:sub(1, 4) ~= "RIFF" or data:sub(9, 12) ~= "WAVE" then return nil end
+    local pos, fmt, pcm = 13, nil, nil
+    while pos + 7 <= #data do
+        local tag = data:sub(pos, pos + 3)
+        local size = u32le(data, pos + 4)
+        local body = pos + 8
+        if size < 0 or body + size - 1 > #data then return nil end
+        if tag == "fmt " and size >= 16 then
+            fmt = {
+                format = u16le(data, body), channels = u16le(data, body + 2),
+                rate = u32le(data, body + 4), bits = u16le(data, body + 14),
+            }
+        elseif tag == "data" then
+            pcm = data:sub(body, body + size - 1)
+        end
+        pos = body + size + (size % 2)
+    end
+    if not fmt or not pcm or fmt.format ~= 1 then return nil end
+    if (fmt.bits ~= 8 and fmt.bits ~= 16) or (fmt.channels ~= 1 and fmt.channels ~= 2) then return nil end
+    return { pcm = pcm, sample_rate = fmt.rate, bits = fmt.bits,
+        channels = fmt.channels, signed = fmt.bits == 16 }
+end
+
+local function make_sound_resource(data, label)
+    local snd = parse_snd(data)
+    if snd then
+        local handle = sound_create_pcm(snd.sample_rate, 8, 1, true, snd.pcm)
+        if not handle then return nil end
+        return {
+            type = "sound", sound = handle,
+            description = string.format("%s - Gob SND, %d samples @ %d Hz",
+                label, snd.sample_count, snd.sample_rate),
+        }
+    end
+    local wav = decode_wav_pcm(data)
+    if wav then
+        local handle = sound_create_pcm(wav.sample_rate, wav.bits, wav.channels, wav.signed, wav.pcm)
+        if not handle then return nil end
+        return {
+            type = "sound", sound = handle,
+            description = string.format("%s - PCM WAV, %d Hz, %d-bit, %d channel(s)",
+                label, wav.sample_rate, wav.bits, wav.channels),
+        }
+    end
+    return nil
+end
+
+local function make_adl_resource(data, label)
+    local info = parse_adl_info(data)
+    if not info then return nil end
+    local handle = sound_create_gob_adl(data)
+    if not handle then return nil end
+    return {
+        type = "sound", sound = handle,
+        description = string.format("%s - Coktel ADL music, %d timbres, %d events, %.1f s",
+            label, info.timbres, info.events, info.duration_ms / 1000),
+    }
 end
 
 -- ============================================================================
@@ -429,15 +633,17 @@ end
 
 function engine.get_resources(game_path)
     local scenes = {}
+    local sounds = {}
+    local music = {}
     local seen   = {}
+    local seen_named_audio = {}
 
-    for _, stk_file in ipairs(STK_FILES) do
-        local raw = read_file_all(game_path .. "/" .. stk_file)
-              or   read_file_all(game_path .. "/" .. stk_file:lower())
+    for stk_index, stk_file in ipairs(STK_FILES) do
+        local raw = read_stk(game_path, stk_file)
         if raw then
             local entries = parse_stk(raw)
             if entries then
-                for name_upper, _ in pairs(entries) do
+                for _, name_upper in ipairs(sorted_entry_names(entries)) do
                     if name_upper:match("%.EXT$") and not seen[name_upper] then
                         seen[name_upper] = true
                         local scene_id = name_upper:sub(1, #name_upper - 4)  -- strip ".EXT"
@@ -447,12 +653,71 @@ function engine.get_resources(game_path)
                             stk_file = stk_file,
                         }
                     end
+                    if (name_upper:match("%.SND$") or name_upper:match("%.WAV$"))
+                            and not seen_named_audio[name_upper] then
+                        seen_named_audio[name_upper] = true
+                        sounds[#sounds + 1] = {
+                            id = string.format("snd_stk_%d_%s", stk_index, name_upper),
+                            name = name_upper,
+                            type = "sound",
+                        }
+                    elseif name_upper:match("%.ADL$") and not seen_named_audio[name_upper] then
+                        seen_named_audio[name_upper] = true
+                        music[#music + 1] = {
+                            id = string.format("music_stk_%d_%s", stk_index, name_upper),
+                            name = name_upper,
+                            type = "sound",
+                        }
+                    end
                 end
             end
         end
     end
 
     table.sort(scenes, function(a, b) return a.scene_id < b.scene_id end)
+
+    -- Gob2 and Gob3 load many samples by numeric resource ID. Find those
+    -- anonymous SND/ADL blobs in each EXT/COMMUN resource table.
+    for stk_index, stk_file in ipairs(STK_FILES) do
+        local stk_raw = read_stk(game_path, stk_file)
+        local entries = stk_raw and parse_stk(stk_raw) or nil
+        if entries then
+            local commun_raw = nil
+            for _, ext_name in ipairs(sorted_entry_names(entries)) do
+                if ext_name:match("%.EXT$") then
+                    local ext_data = stk_extract(stk_raw, ext_name)
+                    local items = ext_data and parse_ext_table(ext_data) or nil
+                    if items then
+                        local scene_id = ext_name:sub(1, #ext_name - 4)
+                        for item_index, item in ipairs(items) do
+                            if item.ex_type and not commun_raw then
+                                commun_raw = load_commun(game_path, stk_file)
+                            end
+                            local blob = load_entry_blob(item, ext_data, commun_raw)
+                            if blob then
+                                if parse_snd(blob) or decode_wav_pcm(blob) then
+                                    sounds[#sounds + 1] = {
+                                        id = string.format("snd_ext_%d_%s_%d", stk_index, scene_id, item_index),
+                                        name = string.format("%s resource %d", scene_id, item.idx),
+                                        type = "sound",
+                                    }
+                                elseif parse_adl_info(blob) then
+                                    music[#music + 1] = {
+                                        id = string.format("music_ext_%d_%s_%d", stk_index, scene_id, item_index),
+                                        name = string.format("%s resource %d", scene_id, item.idx),
+                                        type = "sound",
+                                    }
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(sounds, function(a, b) return a.name < b.name end)
+    table.sort(music, function(a, b) return a.name < b.name end)
 
     local categories = {}
     for _, scene in ipairs(scenes) do
@@ -470,6 +735,19 @@ function engine.get_resources(game_path)
         }
     end
 
+    if #sounds > 0 then
+        categories[#categories + 1] = {
+            id = "cat_sounds", name = string.format("Sound Effects (%d)", #sounds),
+            type = "category", children = sounds,
+        }
+    end
+    if #music > 0 then
+        categories[#categories + 1] = {
+            id = "cat_music", name = string.format("Music (%d)", #music),
+            type = "category", children = music,
+        }
+    end
+
     return categories
 end
 
@@ -478,13 +756,51 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    -- Named SND/WAV members from an STK.
+    local stk_index, audio_name = resource_id:match("^snd_stk_(%d+)_(.+)$")
+    if stk_index then
+        local stk_file = STK_FILES[tonumber(stk_index)]
+        local stk_raw = stk_file and read_stk(game_path, stk_file) or nil
+        local data = stk_raw and stk_extract(stk_raw, audio_name) or nil
+        return data and make_sound_resource(data, audio_name) or nil
+    end
+
+    -- Named Coktel ADL music members from an STK.
+    stk_index, audio_name = resource_id:match("^music_stk_(%d+)_(.+)$")
+    if stk_index then
+        local stk_file = STK_FILES[tonumber(stk_index)]
+        local stk_raw = stk_file and read_stk(game_path, stk_file) or nil
+        local data = stk_raw and stk_extract(stk_raw, audio_name) or nil
+        return data and make_adl_resource(data, audio_name) or nil
+    end
+
+    -- Anonymous EXT/COMMUN sound and music resources.
+    local kind, ext_stk_index, scene_id, item_index =
+        resource_id:match("^(snd)_ext_(%d+)_(.+)_(%d+)$")
+    if not kind then
+        kind, ext_stk_index, scene_id, item_index =
+            resource_id:match("^(music)_ext_(%d+)_(.+)_(%d+)$")
+    end
+    if kind then
+        local stk_file = STK_FILES[tonumber(ext_stk_index)]
+        local stk_raw = stk_file and read_stk(game_path, stk_file) or nil
+        local ext_data = stk_raw and stk_extract(stk_raw, scene_id .. ".EXT") or nil
+        local items = ext_data and parse_ext_table(ext_data) or nil
+        local item = items and items[tonumber(item_index)] or nil
+        if not item then return nil end
+        local commun_raw = item.ex_type and load_commun(game_path, stk_file) or nil
+        local data = load_entry_blob(item, ext_data, commun_raw)
+        if kind == "snd" then return data and make_sound_resource(data, scene_id .. " resource " .. item.idx) or nil end
+        return data and make_adl_resource(data, scene_id .. " resource " .. item.idx) or nil
+    end
+
     -- resource_id = "bg_SCENENAME"  e.g. "bg_AVT00"
     if not resource_id:match("^bg_") then return nil end
     local scene_id = resource_id:sub(4)    -- strip "bg_"
     local ext_name = scene_id .. ".EXT"
 
     -- Find the STK containing this EXT
-    local stk_raw = find_stk_with(game_path, ext_name)
+    local stk_raw, stk_file = find_stk_with(game_path, ext_name)
     if not stk_raw then return nil end
 
     -- Extract EXT bytes
@@ -496,7 +812,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
     if not items or #items == 0 then return nil end
 
     -- Load COMMUN.EX1
-    local commun_raw = load_commun(game_path)
+    local commun_raw = load_commun(game_path, stk_file)
 
     -- Pick best background: prefer largest 320×200, fallback to biggest area
     local best
