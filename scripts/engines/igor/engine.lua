@@ -36,6 +36,9 @@ engine.version     = "7.0"
 
 local function u8(data, pos)    return data:byte(pos) end
 local function u16le(data, pos) return data:byte(pos) + data:byte(pos+1) * 256 end
+local function u32le(data, pos)
+    return data:byte(pos) + data:byte(pos+1) * 256 + data:byte(pos+2) * 65536 + data:byte(pos+3) * 16777216
+end
 
 -- Expand 6-bit VGA (0-63) to 8-bit (0-255): (v << 2) | (v >> 4)
 local function expand6(v)
@@ -235,126 +238,12 @@ local CD_TEXTS = {
 
 -- ============================================================================
 -- Floppy version (Spanish) - offsets into IGOR.DAT 11,199,335 bytes
--- Derived from binary analysis of the actual floppy IGOR.DAT.
--- Pixel blocks found by scanning for contiguous rows; palettes matched by
--- searching backward for the nearest valid 768-byte VGA palette.
--- Entries with shared palettes use the closest verified palette.
+-- Room backgrounds are NOT listed here as a static table: the floppy game is a
+-- Borland Pascal overlay executable and its room images only exist inside
+-- per-room overlay segments (see get_floppy_rooms() / parse_floppy_stubs()
+-- below), not at fixed flat offsets. Only the fullscreen splash images and CMF
+-- music below were reliably found via flat-file signature scanning.
 -- ============================================================================
-
--- Floppy rooms: { name, img_off, img_size, pal_off, 768, 0,0, 0,0, 0,0 }
--- No mask/box/text data available for the 11.2 MB Spanish floppy version.
-local FLOPPY_ROOMS = {
-    -- Early data blocks (before first named room)
-    {"Data Block 1",                        35200, 51520,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 2",                        87680, 32640,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 3",                       120640, 63360,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 4",                       185280, 47360,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 5",                       263040, 64000,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 6",                       327680, 45760,  421029, 768, 0,0, 0,0, 0,0},
-    {"Data Block 7",                       379200, 42560,  421029, 768, 0,0, 0,0, 0,0},
-    -- Named rooms (ScummVM resource_ids.h names)
-    {"Philip's Room",                      422080, 64000,  421029, 768, 0,0, 0,0, 0,0},
-    {"Physics Classroom",                  487360, 64000,  486549, 768, 0,0, 0,0, 0,0},
-    {"Chemistry Classroom",                552960, 64000,  552024, 768, 0,0, 0,0, 0,0},
-    {"College Stairs (2nd Floor)",         618560, 64000,  617495, 768, 0,0, 0,0, 0,0},
-    {"College Stairs (1st Floor)",         683840, 64000,  682966, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Miss Barrymore)",          749440, 64000,  748437, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Announcement Bd)",         817920, 62080,  817152, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Sharon & Michael)",        881600, 64000,  879379, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Caroline)",                966720, 63680,  945439, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Lucas)",                  1030720, 64000,  945439, 768, 0,0, 0,0, 0,0},
-    {"Corridor (Margaret)",               1154560, 48640, 1115731, 768, 0,0, 0,0, 0,0},
-    {"College Lockers",                   1259200, 51200, 1115731, 768, 0,0, 0,0, 0,0},
-    {"Women's Toilets",                   1338240, 45120, 1115731, 768, 0,0, 0,0, 0,0},
-    {"Men's Toilets",                     1383680, 64000, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Outside College",                   1450240, 48640, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Laboratory",                        1553920, 52800, 1523379, 768, 0,0, 0,0, 0,0},
-    {"Margaret's Room",                   1630400, 64000, 1628740, 768, 0,0, 0,0, 0,0},
-    {"Map",                               1729280, 50880, 1628740, 768, 0,0, 0,0, 0,0},
-    {"Spring Bridge",                     1807040, 49600, 1857052, 768, 0,0, 0,0, 0,0},
-    {"Spring Rock",                       1865920, 48960, 1857052, 768, 0,0, 0,0, 0,0},
-    {"Bell Church",                       1931520, 48000, 1855765, 768, 0,0, 0,0, 0,0},
-    {"Tobias' Office",                    1987840, 50240, 1979814, 768, 0,0, 0,0, 0,0},
-    {"Church Mosaic",                     2061120, 48640, 2053413, 768, 0,0, 0,0, 0,0},
-    {"Inside Church",                     2153920, 53120, 2131319, 768, 0,0, 0,0, 0,0},
-    {"Church Puzzle",                     2253120, 58560, 2227614, 768, 0,0, 0,0, 0,0},
-    {"Outside Church",                    2314240, 51520, 2227612, 768, 0,0, 0,0, 0,0},
-    -- Additional game backgrounds
-    {"Background 34",                     2387840, 37120, 2385396, 768, 0,0, 0,0, 0,0},
-    {"Background 35",                     2429440, 51840, 2386514, 768, 0,0, 0,0, 0,0},
-    {"Background 36",                     2576320, 56000, 2505268, 768, 0,0, 0,0, 0,0},
-    {"Library",                           2650560, 45120, 2647030, 768, 0,0, 0,0, 0,0},
-    {"Spring Bridge (Intro)",             2706560, 50240, 2647030, 768, 0,0, 0,0, 0,0},
-    {"Park",                              3855360, 48640, 3844749, 768, 0,0, 0,0, 0,0},
-    -- Extended rooms (alternate states, additional areas)
-    {"Admin (Secretary Room)",            5883520, 48960, 5876805, 768, 0,0, 0,0, 0,0},
-    {"Dean Pepper's Office",              5960640, 49600, 5953494, 768, 0,0, 0,0, 0,0},
-    {"Student Dormitory",                 6061120, 40640, 6045969, 768, 0,0, 0,0, 0,0},
-    {"Background 58",                     6106240, 53440, 6045969, 768, 0,0, 0,0, 0,0},
-    {"Background 59",                     6160960, 37440, 6159520, 768, 0,0, 0,0, 0,0},
-    {"Background 60",                     6200960, 52800, 6159998, 768, 0,0, 0,0, 0,0},
-    {"Background 61",                     6288320, 52160, 6274003, 768, 0,0, 0,0, 0,0},
-    {"Background 62",                     6366400, 40640, 6358236, 768, 0,0, 0,0, 0,0},
-    {"Background 63",                     6409600, 49920, 6357058, 768, 0,0, 0,0, 0,0},
-    {"Background 64",                     6487040, 49280, 6476192, 768, 0,0, 0,0, 0,0},
-    {"Background 65",                     6567680, 49280, 6552976, 768, 0,0, 0,0, 0,0},
-    {"Background 66",                     6636160, 49280, 6631534, 768, 0,0, 0,0, 0,0},
-    {"Background 67",                     6716800, 49280, 6702071, 768, 0,0, 0,0, 0,0},
-    {"Background 68",                     6811840, 50240, 6789022, 768, 0,0, 0,0, 0,0},
-    {"Background 69",                     6892160, 49600, 6878997, 768, 0,0, 0,0, 0,0},
-    {"Background 70",                     6978560, 33600, 6961491, 768, 0,0, 0,0, 0,0},
-    {"Background 71",                     7014720, 49600, 6961491, 768, 0,0, 0,0, 0,0},
-    {"Background 72",                     7096960, 49600, 7081358, 768, 0,0, 0,0, 0,0},
-    {"Background 73",                     7211520, 49920, 7190977, 768, 0,0, 0,0, 0,0},
-    {"Background 74",                     7308480, 49920, 7261816, 768, 0,0, 0,0, 0,0},
-    {"Background 75",                     7440320, 53440, 7384119, 768, 0,0, 0,0, 0,0},
-    {"Background 76",                     7604800, 49920, 7513740, 768, 0,0, 0,0, 0,0},
-    {"Background 77",                     7656960, 58240, 7513740, 768, 0,0, 0,0, 0,0},
-    {"Background 78",                     7717440, 48320, 7779541, 768, 0,0, 0,0, 0,0},
-    {"Background 79",                     7785280, 48960, 7779541, 768, 0,0, 0,0, 0,0},
-    {"Background 80",                     7868160, 48960, 7854029, 768, 0,0, 0,0, 0,0},
-    {"Background 81",                     7934400, 42880, 7931945, 768, 0,0, 0,0, 0,0},
-    {"Background 82",                     7979520, 48320, 7933063, 768, 0,0, 0,0, 0,0},
-    {"Background 83",                     8073280, 43200, 8044164, 768, 0,0, 0,0, 0,0},
-    {"Background 84",                     8122880, 35840, 8118943, 768, 0,0, 0,0, 0,0},
-    {"Background 85",                     8212480, 50880, 8208182, 768, 0,0, 0,0, 0,0},
-    {"Background 86",                     8292800, 49280, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 87",                     8342400, 49280, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 88",                     8392640, 53440, 8286990, 768, 0,0, 0,0, 0,0},
-    {"Background 89",                     8446400, 52160, 8518763, 768, 0,0, 0,0, 0,0},
-    {"Background 90",                     8523200, 49920, 8518763, 768, 0,0, 0,0, 0,0},
-    {"Background 91",                     8621120, 54400, 8599403, 768, 0,0, 0,0, 0,0},
-    {"Background 92",                     8678080, 50880, 8598227, 768, 0,0, 0,0, 0,0},
-    {"Background 93",                     8790720, 51520, 8777516, 768, 0,0, 0,0, 0,0},
-    {"Background 94",                     8845440, 53760, 8842429, 768, 0,0, 0,0, 0,0},
-    {"Background 95",                     9032640, 51520, 9000174, 768, 0,0, 0,0, 0,0},
-    {"Background 96",                     9119040, 37120, 9108639, 768, 0,0, 0,0, 0,0},
-    {"Background 97",                     9157120, 53120, 9108639, 768, 0,0, 0,0, 0,0},
-    {"Background 98",                     9277120, 56960, 9260423, 768, 0,0, 0,0, 0,0},
-    {"Background 99",                     9336320, 50880, 9259189, 768, 0,0, 0,0, 0,0},
-    {"Background 100",                    9434880, 58560, 9259189, 768, 0,0, 0,0, 0,0},
-    {"Background 101",                    9495680, 51520, 9568764, 768, 0,0, 0,0, 0,0},
-    {"Background 102",                    9584960, 50880, 9568764, 768, 0,0, 0,0, 0,0},
-    {"Background 103",                    9679680, 51840, 9652152, 768, 0,0, 0,0, 0,0},
-    {"Background 104",                    9734080, 49600, 9652150, 768, 0,0, 0,0, 0,0},
-    {"Background 105",                    9872640, 49280, 9812011, 768, 0,0, 0,0, 0,0},
-    {"Background 106",                    9924160, 53760, 9812011, 768, 0,0, 0,0, 0,0},
-    {"Background 107",                   10054400, 36160, 10004120, 768, 0,0, 0,0, 0,0},
-    {"Background 108",                   10093120, 55040, 10004120, 768, 0,0, 0,0, 0,0},
-    {"Background 109",                   10153280, 42560, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 110",                   10198080, 48000, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 111",                   10248320, 50880, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 112",                   10300480, 64000, 10148547, 768, 0,0, 0,0, 0,0},
-    {"Background 113",                   10689600, 38720, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 114",                   10728640, 51840, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 115",                   10780800, 53120, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 116",                   10834240, 48640, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 117",                   10886400, 51840, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 118",                   10947840, 44160, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 119",                   10994240, 51200, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 120",                   11046080, 46720, 10993073, 768, 0,0, 0,0, 0,0},
-    {"Background 121",                   11095680, 43200, 10993073, 768, 0,0, 0,0, 0,0},
-}
 
 -- Floppy: splash / shareware / title screens
 local FLOPPY_FULLSCREEN = {
@@ -400,6 +289,148 @@ local FLOPPY_MUSIC = {
 }
 
 -- ============================================================================
+-- Floppy room backgrounds: real Borland Pascal overlay parsing
+-- ============================================================================
+-- The floppy IGOR.EXE (~95KB) is a Borland Pascal "overlay" stub file: each
+-- room is compiled to its own overlay segment stored in IGOR.DAT, indexed by a
+-- table of 32-byte stub headers embedded in IGOR.EXE (starting at a fixed file
+-- offset). A previous version of this engine guessed room image offsets by
+-- scanning IGOR.DAT for pixel-like byte runs, which does not reflect the real
+-- file layout and never produced correct backgrounds. This replaces that with
+-- the actual overlay format, reverse engineered by the cyxx/igor project
+-- (docs/RE.md, overlay_exe.cpp, room.cpp - see engine-sources.md).
+--
+-- Stub header (32 bytes, little-endian):
+--   u16 int_code   (0x3FCD magic = "INT 3Fh" opcode used as an overlay marker)
+--   u16 memswap    (always 0 for a valid header)
+--   u32 fileoff    offset of this segment's code+data in IGOR.DAT
+--   u16 codesize   size of this segment in IGOR.DAT
+--   u16 relsize
+--   u16 nentries   number of far-jump trampoline entries following the header
+--   u16 prevstub
+--   ...16 bytes workarea, then `nentries` x 5-byte far jumps (padded to 16)
+--
+-- Many room segments end with a trailing [768-byte VGA palette][320x200 8bpp
+-- image] blob immediately after the last "pop bp; retf" (bytes 5D CB) in the
+-- segment's compiled code. That marker + exact trailing size is how the
+-- reference tool (and this engine) locates the image within each segment.
+-- ============================================================================
+
+local STUB_HEADER_SIZE     = 32
+local STUB_SCAN_START      = 0x19F0
+local FULLSCREEN_BLOB_SIZE = 768 + 320 * 200 -- palette + 320x200 8bpp image
+
+local function find_exe_file(game_path)
+    local candidates = {
+        game_path .. "/IGOR.EXE",
+        game_path .. "/igor.exe",
+    }
+    for _, p in ipairs(candidates) do
+        if file_exists(p) then return p end
+    end
+    return nil
+end
+
+-- Parse the Pascal overlay stub table embedded in the floppy IGOR.EXE.
+-- Mirrors OverlayExecutable::parse(): scan 32-byte-aligned blocks from a fixed
+-- start offset, recording valid stub headers and skipping their jump tables.
+local function parse_floppy_stubs(exe_path)
+    local fh = file_open(exe_path)
+    if not fh then return {} end
+    local exe_size = file_size(fh)
+
+    local stubs = {}
+    local pos = STUB_SCAN_START
+    while pos + STUB_HEADER_SIZE <= exe_size do
+        local hdr = file_read(fh, pos, STUB_HEADER_SIZE)
+        if not hdr or #hdr < STUB_HEADER_SIZE then break end
+
+        -- isPascalStub(): u16le(hdr,0)==0x3FCD (bytes CD,3F) and u16le(hdr,2)==0
+        if hdr:byte(1) == 0xCD and hdr:byte(2) == 0x3F and hdr:byte(3) == 0 and hdr:byte(4) == 0 then
+            local seg_offset = u32le(hdr, 5)
+            local seg_size   = u16le(hdr, 9)
+            local count      = u16le(hdr, 13)
+            if seg_size ~= 0 then
+                stubs[#stubs + 1] = { offset = seg_offset, size = seg_size }
+                local jmp_size = math.floor((count * 5 + 15) / 16) * 16
+                pos = pos + STUB_HEADER_SIZE + jmp_size
+            else
+                pos = pos + STUB_HEADER_SIZE
+            end
+        else
+            pos = pos + STUB_HEADER_SIZE
+        end
+    end
+    file_close(fh)
+    return stubs
+end
+
+-- Scan one overlay segment (read from IGOR.DAT) for a trailing
+-- [768-byte palette][320x200 image] blob, validating the palette is in the
+-- legal 6-bit VGA range (0-63) before trusting the match.
+local function scan_floppy_room_blob(dat_path, stub)
+    local fh = file_open(dat_path)
+    if not fh then return nil end
+    local seg = file_read(fh, stub.offset, stub.size)
+    file_close(fh)
+    if not seg then return nil end
+
+    local size = #seg
+    local pos = size - 1
+    while pos >= 1 do
+        if seg:byte(pos) == 0x5D and seg:byte(pos + 1) == 0xCB then -- pop bp; retf
+            local blob_start = pos + 2
+            local blob_size = size - blob_start + 1
+            if blob_size == FULLSCREEN_BLOB_SIZE then
+                local pal_raw = seg:sub(blob_start, blob_start + 767)
+                local pal_ok = #pal_raw == 768
+                if pal_ok then
+                    for i = 1, 768 do
+                        if pal_raw:byte(i) > 63 then pal_ok = false; break end
+                    end
+                end
+                if pal_ok then
+                    local img_raw = seg:sub(blob_start + 768, blob_start + 768 + 320 * 200 - 1)
+                    if #img_raw == 320 * 200 then
+                        return pal_raw, img_raw
+                    end
+                end
+            end
+            break -- only the first marker found scanning backward is considered
+        end
+        pos = pos - 1
+    end
+    return nil
+end
+
+-- Cached per game_path: dynamically-discovered floppy rooms (name, stub info).
+local _floppy_rooms_cache = nil
+local _floppy_rooms_cache_path = nil
+
+local function get_floppy_rooms(game_path, dat_path)
+    if _floppy_rooms_cache and _floppy_rooms_cache_path == game_path then
+        return _floppy_rooms_cache
+    end
+    local rooms = {}
+    local exe_path = find_exe_file(game_path)
+    if exe_path then
+        local stubs = parse_floppy_stubs(exe_path)
+        for i, stub in ipairs(stubs) do
+            local pal_raw, img_raw = scan_floppy_room_blob(dat_path, stub)
+            if pal_raw and img_raw then
+                rooms[#rooms + 1] = {
+                    string.format("Floppy Room %d", i),
+                    stub.offset, stub.size, 0, 0, 0, 0, 0, 0, 0, 0,
+                }
+            end
+        end
+    end
+    _floppy_rooms_cache = rooms
+    _floppy_rooms_cache_path = game_path
+    return rooms
+end
+
+-- ============================================================================
 -- Palette loading
 -- ============================================================================
 
@@ -409,12 +440,15 @@ local function read_palette(fh, pal_off, pal_size)
     if not pal_raw then return nil end
 
     local palette = {}
+    local out_of_range = 0
     -- Expand 6-bit VGA to 8-bit, padding to 768 entries
     local num_colors = math.floor(pal_size / 3)
     for i = 0, num_colors - 1 do
-        palette[i*3+1] = expand6(pal_raw:byte(i*3+1))
-        palette[i*3+2] = expand6(pal_raw:byte(i*3+2))
-        palette[i*3+3] = expand6(pal_raw:byte(i*3+3))
+        local r, g, b = pal_raw:byte(i*3+1), pal_raw:byte(i*3+2), pal_raw:byte(i*3+3)
+        if r > 63 or g > 63 or b > 63 then out_of_range = out_of_range + 1 end
+        palette[i*3+1] = expand6(r)
+        palette[i*3+2] = expand6(g)
+        palette[i*3+3] = expand6(b)
     end
     -- Fill remaining entries with black
     for i = num_colors, 255 do
@@ -422,7 +456,11 @@ local function read_palette(fh, pal_off, pal_size)
         palette[i*3+2] = 0
         palette[i*3+3] = 0
     end
-    return palette
+    -- out_of_range > 0 means this palette almost certainly points at the wrong
+    -- file offset (valid VGA DAC values are 0-63 per channel); surfaced to the
+    -- caller so a bad room offset shows a warning instead of silently
+    -- rendering blown-out/garbled colours.
+    return palette, out_of_range
 end
 
 -- ============================================================================
@@ -700,7 +738,7 @@ function engine.get_resources(game_path)
         texts = CD_TEXTS
         music = nil
     else
-        rooms = FLOPPY_ROOMS
+        rooms = get_floppy_rooms(game_path, data_path)
         fullscreen = FLOPPY_FULLSCREEN
         ui = FLOPPY_UI
         igor_sprites = FLOPPY_IGOR_SPRITES
@@ -823,7 +861,7 @@ function engine.get_resources(game_path)
             music_children[#music_children + 1] = {
                 id = "music_" .. i,
                 name = m[1],
-                type = "image",
+                type = "midi",
             }
         end
         root[#root + 1] = {
@@ -856,7 +894,7 @@ function engine.load_resource(game_path, resource_id)
         texts = CD_TEXTS
         music = nil
     else
-        rooms = FLOPPY_ROOMS
+        rooms = get_floppy_rooms(game_path, data_path)
         fullscreen = FLOPPY_FULLSCREEN
         ui = FLOPPY_UI
         igor_sprites = FLOPPY_IGOR_SPRITES
@@ -888,30 +926,68 @@ function engine.load_resource(game_path, resource_id)
         if not fh then return {type = "text", text = "Cannot open data file"} end
 
         if room_type == "bg" then
-            local palette = read_palette(fh, pal_off, pal_size)
-            if not palette then
+            if version == VER_CD then
+                local palette, bad_colors = read_palette(fh, pal_off, pal_size)
+                if not palette then
+                    file_close(fh)
+                    return {type = "text", text = "Failed to read palette for " .. name}
+                end
+                local img_raw = file_read(fh, img_off, img_size)
                 file_close(fh)
-                return {type = "text", text = "Failed to read palette for " .. name}
-            end
-            local img_raw = file_read(fh, img_off, img_size)
-            file_close(fh)
-            if not img_raw or #img_raw < img_size then
-                return {type = "text", text = "Failed to read image for " .. name}
+                if not img_raw or #img_raw < img_size then
+                    return {type = "text", text = "Failed to read image for " .. name}
+                end
+
+                local img_h = math.floor(img_size / IMG_W)
+                local pixels = {}
+                for i = 1, img_size do
+                    pixels[i] = img_raw:byte(i)
+                end
+
+                local img = image_create_indexed(IMG_W, img_h, pixels, palette)
+                local warning = ""
+                if bad_colors and bad_colors > 0 then
+                    warning = string.format(
+                        "  |  WARNING: %d palette entries outside valid 6-bit VGA range - offsets are likely wrong for this room",
+                        bad_colors)
+                end
+                return {
+                    type = "image",
+                    image = img,
+                    description = string.format(
+                        "%s  |  %dx%d  |  pal@0x%X (%d bytes)  |  img@0x%X%s",
+                        name, IMG_W, img_h, pal_off, pal_size, img_off, warning),
+                }
             end
 
-            local img_h = math.floor(img_size / IMG_W)
+            -- Floppy: img_off/img_size here are actually the overlay segment's
+            -- (offset, size) in IGOR.DAT; re-scan it for the trailing
+            -- [palette][image] blob (see get_floppy_rooms()).
+            file_close(fh)
+            local pal_raw, img_raw = scan_floppy_room_blob(data_path, { offset = img_off, size = img_size })
+            if not pal_raw or not img_raw then
+                return {type = "text", text = "No background data found for " .. name}
+            end
+
+            local palette = {}
+            for i = 0, 255 do
+                palette[i*3+1] = expand6(pal_raw:byte(i*3+1))
+                palette[i*3+2] = expand6(pal_raw:byte(i*3+2))
+                palette[i*3+3] = expand6(pal_raw:byte(i*3+3))
+            end
+
             local pixels = {}
-            for i = 1, img_size do
+            for i = 1, #img_raw do
                 pixels[i] = img_raw:byte(i)
             end
 
-            local img = image_create_indexed(IMG_W, img_h, pixels, palette)
+            local img = image_create_indexed(IMG_W, 200, pixels, palette)
             return {
                 type = "image",
                 image = img,
                 description = string.format(
-                    "%s  |  %dx%d  |  pal@0x%X (%d bytes)  |  img@0x%X",
-                    name, IMG_W, img_h, pal_off, pal_size, img_off),
+                    "%s  |  %dx200  |  overlay segment @0x%X (%d bytes)",
+                    name, IMG_W, img_off, img_size),
             }
 
         elseif room_type == "msk" then
@@ -1214,9 +1290,18 @@ function engine.load_resource(game_path, resource_id)
             end
 
             local desc = describe_cmf(cmf_raw)
+            local midi = midi_create_from_cmf(cmf_raw)
+            if not midi then
+                return {
+                    type = "text",
+                    text = string.format("%s\n\nFailed to convert CMF to MIDI\n\n%s", m[1], desc),
+                }
+            end
+
             return {
-                type = "text",
-                text = string.format("%s\n\n%s", m[1], desc),
+                type = "midi",
+                midi = midi,
+                description = string.format("%s\n\n%s", m[1], desc),
             }
         end
     end

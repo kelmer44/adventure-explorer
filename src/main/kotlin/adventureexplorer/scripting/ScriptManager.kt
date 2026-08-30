@@ -139,6 +139,11 @@ class ScriptManager {
                     val sound = lua.getSound(sndHandle)
                     ResourceData(type, null, description, soundData = sound)
                 }
+                "midi" -> {
+                    val midiHandle = table.get("midi").checkint()
+                    val midi = lua.getMidi(midiHandle)
+                    ResourceData(type, null, description, midiData = midi)
+                }
                 else -> ResourceData(type, null, description)
             }
         } catch (e: Exception) {

@@ -143,6 +143,10 @@ fun App() {
                         onExportSoundWav = {
                             scope.launch(Dispatchers.IO) { showExportSoundWavDialog(appState) }
                         },
+                        midiData = appState.previewMidiData,
+                        onExportMidi = {
+                            scope.launch(Dispatchers.IO) { showExportMidiDialog(appState) }
+                        },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
@@ -351,4 +355,21 @@ private suspend fun showExportSoundWavDialog(appState: AppState) {
         }
     } ?: return
     withContext(Dispatchers.Main) { appState.exportSoundWav(chosen) }
+}
+
+private suspend fun showExportMidiDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Export as MIDI"
+            chooser.selectedFile = java.io.File("track.mid")
+            chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("MIDI files", "mid")
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                var path = chooser.selectedFile.absolutePath
+                if (!path.lowercase().endsWith(".mid")) path += ".mid"
+                path
+            } else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportMidiFile(chosen) }
 }

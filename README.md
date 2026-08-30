@@ -33,7 +33,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Speech | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
-| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations | ✅ Working |
+| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations, Music | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -49,7 +49,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
-| Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound | ✅ Working |
+| Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds | ✅ Working |
 | Sierra SCI (SCI0/SCI1/SCI1.1) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Palettes | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
@@ -212,6 +212,19 @@ return engine
 |----------|---------|-------------|
 | `sound_create_pcm(rate, bits, channels, signed, data)` | handle | Create playable raw PCM audio |
 | `sound_create_gob_adl(data)` | handle | Render Coktel Vision ADL/OPL music to PCM |
+
+#### MIDI
+
+MIDI-family resources (CMF, XMIDI, standard MIDI) are converted to a standard MIDI
+file rather than synthesized ourselves, so playback uses the system's own MIDI
+device/instruments instead of an opinionated built-in synth.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `midi_create_raw(data)` | handle | Wrap data that is already a standard MIDI file |
+| `midi_create_from_cmf(data)` | handle | Convert Creative Music Format (CTMF) to standard MIDI |
+| `midi_create_from_xmi(data)` | handle | Convert XMIDI (.xmi, IFF-wrapped or bare EVNT) to standard MIDI |
+| `midi_create_auto(data)` | handle | Sniff the magic bytes and pick the right converter above |
 
 #### Data Helpers
 

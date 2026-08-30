@@ -7,6 +7,7 @@ import adventureexplorer.model.DetectionResult
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.SoundData
+import adventureexplorer.model.MidiData
 import adventureexplorer.scripting.ScriptManager
 import kotlinx.coroutines.*
 import java.awt.image.BufferedImage
@@ -32,6 +33,7 @@ class AppState {
     var previewFrames    by mutableStateOf<List<BufferedImage>?>(null)
     var previewFrameDelayMs by mutableStateOf(100)
     var previewSoundData by mutableStateOf<SoundData?>(null)
+    var previewMidiData  by mutableStateOf<MidiData?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
 
@@ -82,6 +84,7 @@ class AppState {
         previewFrames = null
         previewFrameDelayMs = 100
         previewSoundData = null
+        previewMidiData = null
         selectedNode = null
         nodeById.clear()
         paletteCompanionOf.clear()
@@ -173,6 +176,7 @@ class AppState {
                         previewFrames = bgWithPal?.frames ?: data.frames
                         previewFrameDelayMs = bgWithPal?.frameDelayMs?.takeIf { it > 0 } ?: data.frameDelayMs
                         previewSoundData = data.soundData
+                        previewMidiData = data.midiData
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
@@ -194,6 +198,7 @@ class AppState {
                         previewFrames = null
                         previewFrameDelayMs = 100
                         previewSoundData = null
+                        previewMidiData = null
                         statusMessage = "Failed to load ${node.name}"
                     }
                 }
@@ -327,6 +332,21 @@ class AppState {
 
     val canExportSound: Boolean
         get() = previewSoundData != null
+
+    val canExportMidi: Boolean
+        get() = previewMidiData != null
+
+    fun exportMidiFile(outputPath: String) {
+        val midi = previewMidiData ?: return
+        try {
+            val file = File(outputPath)
+            file.parentFile?.mkdirs()
+            file.writeBytes(midi.bytes)
+            statusMessage = "Exported to ${file.name}"
+        } catch (e: Exception) {
+            statusMessage = "Export failed: ${e.message}"
+        }
+    }
 
     fun exportSoundWav(outputPath: String) {
         val sound = previewSoundData ?: return

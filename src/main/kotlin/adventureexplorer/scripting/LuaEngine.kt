@@ -1,7 +1,10 @@
 package adventureexplorer.scripting
 
 import adventureexplorer.model.SoundData
+import adventureexplorer.model.MidiData
 import adventureexplorer.audio.GobAdlDecoder
+import adventureexplorer.audio.CmfToMidiConverter
+import adventureexplorer.audio.XmiToMidiConverter
 import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
@@ -27,6 +30,10 @@ import javax.imageio.ImageIO
  *   image_create_rgb(w, h, rgb_table) -> image_handle
  *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
  *   sound_create_gob_adl(data) -> sound_handle
+ *   midi_create_raw(data) -> midi_handle          (data is already a standard MIDI file)
+ *   midi_create_from_cmf(data) -> midi_handle     (Creative Music Format)
+ *   midi_create_from_xmi(data) -> midi_handle     (XMIDI, IFF-wrapped or bare EVNT)
+ *   midi_create_auto(data) -> midi_handle          (sniffs the magic bytes to pick a decoder)
  *   log_info(msg), log_warn(msg), log_error(msg)
  */
 class LuaEngine {
@@ -40,11 +47,14 @@ class LuaEngine {
     private var nextAnimHandle = 1
     private val sounds = mutableMapOf<Int, SoundData>() // handle -> sound data
     private var nextSoundHandle = 1
+    private val midis = mutableMapOf<Int, MidiData>() // handle -> standard MIDI file bytes
+    private var nextMidiHandle = 1
 
     init {
         registerFileApi()
         registerImageApi()
         registerSoundApi()
+        registerMidiApi()
         registerBinaryApi()
         registerLogApi()
     }
@@ -240,6 +250,68 @@ class LuaEngine {
                 return valueOf(handle)
             }
         }
+
+    }
+
+    // ── MIDI API ────────────────────────────────────────────────────
+
+    private fun registerMidiApi() {
+        fun toBytes(data: LuaValue): ByteArray? = try {
+            val luaStr = data.checkstring()
+            ByteArray(luaStr.length()).also { luaStr.copyInto(0, it, 0, it.size) }
+        } catch (_: Exception) { null }
+
+        fun store(bytes: ByteArray?): LuaValue {
+            if (bytes == null) return LuaValue.NIL
+            val handle = nextMidiHandle++
+            midis[handle] = MidiData(bytes)
+            return LuaValue.valueOf(handle)
+        }
+
+        // midi_create_raw(data) -> midi_handle
+        // Wraps data that is already a standard MIDI file (MThd/MTrk).
+        globals["midi_create_raw"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return NIL
+                if (bytes.size < 4 || String(bytes, 0, 4, Charsets.US_ASCII) != "MThd") return NIL
+                return store(bytes)
+            }
+        }
+
+        // midi_create_from_cmf(data) -> midi_handle
+        // Converts Creative Music Format (CTMF) song data to a standard MIDI file.
+        globals["midi_create_from_cmf"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return NIL
+                return store(CmfToMidiConverter.convert(bytes))
+            }
+        }
+
+        // midi_create_from_xmi(data) -> midi_handle
+        // Converts an XMIDI (.xmi) resource to a standard MIDI file.
+        globals["midi_create_from_xmi"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return NIL
+                return store(XmiToMidiConverter.convert(bytes))
+            }
+        }
+
+        // midi_create_auto(data) -> midi_handle
+        // Sniffs the magic bytes (MThd / CTMF / FORM) to pick the right decoder.
+        globals["midi_create_auto"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return NIL
+                if (bytes.size < 4) return NIL
+                val magic = String(bytes, 0, 4, Charsets.US_ASCII)
+                val converted = when (magic) {
+                    "MThd" -> bytes
+                    "CTMF" -> CmfToMidiConverter.convert(bytes)
+                    "FORM" -> XmiToMidiConverter.convert(bytes)
+                    else -> XmiToMidiConverter.convert(bytes)
+                }
+                return store(converted)
+            }
+        }
     }
 
     // ── Binary utilities API ─────────────────────────────────────────
@@ -342,6 +414,8 @@ class LuaEngine {
     fun getAnimation(handle: Int): Pair<List<BufferedImage>, Int>? = animations[handle]
 
     fun getSound(handle: Int): SoundData? = sounds[handle]
+
+    fun getMidi(handle: Int): MidiData? = midis[handle]
 
     fun cleanup() {
         openFiles.values.forEach { runCatching { it.close() } }

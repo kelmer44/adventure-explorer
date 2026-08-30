@@ -88,8 +88,8 @@ local TAG_ICONS = {
     [TAG_ANIM] = "image",
     [TAG_MENU] = "text",
     [TAG_FONT] = "image",
-    [TAG_XMID] = "sound",
-    [TAG_MIDI] = "sound",
+    [TAG_XMID] = "midi",
+    [TAG_MIDI] = "midi",
 }
 
 -- ── Palette cache helpers ───────────────────────────────────────
@@ -747,6 +747,35 @@ local function load_sound(game_path, res_offset, res_size)
     }
 end
 
+-- ── Load an XMIDI/MIDI music resource ────────────────────────────
+
+local function load_midi(game_path, res_offset, res_size)
+    local prj_path = find_file(game_path, "LGOP2.PRJ")
+    if not prj_path then return nil end
+
+    local f = file_open(prj_path)
+    if not f then return nil end
+
+    local raw = file_read(f, res_offset, res_size)
+    file_close(f)
+    if not raw then
+        return { type = "text", text = "Failed to read music data" }
+    end
+
+    -- midi_create_auto() sniffs MThd/CTMF/FORM(XDIR) magic and converts as needed,
+    -- letting the system's own MIDI synth/instruments handle playback.
+    local midi = midi_create_auto(raw)
+    if not midi then
+        return { type = "text", text = string.format("Could not decode music resource (%d bytes)", res_size) }
+    end
+
+    return {
+        type = "midi",
+        midi = midi,
+        description = string.format("Music (%d bytes)", res_size)
+    }
+end
+
 -- ── Load a MENU resource ─────────────────────────────────────────
 
 local function load_menu(game_path, res_offset, res_size)
@@ -921,6 +950,8 @@ function engine.load_resource(game_path, resource_id, palette_id)
         return load_sound(game_path, res_offset, res_size)
     elseif tag == TAG_MENU then
         return load_menu(game_path, res_offset, res_size)
+    elseif tag == TAG_XMID or tag == TAG_MIDI then
+        return load_midi(game_path, res_offset, res_size)
     else
         -- Generic: show hex info
         return {

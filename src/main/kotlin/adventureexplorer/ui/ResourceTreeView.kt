@@ -230,6 +230,7 @@ private fun TreeRowItem(
                 "image"    -> "\uD83D\uDDBC"
                 "animation" -> "\uD83C\uDFAC"
                 "sound"    -> "\uD83D\uDD0A"
+                "midi"     -> "\uD83C\uDFB9"
                 "text"     -> "\uD83D\uDCDD"
                 "palette"  -> "\uD83C\uDFA8"
                 else       -> "\uD83D\uDCC4"

@@ -21,8 +21,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.audio.SoundPlayer
+import adventureexplorer.audio.MidiPlayer
 import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.SoundData
+import adventureexplorer.model.MidiData
 import kotlinx.coroutines.delay
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -45,6 +47,8 @@ fun PreviewPane(
     onExportAllFrames: () -> Unit,
     soundData: SoundData?,
     onExportSoundWav: () -> Unit,
+    midiData: MidiData?,
+    onExportMidi: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
@@ -71,6 +75,11 @@ fun PreviewPane(
                 description = description,
                 canExportPalette = canExportPalette,
                 onExportPaletteBin = onExportPaletteBin
+            )
+            midiData != null -> MidiPreview(
+                midiData = midiData,
+                description = description,
+                onExportMidi = onExportMidi
             )
             soundData != null -> SoundPreview(
                 soundData = soundData,
@@ -651,6 +660,108 @@ private fun formatTime(ms: Long): String {
     val sec = totalSec % 60
     val frac = (ms % 1000) / 100
     return "%d:%02d.%d".format(min, sec, frac)
+}
+
+// ── MIDI preview ───────────────────────────────────────────────
+
+@Composable
+private fun MidiPreview(
+    midiData: MidiData,
+    description: String?,
+    onExportMidi: () -> Unit
+) {
+    val player = remember { MidiPlayer() }
+
+    DisposableEffect(midiData) {
+        player.load(midiData)
+        onDispose { player.cleanup() }
+    }
+
+    var isPlaying by remember(midiData) { mutableStateOf(false) }
+    var positionMs by remember(midiData) { mutableStateOf(0L) }
+    val durationMs = player.durationMs
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            positionMs = player.positionMs
+            if (durationMs > 0 && positionMs >= durationMs) {
+                isPlaying = false
+                positionMs = 0
+                player.stop()
+                player.load(midiData)
+            }
+            delay(50)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = description ?: "MIDI",
+                fontSize = 12.sp,
+                color = Color(0xFFAAAAAA),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text("\uD83C\uDFB9", fontSize = 64.sp, color = Color(0xFF444444))
+        }
+
+        Divider(color = Color(0xFF333333))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ControlButton(if (isPlaying) "\u23F8" else "\u25B6") {
+                if (isPlaying) {
+                    player.pause()
+                    isPlaying = false
+                } else {
+                    player.play()
+                    isPlaying = true
+                }
+            }
+
+            ControlButton("\u23F9") {
+                player.stop()
+                player.load(midiData)
+                isPlaying = false
+                positionMs = 0
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            Text(
+                text = "${formatTime(positionMs)} / ${formatTime(durationMs)}",
+                fontSize = 12.sp,
+                color = Color(0xFFCCCCCC)
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            ControlButton("\uD83D\uDCBE MIDI") { onExportMidi() }
+        }
+
+        Text(
+            text = "Standard MIDI \u00B7 played via the system synthesizer \u00B7 ${midiData.bytes.size} bytes",
+            fontSize = 11.sp,
+            color = Color(0xFF666666),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
+        )
+    }
 }
 
 // ── Text preview ─────────────────────────────────────────────
