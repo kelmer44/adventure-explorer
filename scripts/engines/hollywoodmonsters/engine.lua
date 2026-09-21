@@ -25,14 +25,23 @@
 --     Block 2: Extra screen data (overlay layer: raw framebuffer, or a
 --              self-describing sprite/icon block list, see below)
 --     Block 3: Z-order / transparency mask (RLE)
---     Block 4: Combined resource buffer - a fixed-layout metadata region
---              (pathfinding, palette and verb/relation tables, ending at
---              SCENE_METADATA_END = 0x610a) followed by per-scene sprite/
---              icon pixel data in the same block-list format.
+--     Block 4: Combined resource buffer - either a table of 14-byte
+--              character-animation frame descriptors (verified against real
+--              game data) or a generic sprite/icon block list, depending on
+--              the scene (see FRAME_DESCRIPTOR_SIZE / scan_frame_descriptors
+--              and the block-list format below).
 --     Blocks 5+: Additional overlay layers
 --
--- Sprite/icon block-list format (used for block 2 overlays, the block 4
--- sprite region, and some RESOURCE.000 UI resources):
+-- Character-animation frame descriptor (14 bytes, block 4, see
+-- scan_frame_descriptors/render_frame_descriptor):
+--   u32 span_rel_offset (from the end of the descriptor table to this
+--       frame's own span data), u32 packed x/width, u32 packed
+--       first_row/last_row, u16 span_count. Followed by every frame's span
+--   data in order: per span, u32 packed x/y, u8 length, then `length` raw
+--   indexed pixel bytes (one scanline run).
+--
+-- Sprite/icon block-list format (used for block 2 overlays, RESOURCE.000 UI
+-- resources, and block 4 on scenes without frame descriptors):
 --   u16 block_count; per block: u32 packed (x = low16, y = high16), u16
 --   size, then `size` raw indexed pixel bytes (one horizontal scanline run
 --   at column x, row y). Self-terminating and bounds-checked, so it is only
@@ -116,11 +125,6 @@ local RESIDENT_SOUND_ENTRIES = {
     0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62
 }
 local RESIDENT_SOUND_RATE = 11025  -- 16-bit signed LE
-
--- Known end of the fixed per-scene metadata region within block 4 (the
--- "combined resource buffer") - pathfinding/palette/verb/relation tables.
--- Any bytes after this point are candidate sprite/overlay pixel data.
-local SCENE_METADATA_END = 0x610a
 
 -- ── Chapter definitions ──────────────────────────────────────────
 -- Each chapter maps a letter to a range of scene numbers (e.g. A00–A09)
@@ -400,6 +404,129 @@ local function render_block_list_image(raw, entries, palette)
     return image_create_indexed(max_x, max_y, pixels, palette), max_x, max_y
 end
 
+-- Scans a byte range for the block list that decodes to the most pixel data.
+-- The exact start offset of sprite/icon data isn't recorded anywhere in the
+-- file (it's a hardcoded per-scene value in the original executable), so
+-- every offset is a candidate; the strict bounds-checking in
+-- try_decode_block_list means a wrong offset almost never validates at all,
+-- and picking the largest match favors real data over incidental noise.
+-- A cheap step budget caps worst-case work for pathological candidates.
+local function scan_best_block_list(raw, start_offset, end_offset, step_budget)
+    start_offset = math.max(start_offset or 0, 0)
+    end_offset = math.min(end_offset or (#raw - 2), #raw - 2)
+    step_budget = step_budget or 400000
+
+    local best_entries, best_total = nil, 0
+    local steps = 0
+    for offset = start_offset, end_offset do
+        if steps > step_budget then break end
+        if offset + 2 <= #raw then
+            local block_count = u16le(raw, offset + 1)
+            if block_count >= 2 and block_count <= 8192 then
+                steps = steps + block_count
+                local entries = try_decode_block_list(raw, offset)
+                if entries and #entries >= 2 then
+                    local total = 0
+                    for _, e in ipairs(entries) do total = total + e.size end
+                    if total > best_total then
+                        best_entries, best_total = entries, total
+                    end
+                end
+            end
+        end
+    end
+
+    return best_entries
+end
+
+-- ── Character sprite frame decoder ─────────────────────────────────
+-- Confirmed against real RESOURCE.Axx data (see ScummVM's drawStripSpriteFrame):
+-- block 4 can open with a table of 14-byte frame descriptors:
+--   u32 span_rel_offset (from the end of the descriptor table to this
+--       frame's own span data)
+--   u32 packed x/width (x = low16, width = high16)
+--   u32 packed first_row/last_row (first_row = low16, last_row = high16)
+--   u16 span_count
+-- Followed immediately by every frame's span data, in descriptor order:
+--   per span: u32 packed x/y, u8 length, then `length` raw indexed pixel
+--   bytes (one scanline run). Verified: descriptor N's total span bytes
+--   exactly equals descriptor N+1's span_rel_offset minus descriptor N's.
+local FRAME_DESCRIPTOR_SIZE = 14
+
+-- Grows a descriptor table from offset 0 while entries stay plausible
+-- (sane bbox/span-count and non-decreasing span offsets); stops at the
+-- first implausible entry, which yields the real descriptor count.
+local function scan_frame_descriptors(raw, max_count)
+    max_count = max_count or 2000
+    local descriptors = {}
+    local prev_rel = -1
+    while #descriptors < max_count do
+        local base = #descriptors * FRAME_DESCRIPTOR_SIZE
+        if base + FRAME_DESCRIPTOR_SIZE > #raw then break end
+
+        local rel_offset  = u32le(raw, base + 1)
+        local packed_xw   = u32le(raw, base + 5)
+        local packed_rows = u32le(raw, base + 9)
+        local span_count  = u16le(raw, base + 13)
+
+        local x = packed_xw % 65536
+        local width = math.floor(packed_xw / 65536)
+        local first_row = packed_rows % 65536
+        local last_row = math.floor(packed_rows / 65536)
+
+        local plausible = width >= 1 and width <= 1024
+            and x >= 0 and x < 1024
+            and first_row <= last_row and (last_row - first_row) < 2048
+            and span_count <= 2000
+            and rel_offset >= prev_rel and rel_offset < #raw
+
+        if not plausible then break end
+
+        descriptors[#descriptors + 1] = {
+            rel_offset = rel_offset, x = x, width = width,
+            first_row = first_row, last_row = last_row, span_count = span_count
+        }
+        prev_rel = rel_offset
+    end
+    return descriptors
+end
+
+-- Renders one descriptor's span data onto a width × (last_row-first_row+1)
+-- indexed canvas (that bounding box is exactly what the descriptor records).
+local function render_frame_descriptor(raw, table_end, descriptor, palette)
+    local w = descriptor.width
+    local h = descriptor.last_row - descriptor.first_row + 1
+    if w <= 0 or h <= 0 or w * h > 2000000 then return nil end
+
+    local pixels = {}
+    for i = 1, w * h do pixels[i] = 0 end
+
+    local cursor = table_end + descriptor.rel_offset + 1
+    for _ = 1, descriptor.span_count do
+        if cursor + 4 > #raw then return nil end
+        local packed = u32le(raw, cursor)
+        local length = raw:byte(cursor + 4)
+        cursor = cursor + 5
+        if not length or cursor + length - 1 > #raw then return nil end
+
+        local span_x = packed % 65536
+        local span_y = math.floor(packed / 65536)
+        local row = span_y - descriptor.first_row
+        local col0 = span_x - descriptor.x
+        if row >= 0 and row < h then
+            for k = 0, length - 1 do
+                local col = col0 + k
+                if col >= 0 and col < w then
+                    pixels[row * w + col + 1] = raw:byte(cursor + k)
+                end
+            end
+        end
+        cursor = cursor + length
+    end
+
+    return image_create_indexed(w, h, pixels, palette), w, h
+end
+
 -- ── Z-buffer RLE decompressor ────────────────────────────────────
 -- Format: 3-byte records (fill_value, run_length_u16le)
 -- Decompresses into STRIDE × SCREEN_H = 491,520 bytes
@@ -497,9 +624,9 @@ function engine.get_resources(game_path)
                             }
                         end
 
-                        -- Block 4: combined resource buffer - anything past the
-                        -- fixed per-scene metadata region is candidate sprite data
-                        if vo[4] and vo[4] > 0 and vs[4] and vs[4] > SCENE_METADATA_END then
+                        -- Block 4: combined resource buffer - metadata plus
+                        -- (on many scenes) trailing sprite/icon data
+                        if vo[4] and vo[4] > 0 and vs[4] and vs[4] > 8 then
                             scene_children[#scene_children + 1] = {
                                 id   = "sprites_" .. scene_id,
                                 name = "Sprites",
@@ -1249,7 +1376,7 @@ function load_scene_overlay(game_path, scene_id)
         end
     end
 
-    local entries = try_decode_block_list(raw, 0)
+    local entries = scan_best_block_list(raw, 0, #raw - 2)
     if entries then
         local img, w, h = render_block_list_image(raw, entries, palette)
         if img then
@@ -1268,10 +1395,10 @@ function load_scene_overlay(game_path, scene_id)
         "Scene %s overlay - unrecognized format (%d bytes)", scene_id, #raw) }
 end
 
--- ── Scene sprite loader (block 4 trailing data) ────────────────────
--- Block 4 starts with a fixed-layout metadata region (pathfinding, palette
--- and verb/relation tables); anything after SCENE_METADATA_END is candidate
--- sprite/icon pixel data in the same self-describing block-list format.
+-- ── Scene sprite loader (block 4) ──────────────────────────────────
+-- Tries the confirmed character-animation frame-descriptor table first
+-- (see scan_frame_descriptors); falls back to the generic block-list format
+-- for scenes that store something else in block 4 (e.g. hotspot/icon data).
 
 function load_scene_sprites(game_path, scene_id)
     local letter = scene_id:sub(1, 1)
@@ -1285,7 +1412,7 @@ function load_scene_sprites(game_path, scene_id)
 
     local offsets, sizes = read_scene_tables(f)
     if not offsets or not sizes or not offsets[4] or offsets[4] == 0
-       or not sizes[4] or sizes[4] <= SCENE_METADATA_END then
+       or not sizes[4] or sizes[4] < 8 then
         file_close(f)
         return nil
     end
@@ -1296,24 +1423,54 @@ function load_scene_sprites(game_path, scene_id)
 
     if not raw or not palette then return nil end
 
-    local entries = try_decode_block_list(raw, SCENE_METADATA_END)
-    if not entries then
-        return { type = "text", text = string.format(
-            "Scene %s sprites - unrecognized format past metadata (%d bytes total)",
-            scene_id, #raw) }
+    local descriptors = scan_frame_descriptors(raw)
+    if #descriptors > 0 then
+        local table_end = #descriptors * FRAME_DESCRIPTOR_SIZE
+        local frames = {}
+        for _, d in ipairs(descriptors) do
+            local img = render_frame_descriptor(raw, table_end, d, palette)
+            if img then frames[#frames + 1] = img end
+        end
+        if #frames == 1 then
+            return {
+                type = "image",
+                image = frames[1],
+                description = string.format("Scene %s sprite frame", scene_id)
+            }
+        elseif #frames > 1 then
+            local anim = animation_create(frames, 150)
+            return {
+                type = "animation",
+                animation = anim,
+                image = frames[1],
+                frames = frames,
+                description = string.format(
+                    "Scene %s sprites - %d animation frames (of %d descriptors)",
+                    scene_id, #frames, #descriptors
+                )
+            }
+        end
     end
 
-    local img, w, h = render_block_list_image(raw, entries, palette)
-    if not img then return nil end
+    -- Fallback: generic self-describing block list (hotspot/icon data)
+    local entries = scan_best_block_list(raw, 0, #raw - 2)
+    if entries then
+        local img, w, h = render_block_list_image(raw, entries, palette)
+        if img then
+            return {
+                type = "image",
+                image = img,
+                description = string.format(
+                    "Scene %s sprites - %d blocks composited into %dx%d",
+                    scene_id, #entries, w, h
+                )
+            }
+        end
+    end
 
-    return {
-        type = "image",
-        image = img,
-        description = string.format(
-            "Scene %s sprites - %d blocks composited into %dx%d",
-            scene_id, #entries, w, h
-        )
-    }
+    return { type = "text", text = string.format(
+        "Scene %s sprites - unrecognized format (%d bytes total)",
+        scene_id, #raw) }
 end
 
 -- ── RESOURCE.000 shared UI resources ───────────────────────────────
