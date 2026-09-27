@@ -21,17 +21,17 @@
 --   MSK_  : RLE-compressed walk mask (code_byte + u16LE length, fills 320x144)
 --   BOX_  : 1280 bytes = 256 x 5-byte entries (area, object, y1Lum, y2Lum, dLum)
 --   FRM_  : Raw sprite frame data (walking sprites = 1500 bytes/frame)
---   TXT_  : Text strings (Spanish text XOR-encrypted with 0x6D)
---   VOC_  : Creative Voice File sound effects (CD IGOR.DAT), 8-bit unsigned
---           PCM, indexed by a 1400-entry sound-offset table into IGOR.DAT
---           (slots 1-68 = sound effects; speech/voice occupies later slots)
+--   VOC_  : Creative Voice File audio (CD IGOR.DAT), 8-bit unsigned PCM,
+--           indexed by a 1400-entry sound-offset table into IGOR.DAT
+--           (indices 1-68 = sound effects, 101-1392 = speech/voice acting)
+--   TXT_  : Text strings (Spanish, per-table byte shuffling, see below)
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Igor: Objective Uikokahonia"
 engine.id          = "igor"
 engine.description = "Pendulo Studios (1994) - DOS floppy & CD"
-engine.version     = "7.1"
+engine.version     = "7.2"
 
 -- ============================================================================
 -- Binary helpers (no bit32 in LuaJ 3.0.1)
@@ -428,6 +428,146 @@ local CD_SOUND_OFFSETS = {
     0x03A6DB16, 0x03A81798, 0x03A85846, 0x03A90222, 0x03A9F226, 0x03AA4DF3, 0x03AA8AB9, 0x03ABDE84,
     0x03AC9DF3, 0x03AD341F, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 }
+
+-- ============================================================================
+-- CD speech (talkie voice acting in IGOR.DAT)
+-- ============================================================================
+-- Speech clip ids referenced by ADD_DIALOGUE_TEXT, in id order.
+-- { speech id, text index, line count, source }  source "main" = the global
+-- dialogue table in IGOR.EXE; otherwise a CD_ROOMS name (its TXT_ block).
+local CD_SPEECH_DIALOGUE = {
+    {4, 4, 1, "main"},
+    {5, 5, 1, "main"},
+    {6, 6, 1, "main"},
+    {7, 7, 1, "main"},
+    {8, 8, 1, "main"},
+    {9, 9, 1, "main"},
+    {10, 10, 1, "main"},
+    {15, 15, 1, "main"},
+    {18, 18, 1, "main"},
+    {19, 19, 1, "main"},
+    {22, 22, 1, "main"},
+    {23, 23, 1, "main"},
+    {24, 24, 1, "main"},
+    {25, 25, 1, "main"},
+    {28, 28, 1, "main"},
+    {29, 29, 1, "main"},
+    {30, 30, 1, "main"},
+    {31, 31, 1, "main"},
+    {32, 51, 1, "main"},
+    {33, 52, 1, "main"},
+    {34, 53, 1, "main"},
+    {35, 54, 1, "main"},
+    {36, 55, 3, "main"},
+    {37, 58, 1, "main"},
+    {38, 59, 2, "main"},
+    {39, 61, 1, "main"},
+    {40, 62, 1, "main"},
+    {41, 63, 1, "main"},
+    {42, 64, 1, "main"},
+    {43, 65, 1, "main"},
+    {44, 66, 1, "main"},
+    {45, 67, 2, "main"},
+    {46, 69, 1, "main"},
+    {47, 70, 1, "main"},
+    {48, 71, 1, "main"},
+    {49, 72, 1, "main"},
+    {50, 73, 1, "main"},
+    {51, 74, 2, "main"},
+    {52, 76, 1, "main"},
+    {56, 80, 1, "main"},
+    {57, 81, 1, "main"},
+    {58, 82, 1, "main"},
+    {59, 83, 2, "main"},
+    {60, 85, 1, "main"},
+    {61, 86, 2, "main"},
+    {62, 88, 1, "main"},
+    {63, 89, 2, "main"},
+    {64, 92, 1, "main"},
+    {65, 93, 3, "main"},
+    {66, 96, 1, "main"},
+    {67, 97, 2, "main"},
+    {68, 99, 1, "main"},
+    {69, 100, 2, "main"},
+    {70, 140, 1, "main"},
+    {71, 141, 1, "main"},
+    {72, 142, 1, "main"},
+    {73, 143, 1, "main"},
+    {74, 144, 1, "main"},
+    {75, 145, 3, "main"},
+    {76, 148, 2, "main"},
+    {77, 150, 2, "main"},
+    {78, 152, 1, "main"},
+    {79, 153, 3, "main"},
+    {80, 156, 1, "main"},
+    {81, 157, 1, "main"},
+    {82, 158, 1, "main"},
+    {83, 159, 1, "main"},
+    {84, 160, 1, "main"},
+    {85, 161, 1, "main"},
+    {86, 162, 1, "main"},
+    {87, 163, 1, "main"},
+    {88, 164, 1, "main"},
+    {89, 165, 1, "main"},
+    {90, 166, 1, "main"},
+    {91, 167, 1, "main"},
+    {92, 168, 1, "main"},
+    {93, 169, 1, "main"},
+    {94, 170, 1, "main"},
+    {545, 201, 3, "Spring Bridge (Intro)"},
+    {546, 204, 1, "Spring Bridge (Intro)"},
+    {547, 205, 3, "Spring Bridge (Intro)"},
+    {548, 208, 1, "Spring Bridge (Intro)"},
+    {549, 209, 2, "Spring Bridge (Intro)"},
+    {550, 211, 1, "Spring Bridge (Intro)"},
+    {551, 212, 1, "Spring Bridge (Intro)"},
+    {552, 213, 1, "Spring Bridge (Intro)"},
+    {553, 214, 1, "Spring Bridge (Intro)"},
+    {554, 215, 1, "Spring Bridge (Intro)"},
+    {555, 216, 2, "Spring Bridge (Intro)"},
+    {556, 218, 1, "Spring Bridge (Intro)"},
+    {557, 219, 2, "Spring Bridge (Intro)"},
+    {558, 221, 2, "Spring Bridge (Intro)"},
+    {559, 223, 2, "Spring Bridge (Intro)"},
+    {560, 225, 2, "Spring Bridge (Intro)"},
+    {561, 227, 3, "Spring Bridge (Intro)"},
+    {1097, 201, 1, "Margaret's Room"},
+    {1098, 202, 1, "Margaret's Room"},
+    {1099, 203, 1, "Margaret's Room"},
+    {1100, 204, 1, "Margaret's Room"},
+    {1101, 205, 1, "Margaret's Room"},
+    {1102, 206, 1, "Margaret's Room"},
+    {1103, 207, 1, "Margaret's Room"},
+    {1104, 208, 1, "Margaret's Room"},
+    {1105, 209, 1, "Margaret's Room"},
+    {1106, 210, 1, "Margaret's Room"},
+    {1107, 211, 1, "Margaret's Room"},
+    {1108, 212, 1, "Margaret's Room"},
+    {1109, 213, 2, "Margaret's Room"},
+    {1110, 215, 1, "Margaret's Room"},
+    {1111, 216, 1, "Margaret's Room"},
+    {1112, 217, 1, "Margaret's Room"},
+    {1113, 218, 1, "Margaret's Room"},
+    {1114, 219, 1, "Margaret's Room"},
+    {1115, 220, 1, "Margaret's Room"},
+    {1116, 221, 1, "Margaret's Room"},
+    {1117, 222, 1, "Margaret's Room"},
+    {1118, 223, 1, "Margaret's Room"},
+    {1119, 224, 1, "Margaret's Room"},
+    {1120, 225, 1, "Margaret's Room"},
+    {1156, 201, 1, "Philip's Room"},
+    {1157, 202, 2, "Philip's Room"},
+    {1158, 204, 1, "Philip's Room"},
+    {1159, 205, 1, "Philip's Room"},
+    {1160, 206, 1, "Philip's Room"},
+}
+
+-- Re-key the table above by speech id; it is stored in id order for readability
+-- but callers only ever have an id to hand.
+local CD_SPEECH_BY_ID = {}
+for _, entry in ipairs(CD_SPEECH_DIALOGUE) do
+    CD_SPEECH_BY_ID[entry[1]] = entry
+end
 
 -- ============================================================================
 -- Floppy version (Spanish) - offsets into IGOR.DAT 11,199,335 bytes
@@ -937,6 +1077,218 @@ local function collect_cd_sfx()
     return list
 end
 
+-- Speech is played by playSound(num, 0) while the talkie flag is set: after
+-- the usual 1-based decrement the engine adds 100 before indexing the table,
+-- so speech id N lives at table slot N+99. The CD data uses that whole band
+-- contiguously - ids 2..1293 (slots 101..1392) are real VOC clips, id 1 and
+-- slot 1393 are empty/sentinel and the rest of the table is unused.
+local SPEECH_SLOT_BASE = 99
+local SPEECH_GROUP_SIZE = 200
+
+local function speech_offset(id)
+    local off = CD_SOUND_OFFSETS[id + SPEECH_SLOT_BASE + 1]
+    if not off or off <= 0 then return nil end
+    return off
+end
+
+local function collect_cd_speech()
+    local list = {}
+    for id = 2, 1293 do
+        local off = speech_offset(id)
+        if off then list[#list + 1] = { id = id, offset = off } end
+    end
+    return list
+end
+
+-- ============================================================================
+-- CD dialogue text (TXT_ blocks in IGOR.EXE)
+-- ============================================================================
+-- The Spanish text is byte-shuffled, not encrypted with one global key: each
+-- table uses its own transform. Both variants land on the same output charset
+-- (ASCII plus the eight CP850 letters Igor's text actually uses), so
+-- codepoint_to_utf8() below renders the result directly.
+--
+-- Only these eight high bytes occur anywhere in the game's text, so they are
+-- the only non-ASCII mappings needed (all eight appear in the reference
+-- transcript's \xNN escapes, confirming CP850).
+local CD_TEXT_HIGH = {
+    [0x82] = "\195\169", -- e-acute
+    [0xA0] = "\195\161", -- a-acute
+    [0xA1] = "\195\173", -- i-acute
+    [0xA2] = "\195\179", -- o-acute
+    [0xA3] = "\195\186", -- u-acute
+    [0xA4] = "\195\177", -- n-tilde
+    [0xA8] = "\194\168", -- inverted question
+    [0xAD] = "\194\169", -- inverted exclamation
+}
+
+-- Decode one shuffled byte from a room TXT_ block. Letters (upper and lower
+-- case) are stored shifted up by 0x6D; the 0xE8-0xEE band is a second encoding
+-- of the accented letters and is folded back onto the 0x80/0xA0 range; every
+-- other byte (ASCII punctuation, digits, CP850 letters) is stored as-is.
+local CD_TEXT_ROOM_FOLD = {
+    [0xE8] = 0xA0, [0xE9] = 0x82, [0xEA] = 0xA1, [0xEB] = 0xA2,
+    [0xEC] = 0xA3, [0xED] = 0xA4, [0xEE] = 0xA5,
+}
+
+local function decode_room_text_byte(c)
+    if (c >= 0xAE and c <= 0xC7) or (c >= 0xCE and c <= 0xE7) then
+        return c - 0x6D
+    end
+    if c > 0xE7 then
+        return CD_TEXT_ROOM_FOLD[c] or c
+    end
+    return c
+end
+
+local function codepoint_to_utf8(c)
+    if c < 0x80 then return string.char(c) end
+    -- Only the eight codes in CD_TEXT_HIGH occur in the shipped game, so this
+    -- is a safety net rather than an expected path; escape it visibly in the
+    -- same style decode_text() uses instead of guessing a character.
+    return CD_TEXT_HIGH[c] or string.format("[%02X]", c)
+end
+
+local function decode_shifted_bytes(data, from, len)
+    local out = {}
+    for i = 0, len - 1 do
+        out[#out + 1] = codepoint_to_utf8((u8(data, from + i) - 0x6D) % 256)
+    end
+    return table.concat(out)
+end
+
+-- The global dialogue table (TXT_MainTable, 28,028 bytes in IGOR.EXE) opens
+-- with the game strings and holds 250 fixed 102-byte entries starting at
+-- offset 0x8BA. Each entry is length-prefixed and every byte is shifted by
+-- 0x6D (space included, hence a different transform from the room blocks).
+-- Offsets below are 1-based (Lua string indexing) despite the 0x form.
+local TXT_MAIN_DLG_BASE   = 0x8BA + 1
+local TXT_MAIN_DLG_STRIDE = 102
+local TXT_MAIN_DLG_COUNT  = 250
+
+-- CD_TEXTS entry holding the global dialogue table (name, offset, size).
+local function find_main_text_block()
+    for _, t in ipairs(CD_TEXTS) do
+        if t[1] == "Main Text Table" then return t[2], t[3] end
+    end
+    return nil
+end
+
+local function decode_main_dialogue(data)
+    local out = {}
+    for i = 0, TXT_MAIN_DLG_COUNT - 1 do
+        local pos = TXT_MAIN_DLG_BASE + i * TXT_MAIN_DLG_STRIDE
+        if pos > #data then break end
+        local len = (u8(data, pos) - 0x6D) % 256
+        out[i] = len > 0 and decode_shifted_bytes(data, pos + 1, len) or nil
+    end
+    return out
+end
+
+-- Room TXT_ blocks start with 752 bytes of walk-grid/box data, then two
+-- length-prefixed tables of object names and dialogue lines. Each list is
+-- terminated by 0xF6 and 0xF4 marks the next list entry.
+local TXT_ROOM_HEADER = 752 + 1   -- 1-based
+
+local function decode_room_dialogue(data)
+    local out = {}
+    local pos = TXT_ROOM_HEADER
+    for _, base in ipairs({0, 200}) do
+        local idx = 0
+        while pos + 1 <= #data do
+            local code = u8(data, pos)
+            pos = pos + 1
+            if code == 0xF6 then break end
+            if code == 0xF4 then idx = idx + 1 end
+            local len = u8(data, pos)
+            pos = pos + 1
+            -- len 0 marks an unused slot: nothing inline to skip.
+            if len > 0 then
+                if pos + len - 1 > #data then break end
+                local chars = {}
+                for i = 0, len - 1 do
+                    chars[#chars + 1] = codepoint_to_utf8(decode_room_text_byte(u8(data, pos + i)))
+                end
+                out[base + idx] = table.concat(chars)
+                pos = pos + len
+            end
+        end
+    end
+    return out
+end
+
+-- Locate a CD room's TXT_ block by its display name, so the speech table can
+-- name rooms instead of duplicating their offsets.
+local function find_room_text_block(rooms, name)
+    for _, room in ipairs(rooms) do
+        if room[1] == name and room[10] > 0 and room[11] > 0 then
+            return room[10], room[11]
+        end
+    end
+    return nil
+end
+
+-- Decode the Spanish line(s) spoken by a clip listed in CD_SPEECH_DIALOGUE.
+-- Text lives in IGOR.EXE, so this needs the executable rather than IGOR.DAT.
+local function speech_dialogue_text(game_path, rooms, id, cache)
+    local entry = CD_SPEECH_BY_ID[id]
+    if not entry then return nil end
+    local first_index, count, source = entry[2], entry[3], entry[4]
+
+    local strings = cache[source]
+    if strings == nil then
+        local data_path = find_data_file(game_path)
+        if not data_path then return nil end
+        local fh = file_open(data_path)
+        if not fh then return nil end
+        local raw
+        if source == "main" then
+            local off, size = find_main_text_block()
+            if not off then file_close(fh) return nil end
+            raw = file_read(fh, off, size)
+        else
+            local off, size = find_room_text_block(rooms, source)
+            if not off then file_close(fh) return nil end
+            raw = file_read(fh, off, size)
+        end
+        file_close(fh)
+        if not raw or #raw == 0 then return nil end
+        strings = source == "main" and decode_main_dialogue(raw) or decode_room_dialogue(raw)
+        cache[source] = strings
+    end
+
+    local lines = {}
+    for i = 0, count - 1 do
+        local line = strings[first_index + i]
+        if not line or line == "" then return nil end
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+-- Tree label for a speech clip: "Speech #545 ..." plus, when known, the first
+-- line of its dialogue in quotes, truncated to keep the tree readable. The full
+-- text is shown in the preview pane instead.
+local SPEECH_LABEL_MAX = 64
+
+local function speech_node_label(id, lines)
+    local label = string.format("Speech #%d", id)
+    if not lines then return label end
+    local text = lines[1]
+    if #text > SPEECH_LABEL_MAX then
+        text = text:sub(1, SPEECH_LABEL_MAX - 3)
+        -- Cutting on a byte count can slice a 2-byte accented character in
+        -- half; drop the orphaned tail bytes before appending the ellipsis.
+        while #text > 0 do
+            local last = text:byte(#text)
+            if last < 0x80 or last >= 0xC0 then break end
+            text = text:sub(1, #text - 1)
+        end
+        text = text .. "..."
+    end
+    return string.format("%s  \"%s\"", label, text)
+end
+
 -- First sound-table offset strictly greater than [off]; used to bound a VOC
 -- chunk when reading it from IGOR.DAT (the files are stored contiguously).
 local function next_sound_offset(off)
@@ -1060,6 +1412,72 @@ local function decode_voc_pcm(data)
     return sample_rate, bits, table.concat(pcm_parts)
 end
 
+-- Read one VOC chunk out of IGOR.DAT and turn it into a previewable sound.
+-- [label] is the on-screen name ("Sound #12" / "Speech #545") and is used in
+-- both the success and the failure description.
+local function load_cd_voc_clip(game_path, offset, label)
+    local sound_path = find_sound_file(game_path)
+    if not sound_path then
+        return {type = "text", text = "No IGOR.DAT audio file found for the CD version"}
+    end
+
+    local fh = file_open(sound_path)
+    if not fh then return {type = "text", text = "Cannot open " .. sound_path} end
+
+    -- VOC chunks are stored contiguously in IGOR.DAT: borrow the next
+    -- sound's offset as this chunk's bound (or the end of file).
+    local end_off = next_sound_offset(offset) or file_size(fh)
+    if end_off <= offset then end_off = offset + 1 end
+    local voc_raw = file_read(fh, offset, end_off - offset)
+    file_close(fh)
+    if not voc_raw or #voc_raw < 26 then
+        return {type = "text", text = string.format("%s  |  IGOR.DAT@0x%X\n\nFailed to read clip data", label, offset)}
+    end
+
+    local info = parse_voc_info(voc_raw)
+    local sample_rate, bits, pcm = decode_voc_pcm(voc_raw)
+    if not sample_rate or not pcm then
+        local hint = ""
+        if info then
+            hint = string.format("\n\nVOC v%s present but no decodable PCM data blocks found", info.version)
+        end
+        return {
+            type = "text",
+            text = string.format("%s  |  IGOR.DAT@0x%X\n\nFailed to decode VOC audio%s", label, offset, hint),
+        }
+    end
+
+    local snd = sound_create_pcm(sample_rate, bits, 1, bits == 16, pcm)
+    if not snd then
+        return {type = "text", text = "Failed to create audio for " .. label}
+    end
+
+    local dur = info and info.duration or 0
+    if dur <= 0 and sample_rate > 0 then
+        dur = #pcm / ((bits / 8) * sample_rate)
+    end
+    -- Format the duration with integer math (LuaJ's string.format does not
+    -- honor float precision like "%.2f")
+    local dur_ms = math.floor(dur * 1000 + 0.5)
+    local dur_label = string.format("%d.%03d s", math.floor(dur_ms / 1000), dur_ms % 1000)
+    local signed_label = bits == 16 and "signed" or "unsigned"
+
+    return {
+        type = "sound",
+        sound = snd,
+        -- [2] = the second description line, used when a clip has known text.
+        meta = {
+            version = info and info.version or "?",
+            rate = sample_rate,
+            bits = bits,
+            bits_label = string.format("%d-bit %s", bits, signed_label),
+            samples = #pcm,
+            duration = dur_label,
+            offset = offset,
+        },
+    }
+end
+
 -- ============================================================================
 -- engine.detect(game_path)
 -- ============================================================================
@@ -1172,6 +1590,36 @@ function engine.get_resources(game_path)
         end
     end
 
+    -- Speech (CD only: talkie voice acting in the same IGOR.DAT sound table).
+    -- 1,292 clips is too many for one flat row, so chunk them into groups of
+    -- 200 and lead each clip with its Spanish line where the dialogue is known.
+    local speech_groups = {}
+    local speech_clip_count = 0
+    if version == VER_CD then
+        local clips = collect_cd_speech()
+        speech_clip_count = #clips
+        local text_cache = {}
+        local group, group_children
+        for i, clip in ipairs(clips) do
+            if i == 1 or (i - 1) % SPEECH_GROUP_SIZE == 0 then
+                group = {
+                    id = string.format("speech_group_%d", #speech_groups + 1),
+                    name = string.format("Speech %d-%d", clip.id,
+                        math.min(clip.id + SPEECH_GROUP_SIZE - 1, clips[#clips].id)),
+                    type = "category",
+                    children = {},
+                }
+                group_children = group.children
+                speech_groups[#speech_groups + 1] = group
+            end
+            group_children[#group_children + 1] = {
+                id = "speech_" .. clip.id,
+                name = speech_node_label(clip.id, speech_dialogue_text(game_path, rooms, clip.id, text_cache)),
+                type = "sound",
+            }
+        end
+    end
+
     local root = {}
     root[#root + 1] = {
         id = "cat_rooms",
@@ -1213,6 +1661,15 @@ function engine.get_resources(game_path)
             name = "Sound Effects (CD, " .. #sfx_children .. " sounds)",
             type = "category",
             children = sfx_children,
+        }
+    end
+
+    if #speech_groups > 0 then
+        root[#root + 1] = {
+            id = "cat_speech",
+            name = "Speech / Voice (CD, " .. speech_clip_count .. " clips)",
+            type = "category",
+            children = speech_groups,
         }
     end
 
@@ -1689,70 +2146,47 @@ function engine.load_resource(game_path, resource_id)
             return {type = "text", text = "Sound slot " .. slot .. " is unused in the CD sound table"}
         end
 
-        local sound_path = find_sound_file(game_path)
-        if not sound_path then
-            return {type = "text", text = "No IGOR.DAT audio file found for the CD version"}
+        local label = string.format("Sound #%d", slot + 1)
+        local clip = load_cd_voc_clip(game_path, offset, label)
+        if clip.type ~= "sound" then return clip end
+
+        local m = clip.meta
+        clip.description = string.format(
+            "%s  |  VOC v%s  |  %d Hz  |  %s PCM  |  %d samples  |  %s  |  IGOR.DAT@0x%X",
+            label, m.version, m.rate, m.bits_label, m.samples, m.duration, m.offset)
+        return clip
+    end
+
+    -- ====== Speech / voice acting (CD, VOC files in IGOR.DAT) ======
+    local speech_idx = resource_id:match("^speech_(%d+)$")
+    if speech_idx then
+        if version ~= VER_CD then
+            return {type = "text", text = "Speech is only available in the CD version (vocal .VOC data in IGOR.DAT)"}
+        end
+        local id = tonumber(speech_idx)
+        local offset = speech_offset(id)
+        if not offset then
+            return {type = "text", text = "Speech id " .. id .. " is unused in the CD sound table"}
         end
 
-        local fh = file_open(sound_path)
-        if not fh then return {type = "text", text = "Cannot open " .. sound_path} end
+        local label = string.format("Speech #%d", id)
+        local clip = load_cd_voc_clip(game_path, offset, label)
+        if clip.type ~= "sound" then return clip end
 
-        -- VOC chunks are stored contiguously in IGOR.DAT: borrow the next
-        -- sound's offset as this chunk's bound (or the end of file).
-        local end_off = next_sound_offset(offset)
-        if not end_off then
-            end_off = file_size(fh)
-        end
-        if end_off <= offset then end_off = offset + 1 end
-        local voc_raw = file_read(fh, offset, end_off - offset)
-        file_close(fh)
-        if not voc_raw or #voc_raw < 26 then
-            return {type = "text", text = "Failed to read sound slot " .. slot}
-        end
+        local m = clip.meta
+        local head = string.format(
+            "%s  |  VOC v%s  |  %d Hz  |  %s PCM  |  %d samples  |  %s  |  IGOR.DAT@0x%X",
+            label, m.version, m.rate, m.bits_label, m.samples, m.duration, m.offset)
 
-        local info = parse_voc_info(voc_raw)
-        local sample_rate, bits, pcm = decode_voc_pcm(voc_raw)
-        if not sample_rate or not pcm then
-            local hint = ""
-            if info then
-                hint = string.format("\n\nVOC v%s present but no decodable PCM data blocks found", info.version)
-            end
-            return {
-                type = "text",
-                text = string.format("Sound #%d  |  IGOR.DAT@0x%X\n\nFailed to decode VOC audio%s", slot + 1, offset, hint),
-            }
+        -- Known clips carry the Spanish line they speak; the rest are idents or
+        -- shouts with no matching ADD_DIALOGUE_TEXT entry.
+        local lines = speech_dialogue_text(game_path, rooms, id, {})
+        if lines then
+            clip.description = head .. "\n\n\"" .. table.concat(lines, "\"\n\"") .. "\""
+        else
+            clip.description = head
         end
-
-        local snd = sound_create_pcm(sample_rate, bits, 1, bits == 16, pcm)
-        if not snd then
-            return {type = "text", text = "Failed to create audio for sound #" .. (slot + 1)}
-        end
-
-        local dur = info and info.duration or 0
-        if dur <= 0 and sample_rate > 0 then
-            dur = #pcm / ((bits / 8) * sample_rate)
-        end
-        -- Format the duration with integer math (LuaJ's string.format does not
-        -- honor float precision like "%.2f")
-        local dur_ms = math.floor(dur * 1000 + 0.5)
-        local dur_label = string.format("%d.%03d s", math.floor(dur_ms / 1000), dur_ms % 1000)
-        local signed_label = bits == 16 and "signed" or "unsigned"
-        local desc = string.format(
-            "Sound #%d  |  VOC v%s  |  %d Hz  |  %d-bit %s PCM  |  %d samples  |  %s  |  IGOR.DAT@0x%X",
-            slot + 1,
-            info and info.version or "?",
-            sample_rate,
-            bits,
-            signed_label,
-            #pcm,
-            dur_label,
-            offset)
-
-        return {
-            type = "sound",
-            sound = snd,
-            description = desc,
-        }
+        return clip
     end
 
     return {type = "text", text = "Unknown resource: " .. tostring(resource_id)}
