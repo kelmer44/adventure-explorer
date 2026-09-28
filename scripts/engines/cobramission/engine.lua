@@ -3,24 +3,29 @@
 -- ============================================================================
 -- MegaTech, 1992. DOS.
 --
--- VOL archive: no header, just u32le offset table (padded to 256 bytes).
---   Last non-zero offset = total file size. Entries between consecutive offsets.
+-- VOL archive: the first u32le is the header size in bytes, so the offset
+--   table occupies exactly header_size/4 slots. Offsets ascend from
+--   header_size and the last one equals the file size; the remaining slots
+--   are padding. Repeated offsets are empty placeholder entries.
+--   The header size varies per file (32/64/96/128/256/384), so reading a
+--   fixed 256 bytes would mistake payload bytes for offsets.
 --
 -- GC image format (16-color planar, Huffman-compressed):
---   Header (16 bytes):
---     u16le sig "GC" (0x4347), u16le version, u16le palette_flag,
---     u16le subchunk_table_offset, u32le num_subchunks,
---     u16le chunk_size, u8 pad, u8 checksum
+--   Header:
+--     u8[0..1] sig "GC", u8[2..3] version, u8[4] palette flag (0x80 = present),
+--     u16le subchunk_table_offset, u16le num_subchunks, u16le entry_size, ...
 --   Optional palette: 16 colors * u16le in 0GRB format (4 bits per channel)
 --   Subchunk offset table: (num_subchunks+1) * u32le
 --   Each GC data chunk (10-byte header + Huffman bitstream):
 --     u8 marker (0xA4), u8 checksum,
 --     u8 x_offset, u8 y_offset (pixel positions),
---     u8 width_entries (in 8-pixel units), u8 height,
+--     u8 unknown, u8 width_entries2 (width in 8-pixel units is this >> 1),
 --     u16le data_size, u16le unknown
 --   Huffman codes (MSB-first, 16-bit bit buffer):
 --     00=copy_back, 01=copy_skip, 10=skip, 110=copy_store,
 --     1110=copy_move, 1111=copy_backing
+--   The height is not stored: the bitstream self-terminates when the chunk's
+--   data_size bytes have been consumed, so lines are decoded until then.
 --   Output is planar: 4 bytes -> 8 pixels (4 planes)
 -- ============================================================================
 
@@ -28,7 +33,7 @@ local engine = {}
 engine.name        = "Cobra Mission"
 engine.id          = "cobramission"
 engine.description = "Cobra Mission (MegaTech, 1992)"
-engine.version     = "1.0"
+engine.version     = "1.1"
 
 -- ============================================================================
 -- Binary helpers
@@ -46,32 +51,43 @@ end
 local POW2 = {}
 for i = 0, 16 do POW2[i] = 2 ^ i end
 
+local function bittest(v, bit)
+    return math.floor(v / POW2[bit]) % 2 == 1
+end
+
 -- ============================================================================
 -- VOL Archive Reader
 -- ============================================================================
 
 local function vol_entries(fh, fsize)
-    local max_tbl = math.min(fsize, 256)
-    local tbl = file_read(fh, 0, max_tbl)
-    if not tbl or #tbl < 4 then return {} end
+    if fsize < 8 then return {} end
+    local head = file_read(fh, 0, 4)
+    if not head or #head < 4 then return {} end
+
+    local hdr_size = u32le(head, 1)
+    local slots = math.floor(hdr_size / 4)
+    if slots < 2 or slots > 4096 or hdr_size > fsize then return {} end
+
+    local tbl = file_read(fh, 0, hdr_size)
+    if not tbl or #tbl < hdr_size then return {} end
 
     local offs = {}
-    for i = 0, math.floor(#tbl / 4) - 1 do
-        local o = u32le(tbl, i * 4 + 1)
-        if o > 0 and o <= fsize then table.insert(offs, o) end
+    for i = 0, slots - 1 do
+        local v = u32le(tbl, i * 4 + 1)
+        if v == 0 or v > fsize then break end
+        local n = #offs
+        if n > 0 and v < offs[n] then break end
+        offs[n + 1] = v
     end
-    table.sort(offs)
-
-    -- Deduplicate
-    local uoffs = { offs[1] }
-    for i = 2, #offs do
-        if offs[i] ~= offs[i - 1] then table.insert(uoffs, offs[i]) end
-    end
+    if #offs < 2 then return {} end
 
     local entries = {}
-    for i = 1, #uoffs - 1 do
-        if uoffs[i] < uoffs[i + 1] then
-            table.insert(entries, { offset = uoffs[i], size = uoffs[i + 1] - uoffs[i] })
+    for i = 1, #offs - 1 do
+        if offs[i + 1] > offs[i] then
+            table.insert(entries, {
+                offset = offs[i],
+                size = offs[i + 1] - offs[i],
+            })
         end
     end
     return entries
@@ -88,9 +104,19 @@ local function parse_0grb(data, pos)
         local r4 = math.floor(val / 16) % 16
         local g4 = math.floor(val / 256)
         local b4 = val % 16
-        pal[i * 3 + 1] = r4 * 16 + math.floor(r4 / 4)
-        pal[i * 3 + 2] = g4 * 16 + math.floor(g4 / 4)
-        pal[i * 3 + 3] = b4 * 16 + math.floor(b4 / 4)
+        pal[i * 3 + 1] = r4 * 17
+        pal[i * 3 + 2] = g4 * 17
+        pal[i * 3 + 3] = b4 * 17
+    end
+    for i = 16, 255 do pal[i*3+1]=0; pal[i*3+2]=0; pal[i*3+3]=0 end
+    return pal
+end
+
+local function default_palette()
+    local pal = {}
+    for i = 0, 15 do
+        local v = math.floor(i * 255 / 15)
+        pal[i*3+1]=v; pal[i*3+2]=v; pal[i*3+3]=v
     end
     for i = 16, 255 do pal[i*3+1]=0; pal[i*3+2]=0; pal[i*3+3]=0 end
     return pal
@@ -100,226 +126,292 @@ end
 -- GC Data Chunk Decoder
 -- ============================================================================
 
-local OFF_TABLE = {-1, -2, -4, -8, 1, 0}
+local DELTAS = { -1, -2, -4, -8, 1, 0 }
+local MAX_LINES = 2048
+local OP_GUARD = 100000
 
-local function decode_gc_chunk(data, cpos, csize, canvas, canvas_w)
-    if cpos + 9 > #data then return end
+-- Grow `canvas` (cw x ch) so it can hold at least need_w x need_h pixels.
+local function canvas_resize(canvas, cw, ch, need_w, need_h)
+    if need_w <= cw and need_h <= ch then return canvas, cw, ch end
+    local nw = math.max(cw, 1)
+    local nh = math.max(ch, 1)
+    while nw < need_w do nw = nw * 2 end
+    while nh < need_h do nh = nh * 2 end
+    local grown = {}
+    for i = 1, nw * nh do grown[i] = 0 end
+    for y = 0, ch - 1 do
+        local srow = y * cw
+        local drow = y * nw
+        for x = 0, cw - 1 do grown[drow + x + 1] = canvas[srow + x + 1] end
+    end
+    return grown, nw, nh
+end
+
+-- Decodes one GC subchunk and blits it into the canvas at (x_off, y_off).
+local function decode_gc_chunk(data, cpos, canvas, cw, ch)
+    if cpos + 9 > #data then return canvas, cw, ch, 0, 0 end
     local x_off = u8(data, cpos + 2)
     local y_off = u8(data, cpos + 3)
-    local w_ent = u8(data, cpos + 4)
-    local height = u8(data, cpos + 5)
-    if w_ent < 1 or height < 1 then return end
+    local w_ent = math.floor(u8(data, cpos + 5) / 2)
+    local dsize = u16le(data, cpos + 6)
+    if w_ent < 1 or dsize < 1 then return canvas, cw, ch, 0, 0 end
 
-    local dstart = cpos + 10
-    local line_bytes = w_ent * 4
-    local total_bytes = w_ent * height * 4
+    local blen = w_ent * 4
+    canvas, cw, ch = canvas_resize(canvas, cw, ch, x_off + w_ent * 8, y_off + 1)
 
-    -- Output buffer (4 bytes per entry, line-organized)
-    local out = {}
-    for i = 1, total_bytes do out[i] = 0 end
-    local opos = 0
+    -- Two line buffers, swapped after every line. `prev` holds the line
+    -- above, `cur` is being written and still holds the line two rows up.
+    local cur, prev = {}, {}
+    for i = 1, blen do cur[i] = 0; prev[i] = 0 end
+    local bx = {}
+    for i = 1, 1024 do bx[i] = 0 end
+    local bxi = 0
 
-    -- Backing store: 256 entries * 4 bytes
-    local bk = {}
-    for i = 1, 1024 do bk[i] = 0 end
-    local bk_idx = 0
-
-    -- Shared stream position
-    local spos = dstart
-
-    -- Bit buffer (MSB-first from 16-bit LE word, matching reference decoder)
-    local bbuf, bcount = 0, 0
-    local function bload()
-        if spos + 1 <= #data then
-            bbuf = data:byte(spos) + data:byte(spos + 1) * 256
-            spos = spos + 2
-            bcount = 16
-        else
-            bbuf = 0
-            bcount = 16
-        end
-    end
-    bload()
-
-    local function rbit()
-        bcount = bcount - 1
-        local bit = math.floor(bbuf / POW2[bcount]) % 2
-        if bcount == 0 then bload() end
-        return bit
-    end
-
-    -- Nibble buffer
-    local nib_has = false
-    local nib_hi = 0
-    local function rnib()
-        if nib_has then nib_has = false; return nib_hi end
-        if spos > #data then return 0 end
-        local b = data:byte(spos); spos = spos + 1
-        nib_has = true
-        nib_hi = math.floor(b / 16)
-        return b % 16
-    end
+    local p = cpos + 10
+    local consumed = 0
+    local overrun = false
+    local offset = 0
 
     local function rbyte()
-        if spos > #data then return 0 end
-        local b = data:byte(spos); spos = spos + 1
-        return b
+        consumed = consumed + 1
+        if p > #data then overrun = true; return 0 end
+        local v = data:byte(p)
+        p = p + 1
+        return v
     end
 
-    -- Entry operations
-    local function write4(b1, b2, b3, b4)
-        if opos + 3 < total_bytes then
-            out[opos+1]=b1; out[opos+2]=b2; out[opos+3]=b3; out[opos+4]=b4
+    -- Bit and nibble readers share the byte stream with literal reads.
+    local bitbuf, nbits = 0, 0
+    local function refill()
+        bitbuf = rbyte() + rbyte() * 256
+        nbits = 16
+    end
+    local function gbit()
+        local rv = 0
+        if bitbuf >= 32768 then rv = 1 end
+        bitbuf = (bitbuf * 2) % 65536
+        nbits = nbits - 1
+        if nbits == 0 then refill() end
+        return rv
+    end
+
+    local nibbuf, hasnib = 0, false
+    local function gnib()
+        if hasnib then
+            hasnib = false
+            return math.floor(nibbuf / 16)
         end
-        opos = opos + 4
+        hasnib = true
+        nibbuf = rbyte()
+        return nibbuf % 16
     end
 
-    local function copy_from(src)
-        if src >= 0 and src + 3 < total_bytes and opos + 3 < total_bytes then
-            out[opos+1]=out[src+1]; out[opos+2]=out[src+2]
-            out[opos+3]=out[src+3]; out[opos+4]=out[src+4]
+    -- Entry-granular access (1-based byte arrays, 0-based entry index).
+    local function gget(buf, e)
+        local o = e * 4
+        if o < 0 or o + 4 > blen then return nil end
+        return buf[o + 1], buf[o + 2], buf[o + 3], buf[o + 4]
+    end
+    local function gput(buf, e, a, b, c, d)
+        local o = e * 4
+        if o < 0 or o + 4 > blen then
+            overrun = true
+            return false
         end
-        opos = opos + 4
+        buf[o + 1], buf[o + 2], buf[o + 3], buf[o + 4] = a, b, c, d
+        return true
     end
 
-    local function do_back(off_val, count)
-        for _ = 1, count do
-            if opos >= total_bytes then break end
-            if off_val == 0 then
-                opos = opos + 4
-            elseif off_val == 1 then
-                copy_from(opos - line_bytes)
-            else
-                copy_from(opos + off_val * 4)
-            end
+    -- Repeat the previous line's column, or fill from the backing store.
+    local function put_prev(e)
+        local a, b, c, d = gget(prev, e)
+        if not a then
+            overrun = true
+            return false
         end
+        return gput(cur, e, a, b, c, d)
     end
 
-    local function remaining()
-        return w_ent - math.floor((opos % line_bytes) / 4)
-    end
+    local function handle_one()
+        local op
+        if gbit() == 1 then
+            if gbit() == 1 then
+                if gbit() == 1 then
+                    if gbit() == 1 then op = "bx" else op = "move" end
+                else op = "store" end
+            else op = "skip" end
+        else
+            if gbit() == 1 then op = "skiptable" else op = "back" end
+        end
 
-    -- Decompression loop
-    while opos < total_bytes do
-        local b1 = rbit()
-        local b2 = rbit()
+        if op == "skip" then -- 10: skip single entry
+            offset = offset + 1
 
-        if b1 == 0 and b2 == 0 then
-            -- 00: Copy from back
-            local v = rnib()
-            if v < 4 then
-                do_back(OFF_TABLE[v + 1], 1)
-            elseif v < 10 then
-                local n = rnib()
-                do_back(OFF_TABLE[v - 4 + 1], n + 2)
-            else
-                do_back(OFF_TABLE[v - 10 + 1], remaining())
-            end
+        elseif op == "store" then -- 110: 4 literal bytes, also into backing table
+            local v1, v2, v3, v4 = rbyte(), rbyte(), rbyte(), rbyte()
+            gput(cur, offset, v1, v2, v3, v4)
+            local bo = bxi * 4
+            bx[bo+1], bx[bo+2], bx[bo+3], bx[bo+4] = v1, v2, v3, v4
+            bxi = (bxi + 1) % 256
+            offset = offset + 1
 
-        elseif b1 == 0 and b2 == 1 then
-            -- 01: Copy with Skip
-            local v = rnib()
+        elseif op == "bx" then -- 1111: copy from backing table
+            local bo = rbyte() * 4
+            gput(cur, offset, bx[bo+1], bx[bo+2], bx[bo+3], bx[bo+4])
+            offset = offset + 1
+
+        elseif op == "skiptable" then -- 01: copy with skip table
+            local v = gnib()
             if v == 0 then
-                local n = rnib()
-                local e = {}
-                for bit = 0, 3 do
-                    e[bit+1] = (math.floor(n / POW2[bit]) % 2 == 1) and 0xFF or 0x00
-                end
-                write4(e[1], e[2], e[3], e[4])
+                local v2 = gnib()
+                gput(cur, offset,
+                    bittest(v2, 0) and 0xFF or 0x00,
+                    bittest(v2, 1) and 0xFF or 0x00,
+                    bittest(v2, 2) and 0xFF or 0x00,
+                    bittest(v2, 3) and 0xFF or 0x00)
+                offset = offset + 1
             elseif v == 15 then
-                copy_from(opos - line_bytes)
+                put_prev(offset)
+                offset = offset + 1
             else
-                local e = {0,0,0,0}
-                if opos + 3 < total_bytes then
-                    for j=0,3 do e[j+1] = out[opos+j+1] end
-                end
-                for bit = 0, 3 do
-                    if math.floor(v / POW2[bit]) % 2 == 1 then
-                        e[bit+1] = rbyte()
+                -- Only the set bits take a literal byte; the rest of the
+                -- entry is left as-is.
+                local o = offset * 4
+                if o + 4 <= blen then
+                    for n = 0, 3 do
+                        if bittest(v, n) then
+                            cur[o + n + 1] = rbyte()
+                        end
                     end
                 end
-                write4(e[1], e[2], e[3], e[4])
+                offset = offset + 1
             end
 
-        elseif b1 == 1 and b2 == 0 then
-            -- 10: Skip single entry
-            opos = opos + 4
-
-        else
-            local b3 = rbit()
-            if b3 == 0 then
-                -- 110: Copy and store
-                local r1,r2,r3,r4 = rbyte(),rbyte(),rbyte(),rbyte()
-                bk[bk_idx*4+1]=r1; bk[bk_idx*4+2]=r2
-                bk[bk_idx*4+3]=r3; bk[bk_idx*4+4]=r4
-                bk_idx = (bk_idx + 1) % 256
-                write4(r1, r2, r3, r4)
-            else
-                local b4 = rbit()
-                if b4 == 0 then
-                    -- 1110: Copy with Move
-                    local v = rnib()
-                    if v == 0 then
-                        local x = rbyte()
-                        local cnt = (x % 64) + 18
-                        local oidx = math.floor(x / 64)
-                        do_back(OFF_TABLE[oidx + 1], cnt)
-                    elseif v == 15 then
-                        local x = rbyte()
-                        local cnt = (x % 64) + 18
-                        local top = math.floor(x / 64)
-                        if top == 0 then
-                            for _ = 1, cnt do
-                                if opos >= total_bytes then break end
-                                copy_from(opos - line_bytes)
-                            end
-                        else
-                            for _ = 1, cnt do
-                                if opos >= total_bytes then break end
-                                opos = opos + 4
-                            end
-                        end
-                    else
-                        local e = {0,0,0,0}
-                        if opos >= 4 then
-                            for j=0,3 do e[j+1] = out[opos-4+j+1] end
-                        end
-                        for bit = 0, 3 do
-                            if math.floor(v / POW2[bit]) % 2 == 1 then
-                                e[bit+1] = rbyte()
-                            end
-                        end
-                        write4(e[1], e[2], e[3], e[4])
+        elseif op == "move" then -- 1110: copy with move table
+            local v = gnib()
+            if v == 0 then
+                local cb = rbyte()
+                local delta = DELTAS[math.floor(cb / 64) + 1]
+                local cnt = cb % 64 + 0x12
+                for _ = 1, cnt do
+                    local d1, d2, d3, d4 = gget(cur, offset + delta)
+                    if not d1 then break end
+                    gput(cur, offset, d1, d2, d3, d4)
+                    offset = offset + 1
+                end
+            elseif v == 15 then
+                local cb = rbyte()
+                local cnt = cb % 64 + 0x12
+                if math.floor(cb / 64) == 0 then
+                    for _ = 1, cnt do
+                        if not put_prev(offset) then break end
+                        offset = offset + 1
                     end
                 else
-                    -- 1111: Copy from backing store
-                    local idx = rbyte()
-                    write4(bk[idx*4+1], bk[idx*4+2], bk[idx*4+3], bk[idx*4+4])
+                    offset = offset + cnt
+                end
+            else
+                -- Set bits always consume a literal byte, so the stream
+                -- stays aligned even at offset 0 where the clear bits have
+                -- no previous entry to repeat.
+                local o = offset * 4
+                if o + 4 <= blen then
+                    for n = 0, 3 do
+                        if bittest(v, n) then
+                            cur[o + n + 1] = rbyte()
+                        elseif o >= 4 then
+                            cur[o + n + 1] = cur[o + n - 3]
+                        else
+                            cur[o + n + 1] = 0x00
+                        end
+                    end
+                end
+                offset = offset + 1
+            end
+
+        else -- "back": copy from back
+            local a = gnib()
+            if a < 4 then
+                local d1, d2, d3, d4 = gget(cur, offset + DELTAS[a + 1])
+                if d1 then
+                    gput(cur, offset, d1, d2, d3, d4)
+                else
+                    overrun = true
+                end
+                offset = offset + 1
+            else
+                local cnt, delta
+                if a < 10 then
+                    cnt = gnib() + 2
+                    delta = DELTAS[a - 3]
+                else
+                    cnt = w_ent - offset
+                    delta = DELTAS[a - 9]
+                end
+                if delta < 0 then
+                    for _ = 1, cnt do
+                        if offset >= w_ent then break end
+                        local d1, d2, d3, d4 = gget(cur, offset + delta)
+                        if not d1 then
+                            overrun = true
+                            break
+                        end
+                        gput(cur, offset, d1, d2, d3, d4)
+                        offset = offset + 1
+                    end
+                elseif delta > 0 then
+                    for _ = 1, cnt do
+                        if offset >= w_ent then break end
+                        if not put_prev(offset) then break end
+                        offset = offset + 1
+                    end
+                else
+                    offset = offset + cnt
                 end
             end
         end
     end
 
-    -- Convert planar output to pixel indices on canvas
-    for ey = 0, height - 1 do
-        for ex = 0, w_ent - 1 do
-            local ep = (ey * w_ent + ex) * 4
-            local pb1, pb2, pb3, pb4 = out[ep+1], out[ep+2], out[ep+3], out[ep+4]
-            for p = 0, 7 do
-                local bp = 7 - p
-                local pixel = math.floor(pb1 / POW2[bp]) % 2
-                            + math.floor(pb2 / POW2[bp]) % 2 * 2
-                            + math.floor(pb3 / POW2[bp]) % 2 * 4
-                            + math.floor(pb4 / POW2[bp]) % 2 * 8
-                local cx = x_off + ex * 8 + p
-                local cy = y_off + ey
-                local ci = cy * canvas_w + cx + 1
-                if cx < canvas_w and ci >= 1 and ci <= #canvas then
-                    canvas[ci] = pixel
+    -- Prime the bit buffer, then decode one line per stream termination.
+    refill()
+    local lines = 0
+    while lines < MAX_LINES and consumed < dsize and not overrun do
+        offset = 0
+        local guard = 0
+        while offset < w_ent and not overrun do
+            handle_one()
+            guard = guard + 1
+            if guard > OP_GUARD then
+                overrun = true
+                break
+            end
+        end
+
+        canvas, cw, ch = canvas_resize(canvas, cw, ch,
+            x_off + w_ent * 8, y_off + lines + 1)
+
+        local ey = y_off + lines
+        if ey < ch then
+            for ex = 0, w_ent - 1 do
+                local o = ex * 4
+                local pb1, pb2, pb3, pb4 = cur[o+1], cur[o+2], cur[o+3], cur[o+4]
+                local prow = ey * cw + x_off
+                for px = 0, 7 do
+                    local bp = 7 - px
+                    canvas[prow + ex * 8 + px + 1] =
+                          (bittest(pb1, bp) and 1 or 0)
+                        + (bittest(pb2, bp) and 2 or 0)
+                        + (bittest(pb3, bp) and 4 or 0)
+                        + (bittest(pb4, bp) and 8 or 0)
                 end
             end
         end
+
+        lines = lines + 1
+        cur, prev = prev, cur
     end
+
+    return canvas, cw, ch, x_off + w_ent * 8, y_off + lines
 end
 
 -- ============================================================================
@@ -328,64 +420,45 @@ end
 
 local function decode_gc(data)
     if #data < 16 then return nil end
-    local sig = u16le(data, 1)
-    if sig ~= 0x4347 then return nil end
+    if u8(data, 1) ~= 0x47 or u8(data, 2) ~= 0x43 then return nil end
 
-    local pal_flag = u16le(data, 5)
+    local haspal = u8(data, 5) == 0x80
     local tbl_off = u16le(data, 7)
-    local nsub = u32le(data, 9)
-    if nsub < 1 or nsub > 100 then return nil end
+    local nsub = u16le(data, 9)
+    if haspal and tbl_off ~= 0x30 then tbl_off = 0x30 end
+    if not haspal and tbl_off ~= 0x10 then tbl_off = 0x10 end
+    if nsub < 1 or nsub > 4096 then return nil end
+    if tbl_off + 4 * (nsub + 1) > #data then return nil end
 
-    -- Palette
-    local pal
-    if pal_flag ~= 0 and 17 + 31 <= #data then
-        pal = parse_0grb(data, 17)
-    end
-    if not pal then
-        pal = {}
-        for i = 0, 15 do
-            local v = math.floor(i * 255 / 15)
-            pal[i*3+1]=v; pal[i*3+2]=v; pal[i*3+3]=v
-        end
-        for i = 16, 255 do pal[i*3+1]=0; pal[i*3+2]=0; pal[i*3+3]=0 end
-    end
+    local pal = (haspal and 17 + 31 <= #data)
+        and parse_0grb(data, 17) or default_palette()
 
-    -- Subchunk offset table
-    local tpos = tbl_off + 1
-    local soffs = {}
-    for i = 0, nsub do
-        if tpos + i * 4 + 3 <= #data then
-            soffs[i] = u32le(data, tpos + i * 4)
-        end
-    end
-
-    -- Determine canvas size from chunk headers
-    local cw, ch = 0, 0
+    local canvas, cw, ch = {}, 0, 0
+    local used_w, used_h = 0, 0
     for i = 0, nsub - 1 do
-        local cp = (soffs[i] or 0) + 1
-        if cp + 5 <= #data then
-            local x = u8(data, cp + 2)
-            local y = u8(data, cp + 3)
-            local we = u8(data, cp + 4)
-            local he = u8(data, cp + 5)
-            local r = x + we * 8
-            local b = y + he
-            if r > cw then cw = r end
-            if b > ch then ch = b end
+        local co = u32le(data, tbl_off + 1 + i * 4)
+        if co + 10 <= #data and u8(data, co + 1) == 0xA4 then
+            local uw, uh
+            canvas, cw, ch, uw, uh = decode_gc_chunk(data, co + 1, canvas, cw, ch)
+            if uw > used_w then used_w = uw end
+            if uh > used_h then used_h = uh end
         end
     end
-    if cw < 1 or ch < 1 or cw > 4096 or ch > 4096 then return nil end
 
-    local canvas = {}
-    for i = 1, cw * ch do canvas[i] = 0 end
+    if used_w < 1 or used_h < 1 then return nil end
 
-    for i = 0, nsub - 1 do
-        local co = soffs[i] or 0
-        local ce = soffs[i + 1] or #data
-        decode_gc_chunk(data, co + 1, ce - co, canvas, cw)
+    -- The canvas is grown by doubling, so crop it back to the extent the
+    -- chunks actually covered.
+    local pixels = {}
+    for y = 0, used_h - 1 do
+        local srow = y * cw
+        local drow = y * used_w
+        for x = 0, used_w - 1 do
+            pixels[drow + x + 1] = canvas[srow + x + 1]
+        end
     end
 
-    return image_create_indexed(cw, ch, canvas, pal)
+    return image_create_indexed(used_w, used_h, pixels, pal)
 end
 
 -- ============================================================================

@@ -240,7 +240,7 @@ HQR (High Quality Resource) is the higher-level resource archive format used by 
 
 ## 2.1 VOL Archive Structure
 
-Source: [cobra-mission-writer volfile.cpp](https://github.com/AshleyWright/cobra-mission-writer), [MegaTech VOL Format wiki](https://wiki.scummvm.org/index.php/User:Wikipedia/Cobra_Mission)
+Source: [cobra-mission-writer volfile.cpp](https://github.com/BlackStar-EoP/cobra-mission-writer), [MegaTech VOL Format wiki](https://wiki.scummvm.org/index.php/User:Wikipedia/Cobra_Mission)
 
 ### Archive Layout
 
@@ -277,14 +277,16 @@ A VOL file has **no magic signature**. It is simply:
 | Offset | Size | Field              | Description                          |
 |--------|------|--------------------|--------------------------------------|
 | 0x00   | 2    | Signature          | "GC" (0x47, 0x43)                    |
-| 0x02   | 1    | Version            | Format version                        |
-| 0x03   | 1    | (padding)          | Usually 0                             |
-| 0x04   | 1    | Palette flag       | Non-zero if palette follows header   |
-| 0x05   | 1    | (padding)          | Usually 0                             |
-| 0x06   | 4    | Subchunk table ptr | Offset to subchunk offset table      |
-| 0x0A   | 2    | Num subchunks      | Number of image subchunks            |
-| 0x0C   | 2    | Chunk size         | Total size of this GC entry          |
-| 0x0E   | 2    | Checksum           | Integrity check                       |
+| 0x02   | 1    | Version            | Format version (0 in game data)      |
+| 0x03   | 1    | (padding)          | Usually 0                            |
+| 0x04   | 1    | Palette flag       | Exactly 0x80 if a palette follows    |
+| 0x05   | 1    | (padding)          | Usually 0                            |
+| 0x06   | 2    | Subchunk table ptr | UINT16LE: 0x30 with palette, else 0x10 |
+| 0x08   | 2    | Num subchunks      | UINT16LE number of image subchunks   |
+| 0x0A   | 2    | (padding)          | 0                                    |
+| 0x0C   | 2    | Chunk size         | UINT16LE total size of this GC entry |
+
+Verified against all 972 GC subchunks in the game data: `0x06` always agrees with the palette flag, `0x08` is a UINT16LE (a UINT32LE read happens to work on this data only because the upper bytes are zero), and `data_size == next_offset - offset - 10` for every subchunk.
 
 ### Palette (32 bytes, if palette flag set)
 
@@ -324,20 +326,24 @@ Each subchunk has a 10-byte header:
 |--------|------|----------------|--------------------------------------|
 | 0x00   | 1    | Marker         | Always 0xA4                          |
 | 0x01   | 1    | Checksum       | Data integrity                       |
-| 0x02   | 2    | X offset       | Horizontal position (UINT16LE)       |
-| 0x04   | 2    | Y offset       | Vertical position (UINT16LE)         |
-| 0x06   | 1    | Width          | Width in 8-pixel units               |
-| 0x07   | 1    | Height         | Height in pixels                     |
-| 0x08   | 2    | Data size      | Compressed data size (UINT16LE)      |
+| 0x02   | 1    | X offset       | Horizontal position in pixels        |
+| 0x03   | 1    | Y offset       | Vertical position in pixels          |
+| 0x04   | 1    | Unknown        | -                                    |
+| 0x05   | 1    | Width × 2      | Width in 8-pixel units is `this >> 1`|
+| 0x06   | 2    | Data size      | Compressed data size (UINT16LE)      |
+| 0x08   | 2    | Unknown        | -                                    |
 
 ### Image Dimensions
 
-- **Resolution**: 640×480 (standard) or 592×360 (alternate, as seen in standalone decoder)
-- Width is in **8-pixel units** due to planar encoding (each 4-byte planar group = 8 pixels)
+- Width is in **8-pixel units** due to planar encoding (each 4-byte planar group = 8 pixels), so pixel width is `(header[0x05] >> 1) * 8`. Note this is the `>> 1` of byte 5, **not** byte 4.
+- **Height is not stored.** The bitstream is self-terminating: lines are decoded until the chunk's `data_size` bytes have been consumed. Measured against all 967 GC subchunks in the game data, this consumes the payload exactly in every case.
+- Full-screen images decode to 640×400 (the standard VGA resolution). Sub-rect images decode to their own extents, e.g. 432×292.
+- `header[0x04]` is not the height. It equals the line count for some sprite subchunks but disagrees for the full-screen ones (e.g. 144 vs 400 for PIC1), so it must not be used as one.
+- Subchunks within a GC entry are composited at their (x, y) pixel offsets; the image extent is the maximum `x + width` and `y + height` over all subchunks.
 
 ## 2.3 GC Decompression Algorithm
 
-Source: [gcparse.cpp](https://github.com/AshleyWright/cobra-mission-writer/blob/master/gcparse.cpp)
+Source: [gcparse.cpp](https://github.com/BlackStar-EoP/cobra-mission-writer/blob/master/gcparse.cpp)
 
 The GC format uses a custom **Huffman + LZ77/LZ78 hybrid** compression scheme operating on **4-bit planar** pixel data.
 
