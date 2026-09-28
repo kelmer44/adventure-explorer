@@ -315,6 +315,17 @@ adventure-explorer/
 - [x] More engine scripts (SCI, AITD, Harvester, Cobra Mission)
 - [ ] Resource search/filter
 - [ ] Batch export
+- [ ] Support for all scumm games
+- [ ] Support for all Coktel games
+- [ ] Support for Capstone games
+- [ ] Support for Curse of Enchantia & Universe
+- [ ] Support for The Neverhood
+- [ ] Support for Sanitarium
+- [ ] Support for Microprose adventures
+- [ ] Support for Tsunami games
+- [ ] Support for Noctropolis
+- [ ] Support for Dark Seed II
+
 
 ## License
 
