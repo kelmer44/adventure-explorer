@@ -11,16 +11,18 @@
 --   TIMEGATE - TimeGate: Knight's Chase (1995)    detect: PURSUIT.PAK
 --
 -- Resources:
---   ITD_RESS.PAK  - Title/intro screens (palette+skip+pixels format):
---                     bytes 0-767   : 256-entry 6-bit VGA palette
---                     bytes 768-769 : 2 unknown bytes (skipped)
---                     bytes 770-64769: 64000 raw 8-bit indexed pixels (320x200)
+--   ITD_RESS.PAK  - Title/intro screens, palettes and movie frames
 --   CAMERA00.PAK  - Camera backgrounds for floor 0
 --   CAMERA01.PAK  - Camera backgrounds for floor 1  ... etc.
---                   AITD1: bytes 0-63999 = pixels only (palette from ITD_RESS[3])
---                   JACK+: bytes 0-63999 = pixels, bytes 64000-64767 = 6-bit palette
 --
--- PAK format (source: FITD / pak.cpp):
+--   Screen / background entries are identified by their decompressed size:
+--     64770 : AITD1 -- 8-bit palette (0-767) + 2 filler bytes + 64000 pixels
+--     64768 : JACK+ -- 64000 pixels + 6-bit palette (64000-64767)
+--     64000 : 64000 pixels only. The palette comes from a standalone 768-byte
+--             ITD_RESS entry -- entry 3 (the AITD1 sepia palette) is preferred,
+--             then entry 1, then the first 768-byte entry found.
+--
+-- PAK format (source: FITD fitd/pak.cpp):
 --   The file begins with an offset table:
 --     u32le[0]        : header value (skipped, carries no entry reference)
 --     u32le[1]        : file offset of entry 0   (= (numEntries+2)*4)
@@ -35,10 +37,19 @@
 --     s32le diskSize
 --     s32le uncompressedSize
 --     u8    compressionFlag     -- 0=raw, 1=PAK_explode (DCL implode), 4=deflate
---     u8    info5               -- unused
+--     u8    info5               -- PAK_explode flags: bit2 = literal tree,
+--                                 bit1 = 8K window
 --     s16le nameOffset          -- bytes to skip (name string), often 0
 --     [nameOffset bytes]        -- entry name (skipped)
 --     [diskSize bytes]          -- compressed or raw data
+--
+-- Compression (source: FITD fitd/unpack.cpp, itself Mark Adler's "explode"):
+--   PAK_explode is the PKWare DCL "implode" scheme. Huffman code lengths for
+--   the literal/length/distance trees are packed at the front of the stream as
+--   (count, bitlen) groups. Codes are canonical MSB-first but are read from
+--   the LSB end of the bit buffer, so they are stored bit-reversed and the bit
+--   buffer is complemented at lookup time. A final back-reference may overrun
+--   uncompressedSize; the output is truncated to it.
 -- ============================================================================
 
 local engine = {}
@@ -126,7 +137,8 @@ end
 
 -- Build flat Huffman decode table from bit lengths.
 -- Returns table indexed [0..2^max_len-1] -> packed (sym*256 + code_len), and max_len.
--- Lookup uses (~b) & mask to find the entry.
+-- Lookup complements the low `len` bits of the bit buffer
+-- (mask - (b % (mask + 1)) in Lua 5.2 terms, no bitwise operators needed).
 local function pak_build_table(lengths, n)
     local max_len = 0
     local bl_count = {}
@@ -154,12 +166,16 @@ local function pak_build_table(lengths, n)
         if len > 0 then
             local c = next_code[len]
             next_code[len] = c + 1
-            -- Table index = complement of bit-reversed code
+            -- Canonical Huffman codes are assigned MSB-first, but the decoder
+            -- consumes them LSB-first (the first bit read is the code's LSB),
+            -- so each code is stored bit-reversed. The reference implementation
+            -- stores the reversed code as-is and complements the *bit buffer*
+            -- at lookup time; complementing on both sides would cancel the
+            -- inversion and produce garbage output.
             local rev = bit_reverse(c, len)
-            local comp = math.floor(POW2[len]) - 1 - rev
             local step = math.floor(POW2[len])
             local packed = sym * 256 + len
-            for idx = comp, tsize - 1, step do
+            for idx = rev, tsize - 1, step do
                 tbl[idx] = packed
             end
         end
@@ -263,6 +279,13 @@ local function pak_explode(data, comp_size, uncomp_size, flags)
     local out_n = 0
 
     local function flush(size)
+        -- A final back-reference can overshoot the declared size; the
+        -- reference implementation simply writes past its buffer. Truncate so
+        -- the reported length always matches the PAK header.
+        if out_n + size > uncomp_size then
+            size = uncomp_size - out_n
+        end
+        if size <= 0 then return end
         for i = 1, size do
             out_n = out_n + 1
             out[out_n] = slide[i]
@@ -453,16 +476,17 @@ end
 -- Palette and pixel helpers
 -- ============================================================================
 
--- Convert 6-bit VGA palette (256 entries * 3 bytes) to 8-bit.
--- `data`  : binary string containing the palette
--- `base`  : 1-based Lua string position of the first palette byte
+-- Read a 256-entry palette out of `data` starting at 1-based `base`.
+-- `bits` is the stored colour depth: 6 means 0..63 per channel (VGA DAC,
+-- scaled up by 4), 8 means the bytes are already full range.
 -- Returns a 768-entry 1-indexed Lua table (R,G,B, R,G,B, ...)
-local function pal6_to_8(data, base)
+local function pal_read(data, base, bits)
+    local scale = (bits == 6) and 4 or 1
     local pal = {}
     for i = 0, 255 do
-        pal[i * 3 + 1] = u8(data, base + i * 3)     * 4
-        pal[i * 3 + 2] = u8(data, base + i * 3 + 1) * 4
-        pal[i * 3 + 3] = u8(data, base + i * 3 + 2) * 4
+        pal[i * 3 + 1] = u8(data, base + i * 3)     * scale
+        pal[i * 3 + 2] = u8(data, base + i * 3 + 1) * scale
+        pal[i * 3 + 3] = u8(data, base + i * 3 + 2) * scale
     end
     return pal
 end
@@ -478,13 +502,94 @@ local function gray_pal()
     return pal
 end
 
--- Build a 1-indexed pixel table from `count` bytes starting at `base` (1-based) in `data`
+-- Detect the stored depth of a standalone 768-byte palette. VGA DAC values top
+-- out at 63, so a higher byte means the palette is already full range. Used for
+-- palette entries that carry no layout hint: AITD1 stores 8-bit, AITD3 6-bit.
+local function pal_depth(data, base)
+    for i = 0, 767 do
+        if u8(data, base + i) > 63 then return 8 end
+    end
+    return 6
+end
+
+-- Build a pixel table from `count` bytes starting at `base` (1-based) in `data`
 local function pix_table(data, base, count)
     local pix = {}
     for i = 1, count do
         pix[i] = u8(data, base + i - 1)
     end
     return pix
+end
+
+-- Locate a standalone 768-byte palette inside ITD_RESS.PAK for pixel-only
+-- (64000 byte) entries. AITD1 keeps the in-game sepia palette in entry 3 and a
+-- plain greyscale ramp in entry 1, so entry 3 is preferred; other games store
+-- their palette in whatever entry happens to be 768 bytes, so fall back to the
+-- first one found. Returns nil when ITD_RESS holds no palette at all.
+local function ress_palette(game_path)
+    for _, idx in ipairs({ 3, 1 }) do
+        local p = pak_entry(game_path, "ITD_RESS", idx)
+        if p and #p == 768 then
+            return pal_read(p, 1, pal_depth(p, 1))
+        end
+    end
+    local path = game_path .. "/ITD_RESS.PAK"
+    if not file_exists(path) then return nil end
+    local fh = file_open(path)
+    if not fh then return nil end
+    local n = pak_count(fh)
+    file_close(fh)
+    for i = 0, n - 1 do
+        local p = pak_entry(game_path, "ITD_RESS", i)
+        if p and #p == 768 then
+            log_warn("AITD: no palette at ITD_RESS[3]/[1], falling back to ITD_RESS[" .. i .. "]")
+            return pal_read(p, 1, pal_depth(p, 1))
+        end
+    end
+    return nil
+end
+
+-- Screen / background layouts, keyed by the decompressed entry size:
+--   64770 : 8-bit palette (768) + 2 filler bytes + 64000 pixels  (AITD1)
+--   64768 : 64000 pixels + 6-bit palette (768)                   (AITD2/3)
+--   64000 : 64000 pixels only; the palette lives in a separate entry, so it is
+--           looked up lazily -- only these entries need it.
+-- Returns palette, 1-based pixel offset -- or nil when the size is unknown.
+local function screen_layout(game_path, data)
+    local n = #data
+    if n == 64770 then
+        return pal_read(data, 1, 8), 771
+    elseif n == 64768 then
+        return pal_read(data, 64001, 6), 1
+    elseif n == 64000 then
+        local pal = ress_palette(game_path)
+        if not pal then
+            log_warn("AITD: no 768-byte palette in ITD_RESS, using greyscale")
+            pal = gray_pal()
+        end
+        return pal, 1
+    end
+    return nil, nil
+end
+
+-- Render a 320x200 indexed image out of a decompressed screen entry.
+-- `label` is used for the resource description.
+local function screen_image(game_path, data, label)
+    local pal, pix_base = screen_layout(game_path, data)
+    if not pal then
+        return {
+            type = "text",
+            text = string.format("%s: %d bytes (unrecognised screen layout)",
+                                 label, #data),
+        }
+    end
+
+    local pix = pix_table(data, pix_base, 64000)
+    return {
+        type        = "image",
+        image       = image_create_indexed(320, 200, pix, pal),
+        description = label,
+    }
 end
 
 -- ============================================================================
@@ -583,26 +688,8 @@ function engine.load_resource(game_path, resource_id)
         if not data then
             return { type = "text", text = "Failed to load ITD_RESS entry " .. idx }
         end
-
-        -- Screens have: palette(768) + 2 skip bytes + pixels(64000) = 64770 bytes minimum
-        if #data < 64770 then
-            return {
-                type = "text",
-                text = string.format("ITD_RESS[%d]: %d bytes (not a full-screen image)", idx, #data),
-            }
-        end
-
-        -- Bytes 1-768 (1-based): 6-bit VGA palette
-        -- Bytes 769-770: skipped
-        -- Bytes 771-64770: 64000 raw indexed pixels
-        local pal = pal6_to_8(data, 1)
-        local pix = pix_table(data, 771, 64000)
-        local img = image_create_indexed(320, 200, pix, pal)
-        return {
-            type        = "image",
-            image       = img,
-            description = string.format("ITD_RESS[%d] - %s", idx, variant_name),
-        }
+        return screen_image(game_path, data,
+                            string.format("ITD_RESS[%d] - %s", idx, variant_name))
     end
 
     -- ---- Camera background -------------------------------------------------
@@ -621,42 +708,9 @@ function engine.load_resource(game_path, resource_id)
             }
         end
 
-        if #data < 64000 then
-            return {
-                type = "text",
-                text = string.format("%s[%d]: %d bytes (expected >= 64000)", pak_name, cam_idx, #data),
-            }
-        end
-
-        -- Determine palette source based on game variant:
-        --   AITD1: no embedded palette; use ITD_RESS.PAK entry 3 (raw 768-byte 6-bit palette)
-        --   JACK, AITD2, AITD3, TIMEGATE: 768-byte 6-bit palette appended after the 64000 pixels
-        local pal
-        if variant == "AITD1" then
-            local ress = pak_entry(game_path, "ITD_RESS", 3)
-            if ress and #ress >= 768 then
-                pal = pal6_to_8(ress, 1)
-            end
-        else
-            -- Palette at 1-based position 64001 (= 0-based byte 64000, right after pixels)
-            if #data >= 64768 then
-                pal = pal6_to_8(data, 64001)
-            end
-        end
-
-        if not pal then
-            log_warn("AITD: palette unavailable for " .. pak_name .. "[" .. cam_idx .. "], using grayscale")
-            pal = gray_pal()
-        end
-
-        -- Pixels occupy bytes 1-64000 (1-based)
-        local pix = pix_table(data, 1, 64000)
-        local img = image_create_indexed(320, 200, pix, pal)
-        return {
-            type        = "image",
-            image       = img,
-            description = string.format("Floor %d, Camera %d - %s", floor, cam_idx, variant_name),
-        }
+        return screen_image(game_path, data,
+                            string.format("Floor %d, Camera %d - %s",
+                                          floor, cam_idx, variant_name))
     end
 
     return { type = "text", text = "Unknown resource id: " .. resource_id }
