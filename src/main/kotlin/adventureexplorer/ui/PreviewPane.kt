@@ -778,13 +778,24 @@ private fun TextPreview(text: String, description: String?) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
         }
-        Text(
-            text = text,
-            fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace,
-            color = Color(0xFFE0E0E0),
-            modifier = Modifier.verticalScroll(scrollState)
-        )
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Text(
+                text = text,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFE0E0E0),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(end = 16.dp)
+            )
+            VerticalScrollbar(
+                adapter = rememberScrollbarAdapter(scrollState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+            )
+        }
     }
 }
 
