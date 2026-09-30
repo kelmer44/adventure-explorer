@@ -75,6 +75,14 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 
 games in ags/darkseed and ags/DSEED35
 
+### Dark Seed 2
+No ScummVM engine exists for this game, so the format was reverse engineered from
+the data itself plus the Dark Seed II resource tooling:
+https://github.com/DrMcCoy/darkseed2-tools (see `src/unglue.cpp` for the Glue
+archive container and its LZ variant).
+
+game in ags/DARKSEED2
+
 ### HARVESTER
 Harvester branch in this scummvm fork https://github.com/alexbevi/scummvm/tree/harvester
 

@@ -1246,3 +1246,122 @@ Palettes are installed into the video DAC starting at index 1
 A 256 colour palette therefore occupies DAC entries 1..255, and pixel value
 `n` maps to palette entry `n-1`. Forgetting this shift costs exactly one
 palette entry and visibly darkens/misaligns every image.
+
+# Part 5: Dark Seed 2 Resource Format
+
+No ScummVM engine exists for Dark Seed 2, so the format was derived from the
+game data itself and cross-checked against the Dark Seed II resource tooling at
+https://github.com/DrMcCoy/darkseed2-tools (`src/unglue.cpp`).
+Engine script: `scripts/engines/darkseed2/engine.lua`
+Game location: `ags/DARKSEED2`
+
+## 5.1 Top Level Layout
+
+| File | Purpose |
+|------|---------|
+| `DARK0001.EXE` | Executable (detection) |
+| `GFILE.HDR` | Master index: every archive plus every resource in the game |
+| `DS2RUN.HDR` | Datafile header |
+| `GL00_NNN.000` | 90 per-room Glue archives (compressed) |
+| `GL00__*.000` | 18 bulk Glue archives |
+| `*.AVI`, `SNDTRACK/` | Videos and music |
+
+`GFILE.HDR` is the important discovery: a single 211,318 byte file indexes all
+9,291 resources, so the whole resource tree can be listed without decompressing
+a single byte of the 26 MB of archives.
+
+```
+u16 archiveCount   (= 108)
+u16 resourceCount  (= 9291)
+archiveCount  x 64 byte records, archive name[12] at the record start
+resourceCount x 22 byte records:
+    u16 archiveIndex      (0-based index into the table above)
+    char name[12]
+    u32 size
+    u32 offset
+```
+
+`4 + 108*64 + 9291*22 == 211318` exactly, which is used as a sanity check
+before the file is trusted. Names are stored lower case while the files on disk
+are upper case, so lookups are case folded. `size`/`offset` are relative to the
+**decompressed** archive - `GL00_002.000` is only 159,418 bytes on disk but its
+`RM0002.BMP` sits at offset 111,804 with size 308,278.
+
+Verified by decompressing all 108 archives independently and comparing every
+one of the 9,291 entries: 0 size/offset mismatches.
+
+## 5.2 Glue Archive Format
+
+```
+u16 count
+count x { char name[12]; u32 size; u32 offset; }
+```
+
+Offsets are absolute within the uncompressed archive, so the data starts at
+`2 + count*20`. Whether an archive is compressed is decided the way the
+reference tool does it: attempt to read a resource list straight out of the
+file, and treat the archive as compressed if that fails (a count that cannot
+fit, a name character outside `[A-Za-z0-9._]`, or a resource running past the
+end of the file). 85 of the 108 archives are compressed.
+
+## 5.3 Glue Compression
+
+2048 byte physical chunks. The first chunk carries the uncompressed size as a
+`u32` at offset 2044, plus 128:
+
+```
+uncompressedSize = readU32LE(chunk0, 2044) + 128
+```
+
+Each chunk is then a run of 17 byte groups: one mask byte driving eight
+operations. A set mask bit copies two literal bytes; a clear bit reads a `u16`:
+
+```
+offset = (raw >> 4) + 1        -- 1..4096
+count  = (raw & 0xF) + 3       -- 3..18
+```
+
+When the mask byte has been fully shifted out (eight operations done, 17 input
+bytes consumed) the next mask byte is read. A trailing partial chunk rounds its
+input length up to a whole number of 17 byte groups.
+
+Two details matter for a correct port:
+
+* The reference unconditionally writes 8 bytes per back-reference and then 10
+  more when `count > 8`, so it writes up to 15 bytes past the logical end of a
+  short run. Only the first `count` bytes are meaningful, and a faithful port
+  should append exactly `count` bytes.
+* Decompression stops a little short of the declared size (typically ~125
+  bytes) because the tail chunk cannot be completed. The reference allocates
+  the declared size and leaves the remainder zeroed, so the output must be
+  padded to `uncompressedSize` rather than treated as a short read.
+
+Back-references never reach further back than 4096 bytes, so a small sliding
+window is enough; a 1.6 MB archive is the largest in this game.
+
+## 5.4 Images
+
+All 3,826 images are standard 8-bit Windows BMPs, each carrying its own
+palette, so no separate palette lookup is needed:
+
+| Variant | Count |
+|---------|-------|
+| 8bpp BI_RGB | 207 |
+| 8bpp BI_RLE8 | 3,656 |
+| 4bpp BI_RGB | 1 |
+
+The `RM*.BMP` files (one per room archive) are the room backgrounds: 640x480,
+8bpp, uncompressed, with the palette in the header. One asset, `RM0816.BMP`, is
+genuinely 640x481 in the data and is decoded as such. `RMAP*.BMP` files are not
+backgrounds - they are 64x48 room thumbnails, and the name prefix needs a
+`RM%d%d%d%d` match rather than a plain `RM` prefix to tell them apart.
+
+All 3,826 BMP names are unique across the whole game, which is what allows a
+resource to be addressed by name alone.
+
+## 5.5 Backgrounds
+
+83 of the 108 archives hold exactly one full-screen image each: 82 at 640x480
+and `GL00_816.000` at 640x481. The engine selects them by name (`RM%04d.BMP`)
+rather than by geometry, because the geometry is only knowable after
+decompressing each archive, and listing must stay cheap.
