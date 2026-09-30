@@ -1341,14 +1341,41 @@ window is enough; a 1.6 MB archive is the largest in this game.
 
 ## 5.4 Images
 
-All 3,826 images are standard 8-bit Windows BMPs, each carrying its own
-palette, so no separate palette lookup is needed:
+All 3,826 images are 8-bit Windows BMPs, but they come in two quite different
+encodings, only one of which is a normal BMP:
 
-| Variant | Count |
-|---------|-------|
-| 8bpp BI_RGB | 207 |
-| 8bpp BI_RLE8 | 3,656 |
-| 4bpp BI_RGB | 1 |
+| Variant | Count | `dataoff` | Palette in file |
+|---------|-------|-----------|-----------------|
+| 8bpp BI_RGB (`biCompression = 0`) | 211 | 1,078 | yes, 256 entries |
+| 8bpp scanline (`biCompression = 2`) | 3,614 | 54 | none (`biClrUsed = 0`) |
+| 4bpp BI_RGB (`biCompression = 0`) | 1 (`IBCARD.BMP`) | 118 | yes, 16 entries |
+
+The `biCompression = 2` images are **not** run length encoded, despite the tag
+and despite what the `00 00` byte pairs at each row boundary look like. Decoding
+them as `BI_RLE8` runs the rows hundreds of thousands of pixels past the image
+width. The real layout is a per-row prefix, verified by parsing every one of the
+3,614 images with zero failures, zero leftover bytes, and exactly `h` rows each:
+
+```
+u16 xOffset      -- pixels to skip at the left of the row, 0..w
+u16 length       -- number of pixel bytes that follow, 1..w
+byte pixels[length]   -- raw 8bpp, no padding
+```
+
+repeated for all `h` rows, top-down. This was derived from `002BTN01.BMP`
+(340x55, 18,920 pixel bytes, exactly 55 uniform 344-byte rows of
+`00 00 54 01` + 340 raw pixels) and confirmed on cropped rows by `101CHR01.BMP`,
+a perspective-projected chair whose rows run from `xOffset = 6, length = 68` at
+the top to `xOffset = 0, length = 86` in the middle and back down to
+`length = 31` at the base. 2,787 of the 3,614 images have at least one cropped
+row; the format exists precisely to store those trapezoids compactly.
+
+Because `dataoff = 54` leaves no room before the pixel data, those 3,614 images
+carry **no palette whatsoever**. The game keeps a single shared palette (the one
+`.PAL` resource in `GFILE.HDR`), and its indices are game-wide, so a decoder
+must not read colour tables out of the pixel stream: only palette quads that
+lie before `dataoff` are real. Decoding clamped this way, both variants match an
+independent decoder exactly.
 
 The `RM*.BMP` files (one per room archive) are the room backgrounds: 640x480,
 8bpp, uncompressed, with the palette in the header. One asset, `RM0816.BMP`, is
@@ -1365,3 +1392,8 @@ resource to be addressed by name alone.
 and `GL00_816.000` at 640x481. The engine selects them by name (`RM%04d.BMP`)
 rather than by geometry, because the geometry is only knowable after
 decompressing each archive, and listing must stay cheap.
+
+All 83 are `biCompression = 0`, so background decoding never touches the
+scanline format of 5.4. That format is implemented and verified (against 30
+sampled scanline images plus 11 `BI_RGB` ones, pixels and palettes matching a
+separate decoder byte for byte), but the engine only lists backgrounds for now.

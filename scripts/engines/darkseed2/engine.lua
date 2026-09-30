@@ -279,49 +279,6 @@ local function i32at(getb, pos)
     return v
 end
 
--- Decode the 8bpp BI_RLE8 stream into `pixels`, starting at row `y0`.
-local function rle8(getb, pos, limit, w, h, pixels, y0)
-    local y = y0
-    local x = 0
-    while pos < limit do
-        local n = getb(pos)
-        pos = pos + 1
-        if n == 0 then
-            local code = getb(pos)
-            pos = pos + 1
-            if code == 0 then                       -- end of line
-                y = y + 1
-                x = 0
-            elseif code == 1 then                   -- end of bitmap
-                return pos, y, x, true
-            elseif code == 2 then                   -- delta
-                x = x + getb(pos)
-                y = y + getb(pos + 1)
-                pos = pos + 2
-            else                                    -- absolute mode
-                local padded = code + (code % 2)
-                for i = 0, code - 1 do
-                    if y >= 0 and y < h and x + i < w then
-                        pixels[y * w + x + i + 1] = getb(pos + i)
-                    end
-                end
-                pos = pos + padded
-                x = x + code
-            end
-        else
-            local c = getb(pos)
-            pos = pos + 1
-            for i = 0, n - 1 do
-                if y >= 0 and y < h and x + i < w then
-                    pixels[y * w + x + i + 1] = c
-                end
-            end
-            x = x + n
-        end
-    end
-    return pos, y, x, false
-end
-
 -- Decode a Windows BMP through the 1-based getter `getb`. Returns an image
 -- table, or nil plus a message.
 local function decode_bmp(getb, len, label)
@@ -348,19 +305,30 @@ local function decode_bmp(getb, len, label)
     if bpp ~= 8 and bpp ~= 4 then
         return nil, "unsupported BMP depth: " .. tostring(bpp)
     end
-    -- BI_RGB / BI_RLE8 are understood; BI_RLE4 does not occur in this game
-    if comp == 1 and bpp == 8 then
-        -- RLE8
-    elseif comp == 0 then
-        -- uncompressed
-    else
+    -- Dark Seed 2 only ever writes two variants: biCompression 0 for a plain
+    -- BI_RGB image, and 2 for its own scanline format (see below). Despite
+    -- the 2, the latter is not RLE - nothing in the game is run length coded.
+    if comp == 2 then
+        if bpp ~= 8 then
+            return nil, "unexpected depth for scanline image: " .. tostring(bpp)
+        end
+    elseif comp ~= 0 then
         return nil, "unsupported BMP compression: " .. tostring(comp)
     end
-    local rle = (comp == 1)
+    local scanlines = (comp == 2)
 
     if ncol == 0 then ncol = 256 end
     if bpp == 4 and ncol > 16 then ncol = 16 end
     if bpp == 8 and ncol > 256 then ncol = 256 end
+
+    -- Only palette quads that lie before the pixel data actually exist. A
+    -- data offset of 54 (a bare 40-byte header) means the image carries no
+    -- palette at all - the game keeps one shared palette for its scanline
+    -- images - so clamp to what is really there instead of reading colour
+    -- tables out of the pixel stream.
+    local avail = math.floor((dataoff - 14 - hdrsize) / 4)
+    if avail < 0 then avail = 0 end
+    if ncol > avail then ncol = avail end
 
     -- Palette: BGRA quads, flattened to RGB triples for image_create_indexed
     local palette = {}
@@ -376,7 +344,25 @@ local function decode_bmp(getb, len, label)
     local pixels = {}
     local rowbytes = math.floor((w * bpp / 8 + 3) / 4) * 4
 
-    if not rle then
+    if scanlines then
+        -- Each row is stored as u16 xOffset, u16 length, then `length` raw
+        -- 8bpp pixels, top-down and unpadded. Rows may be cropped, which is how
+        -- the game's perspective-projected sprites are stored.
+        local pos = dataoff + 1
+        local total = w * h
+        for y = 0, h - 1 do
+            if pos + 3 > len then break end
+            local xoff = u16at(getb, pos)
+            local rlen = u16at(getb, pos + 2)
+            pos = pos + 4
+            local dst = y * w + xoff
+            for i = 0, rlen - 1 do
+                local k = dst + i + 1
+                if k >= 1 and k <= total then pixels[k] = getb(pos + i) end
+            end
+            pos = pos + rlen
+        end
+    else
         for y = 0, h - 1 do
             -- BMP stores rows bottom-up unless the height is negative
             local row = topdown and y or (h - 1 - y)
@@ -397,18 +383,21 @@ local function decode_bmp(getb, len, label)
                 end
             end
         end
-    else
-        -- RLE produces rows top-down
-        rle8(getb, dataoff + 1, len, w, h, pixels, 0)
     end
 
     local img = image_create_indexed(w, h, pixels, palette)
+    local colors
+    if ncol == 0 then
+        colors = "no palette in file"
+    else
+        colors = ncol .. " colors"
+    end
     return {
         type = "image",
         image = img,
         width = w,
         height = h,
-        description = string.format("%s - %dx%d, %d colors%s", label, w, h, ncol,
+        description = string.format("%s - %dx%d, %s%s", label, w, h, colors,
             topdown and ", top-down" or ""),
     }
 end
@@ -456,10 +445,16 @@ function engine.get_resources(game_path)
     return resources
 end
 
+-- Resource ids are the resource name with its extension dropped, optionally
+-- prefixed with "bg_" (the ids get_resources hands out). "img_" is accepted too
+-- so any BMP in the game can be loaded by name.
 function engine.load_resource(game_path, resource_id, palette_id)
     local base = resource_id:match("^bg_(.+)$")
+        or resource_id:match("^img_(.+)$")
+        or resource_id
     if not base then return nil end
     if base:match("%.BMP$") then base = base:match("^(.+)%.BMP$") end
+    if not base:match("^[%w_]+$") then return nil end
     local want = base:upper() .. ".BMP"
 
     local archives, dir = parse_gfile(game_path)
