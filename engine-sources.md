@@ -20,7 +20,11 @@ games are located in ags/SWORD/
 
 ### TINSEL
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
-games are located in ags/TINSEL
+games are located in ags/TINSEL (DISCWLD for Discworld 1, DW2 for Discworld 2)
+
+key reference files: engines/tinsel/handle.cpp (SCNHANDLE + chunk list),
+object.cpp (DMA flags / decoder selection), graphics.cpp (all four decoders),
+palette.cpp (DAC palette index shift)
 
 ### TRICK OR TREAT
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)

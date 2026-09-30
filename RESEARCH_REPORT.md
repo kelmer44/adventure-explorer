@@ -1116,3 +1116,133 @@ Individual resource files on disk can override volume resources:
 - Custom Huffman with only 6 fixed codes, not a general-purpose tree
 - Inter-line prediction (delta from previous line)
 - 256-entry circular backing store for dictionary-like repetition
+
+---
+
+# Part 4: Tinsel (Discworld 1 & 2) Resource Format
+
+Source: ScummVM `engines/tinsel/` — `handle.cpp`, `object.cpp`, `graphics.cpp`, `palette.cpp`.
+Engine script: `scripts/engines/tinsel/engine.lua`
+
+## 4.1 File Layout
+
+An `index` file holds one fixed size record per data file.
+
+| Game | Record size | Layout |
+|------|-------------|--------|
+| Discworld 1 | 20 bytes | `name[12]`, `u32 filesize`, 4 reserved |
+| Discworld 2 | 24 bytes | `name[12]`, `u32 filesize`, 4 reserved, `u32 flags2` |
+
+Each `.SCN` data file is a singly linked list of chunks:
+
+```
+u32 chunkType
+u32 nextChunkAbsoluteOffset    -- 0 terminates the list
+```
+
+`CHUNK_IMAGE` (0x33340006) is a flat array of 16 byte records:
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0x00 | 2 | `i16 width` |
+| 0x02 | 2 | `u16 height` — top 2 bits are the packing type, rest is the real height |
+| 0x04 | 2 | `i16 aniX` |
+| 0x06 | 2 | `i16 aniY` |
+| 0x08 | 4 | `u32 hImgBits` — SCNHANDLE to the pixel data |
+| 0x0C | 4 | `u32 hImgPal` — SCNHANDLE to the palette |
+
+`CHUNK_PALETTE` (0x33340005) holds one or more palettes, each an `i32 numColors`
+followed by `numColors` `COLORREF` values in `0x00BBGGRR` order.
+
+## 4.2 SCNHANDLE
+
+A handle packs a file index in the high bits and a byte offset in the low bits.
+
+| Game | Index | Offset |
+|------|-------|--------|
+| Discworld 1 | `h >> 23` | `h & 0x7FFFFF` |
+| Discworld 2 | `h >> 25` | `h & 0x1FFFFFF` |
+
+Note the palette handle resolves to a *different file* than the image handle
+in general, so it must be resolved independently.
+
+## 4.3 Choosing a Decoder
+
+Tinsel picks the decoder from the object type byte, which lives in the scene
+object table and **not** in the IMAGE record. `InitObject` merges the packing
+type into the object flags:
+
+```c
+pObj->flags = DMA_CHANGED | pInitTbl->objFlags;
+pObj->flags |= pImg->imgHeight & C16_FLAG_MASK;   // C16_FLAG_MASK = 0xC000
+```
+
+then `DrawObject` branches on the result:
+
+| Condition | Decoder | Encoding |
+|-----------|---------|----------|
+| `packType != 0` (height top 2 bits) | `PackedWrtNonZero` | 1/2/3 run length packing |
+| `typeId` 0x01, 0x41, 0x02, 0x11, 0x42, 0x51 | `t2WrtNonZero` | byte RLE |
+| `typeId` 0x08, 0x48 | `WrtAll` | raw 8bpp (backgrounds) |
+| `typeId` 0x04, 0x44 | `WrtConst` | solid fill |
+| `typeId` 0x84, 0xC4 | `WrtTrans` | translucent rectangle |
+
+Because the type byte is not available to a standalone extractor, a
+`c16 == 0` image has to be classified indirectly. For **Discworld 1** the block
+list of the playfield always sits at bits offset 24, and 147 of the 149 files
+carry exactly one large image there (`DW.SCN` and `OBJECTS.SCN` contribute only
+small false positives). For **Discworld 2** two rules apply together: the image
+must be playfield sized (at least 600x200) *and* its `width * height` bytes must
+actually be present at the bits offset. The second rule is what separates the
+real backgrounds from the large RLE cutscene frames in `BONEDIE`, `BONEDIE2`,
+`COMPUTER`, `FILMSET` and `GIMLETS` — a pure size test misclassifies all six.
+
+## 4.4 Discworld 1 Decoding (`WrtNonZero`)
+
+The block matrix base is read from the **start of the data file**, not from the
+image data:
+
+```
+charBase    = u32le(file, 0x10)
+transOffset = u32le(file, 0x14)
+```
+
+The pixel data is a list of `i16` block indexes, `ceil(w/4) * ceil(h/4)` of them.
+A positive index is an opaque block at `charBase + index*16`; a negative index
+is transparent, masked with `0x7FFF`, and read at
+`charBase + (transOffset + index)*16`, writing only non-zero pixels. An index
+that masks to zero is skipped entirely.
+
+## 4.5 Discworld 2 Decoders
+
+**`WrtAll` (backgrounds)** — `width * height` bytes, row major, no framing.
+
+**`t2WrtNonZero` (RLE sprites)** — per scan line, the opcode's top bit selects a
+run of the following colour (colour 0 transparent) or a literal run of that many
+bytes. Note the run length is `opcode & 0x7F`, so an opcode of 0x80 is a
+zero-length run, not a literal.
+
+**`PackedWrtNonZero` (packing types 1/2/3)** — type 1 uses base colour `0xF0`,
+type 2 uses `0xE0`, type 3 carries a `u8` colour count followed by that many
+palette bytes at the start of the stream. Each row begins with an `xOffset`
+skip byte. An opcode's low nibble is the run length and its high nibble selects
+the colour; a zero low nibble means the next byte is either a run length of 16+
+or a skip/eol pair (`numBytes + opcode == 0` ends the row). A row that reaches
+the right edge without an explicit eol is followed by a two byte end marker.
+
+Two implementation traps:
+
+- The stream is variable length, so a `width * height` sized read window is not
+  enough; the final run of a row can read past the last pixel.
+- For type 3, Tinsel indexes the colour table with the opcode's high nibble
+  **without bounds checking it**. Some real images declare fewer colours than
+  they reference, so a bounds check turns those images into decode failures
+  where Tinsel itself just reads into the following bytes.
+
+## 4.6 Palette Index Shift
+
+Palettes are installed into the video DAC starting at index 1
+(`FGND_DAC_INDEX` in `palette.cpp`), leaving index 0 as the background colour.
+A 256 colour palette therefore occupies DAC entries 1..255, and pixel value
+`n` maps to palette entry `n-1`. Forgetting this shift costs exactly one
+palette entry and visibly darkens/misaligns every image.

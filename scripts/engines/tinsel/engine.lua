@@ -20,8 +20,9 @@
 --
 -- Decoders (ScummVM graphics.cpp DrawObject):
 --   DW1  WrtNonZero        4x4 block list, block data at charBase = file+u32@0x10
---   DW2  WrtAll            raw 8bpp, used for full screen backgrounds
---   DW2  t2WrtNonZero      byte RLE, used for small c16 == 0 images
+--   DW2  WrtAll            raw 8bpp, used for the playfield backgrounds
+--   DW2  t2WrtNonZero      byte RLE, used for c16 == 0 images that are not
+--                          backgrounds, including the large cutscene frames
 --   DW2  PackedWrtNonZero  run length packing, used for c16 = 1/2/3 images
 --
 -- Image palettes are installed into the video DAC starting at index 1
@@ -348,7 +349,25 @@ local function decode_dw1(f, bits_off, w, h)
     local index_data = read_at(f, bits_off, blocks_w * blocks_h * 2)
     if not index_data or #index_data < blocks_w * blocks_h * 2 then return nil end
 
-    local matrix = read_at(f, char_base, f.size - char_base)
+    -- Only the blocks the image actually references need to be fetched, which
+    -- is a lot less than the whole file for the small sprite images.
+    local max_block = 0
+    for t = 0, blocks_w * blocks_h - 1 do
+        local value = i16le(index_data, t * 2 + 1)
+        if value >= 0 then
+            if value > max_block then max_block = value end
+        else
+            value = value % 32768
+            if value > 0 and trans_off + value > max_block then
+                max_block = trans_off + value
+            end
+        end
+    end
+    local matrix_size = (max_block + 1) * 16
+    if char_base + matrix_size > f.size then matrix_size = f.size - char_base end
+    if matrix_size < 16 then return nil end
+
+    local matrix = read_at(f, char_base, matrix_size)
     if not matrix then return nil end
 
     local pixels = {}
@@ -424,7 +443,7 @@ local function decode_dw2_rle(f, off, w, h)
             if src > total then return pixels end
             local opcode = u8(data, src); src = src + 1
 
-            if opcode % 128 >= 128 then
+            if opcode >= 128 then
                 local run = opcode % 128
                 if src > total then return pixels end
                 local color = u8(data, src); src = src + 1
@@ -454,13 +473,12 @@ local function decode_dw2_packed(f, off, w, h, pack_type)
     local color_table, base_col
 
     if pack_type == 3 then
+        -- Variable colour table. Tinsel indexes it with the high nibble of the
+        -- opcode without checking the declared length, so a short table simply
+        -- gets read past its end. Mirror that instead of rejecting the image.
         if src > total then return nil end
         local count = u8(data, src); src = src + 1
-        if src + count - 1 > total then return nil end
-        color_table = {}
-        for i = 0, count - 1 do
-            color_table[i] = u8(data, src + i)
-        end
+        color_table = src
         src = src + count
     elseif pack_type == 1 then
         base_col = 0xF0
@@ -485,8 +503,12 @@ local function decode_dw2_packed(f, off, w, h, pack_type)
                 if src > total then return pixels end
                 local v = u8(data, src); src = src + 1
                 num_bytes = v % 16
-                color = color_table and color_table[math.floor(v / 16)]
-                          or (base_col + math.floor(v / 16))
+                if color_table then
+                    local ci = color_table + math.floor(v / 16)
+                    color = (ci <= total) and (u8(data, ci) or 0) or 0
+                else
+                    color = base_col + math.floor(v / 16)
+                end
                 if num_bytes ~= 0 then break end
                 if src > total then return pixels end
                 num_bytes = u8(data, src); src = src + 1
@@ -515,13 +537,13 @@ end
 -- Classification
 -- ============================================================================
 
--- A background is the image that covers the whole playfield, and it is the
--- only kind stored as plain 8bpp pixel data. The packing type alone does not
--- say so, because Tinsel picks the decoder from the object flags and those
--- live in the scene object table, not in the IMAGE record. Two rules narrow it
--- down: only a playfield sized image is a background, and its pixel data has
--- to actually be there. Discworld 2 has a few large RLE cutscene frames
--- (BONEDIE, COMPUTER, FILMSET, GIMLETS) that only the second rule rules out.
+-- Tinsel picks the decoder from the object type: 0x08/0x48 is a background and
+-- is stored as plain 8bpp, while 0x01/0x41 and friends are RLE sprites. Those
+-- type bytes live in the scene object table, not in the IMAGE record, so for a
+-- c16 == 0 image the two have to be told apart indirectly: only a playfield
+-- sized image is a background, and its pixel data has to actually be there.
+-- The second rule is what separates the large RLE cutscene frames (BONEDIE,
+-- COMPUTER, FILMSET, GIMLETS) from the real backgrounds.
 local function is_background(fmt, img, file_size)
     if fmt == DW2 then
         if img.c16 ~= 0 then return false end
@@ -587,10 +609,26 @@ function engine.get_resources(game_path)
 
     local backgrounds, sprite_groups, sprite_total = {}, {}, 0
 
+    -- Classification needs the size of the file the pixels actually live in,
+    -- which is not always the file the record was found in. Sizes are cached
+    -- so a shared shape does not reopen its data file once per reference.
+    local sizes = {}
+    local function data_size(name, known)
+        if known then return known end
+        local cached = sizes[name]
+        if cached then return cached end
+        local f = open_data(game_path, name)
+        local n = f and f.size or 0
+        close_data(f)
+        sizes[name] = n
+        return n
+    end
+
     for _, entry in ipairs(files) do
         local f = open_data(game_path, entry.name)
         if f then
             local images = read_image_records(f)
+            local entry_size = f.size
             close_data(f)
 
             local seen, sprites = {}, {}
@@ -598,7 +636,13 @@ function engine.get_resources(game_path)
                 -- Many records point at identical pixel data, list it once.
                 if not seen[img.hImgBits] then
                     seen[img.hImgBits] = true
-                    if is_background(fmt, img, f.size) then
+                    local bits_index = math.floor(img.hImgBits / (2 ^ fmt.shift))
+                    local owner = handles[bits_index]
+                    local owner_name = (owner and owner.name) or entry.name
+                    local owner_size = data_size(owner_name,
+                        owner_name == entry.name and entry_size or nil)
+
+                    if is_background(fmt, img, owner_size) then
                         backgrounds[#backgrounds + 1] = {
                             id   = image_id(entry.name, img),
                             name = string.format("%s - %dx%d",

@@ -45,7 +45,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
-| Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds | ✅ Working |
+| Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
