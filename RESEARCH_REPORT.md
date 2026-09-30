@@ -1530,3 +1530,245 @@ both RNC methods under LuaJ 3.0.1, the same runtime the app uses:
 - 75 of 75 resources decode, 0 failures, about 12.6 s total
 - 5,879,040 image bytes byte-identical to the reference
 - 57,600 palette bytes byte-identical to the reference
+
+# Part 7: Universe EPFS Archive & Method-1 Compression
+
+## 7.1 Archive Layout
+
+`UNIVERSE.EPF` is a single 6,217,836-byte file holding all 779 game resources.
+
+```
+ 0  'E' 'P' 'F' 'S'
+ 4  u32le directory offset      0x005E9D7A (6,200,698)
+ 8  u8   version                always 0
+ 9  u16le entry count           779
+11  first payload byte
+```
+
+The directory sits at the *end* of the file, immediately after the payloads.
+
+The directory is a flat array of 22-byte records at the offset above:
+
+```
+ 0  12 bytes  name, "NAME.EXT" NUL padded (DOS 8.3)
+12  u8        unused
+13  u8        compression method: 0 stored, 1 Huffman/LZ, 2 unused
+14  u32le     stored size
+18  u32le     decompressed size
+```
+
+Records carry no payload offset. Blocks sit back to back from offset 11 in
+directory order, so the offset of entry N is 11 plus the sum of the stored sizes
+of entries 0..N-1. Two independent checks confirm this: the 779 stored sizes add
+up to exactly the directory offset (6,200,687 + 11 = 6,200,698), and all 779
+payloads decode to sane content. The 779 records occupy the final 17,138 bytes,
+which is 779 x 22 exactly.
+
+The executable confirms all three offsets independently. At 0xb559 the loader
+reads `es:[di+0xd]` as the method byte and branches on 0 and 1; at 0xb593 and
+0xb598 it reads `es:[di+0xe]` and `es:[di+0x12]` as the stored and decompressed
+sizes. Those are offsets 13, 14 and 18, which is the layout above. The record
+size is confirmed too, because at 0xb4c5 the loader computes
+`(count + 1) * 0x16`, allocates it with a `shr` by 4 to convert bytes to
+paragraphs, and reads entries from that buffer at 22-byte strides.
+
+The unused byte at +12 is worth flagging because it sits right where a flag would
+be and it reads as one. It is almost always 0, but `ICONS.ENG` carries 5 there.
+The full set of values across all 779 records is just {0, 5}, so it is almost
+certainly padding garbage rather than a field, and a parser that reads the name
+as 13 bytes instead of 12 will be off by one on every subsequent field.
+
+The archive holds 21 stored entries and 758 method-1 entries. No entry uses
+method 2, although the DOS loader at 0xb559 has a branch for it.
+
+## 7.2 Method 1: Canonical-Code Huffman with Match Chains
+
+Recovered by disassembling `UNIVERSE.EXE` 0xb74a-0xba20. This is *not* the
+ProPack/RNC method 1 used by Curse of Enchantia: there is no 5-bit leaf count, no
+table-descriptor section and no 16-bit chunk counter. It is closer to DEFLATE in
+spirit - a code space that widens as it fills - but with a very different match
+representation.
+
+**Code space.** Codes start at 9 bits. `[0xd8cc]`, `[0xd8ce]` and `[0xd8d0]`
+hold `(1<<n)-1`, `(1<<n)-2` and `(1<<n)-3`, where `n` is the current width in
+`[0xd8cb]`. Widths never exceed 14. The widest file in the archive, `M5.BIN`,
+grows the table to 16,294 entries, just under the 16,382 ceiling that a 14-bit
+mask allows.
+
+**Bit reader.** MSB-first out of a 32-bit register refilled a byte at a time.
+At 0xb835 it does `shl ebx,8` then `mov bl,gs:[si]`, so the newest byte is the
+low byte; the code itself is then taken as `shr eax,cl` followed by
+`and ax,[0xd8cc]` at 0xb8e0, i.e. the top `n` bits of the register.
+
+The bit counter lives in `cl` and the width in `ch`, and the refill test at
+0xb85a is `cmp ch,cl` with a **signed** `jg`. Because both are bytes, a count
+that reaches 0x80 turns negative and the refill stops early, so the count can
+never exceed 127. A port that uses an unsigned compare, or a 16-bit counter,
+behaves the same for these files but is not a faithful reproduction, and the
+difference would show up on a file with a long run of codes at one width.
+
+**Stream grammar.**
+- The first code is a plain byte and is emitted as-is.
+- A code equal to the full mask `(1<<n)-1` ends the stream.
+- A code equal to mask-1 empties the table and makes the next code a fresh
+  literal byte.
+- Any other code is a back reference.
+
+**Match expansion.** Two parallel tables, `tab1` holding 16-bit links and `tab2`
+holding bytes. If the code is below the current table size it indexes them
+directly. Otherwise the last byte of the previous match is pushed onto a 4000
+byte scratch buffer and the *previously saved code* indexes the tables instead.
+Walking the link chain yields match bytes in reverse, and the copy loop at 0xb984
+decrements its pointer to zero, so matches expand right to left. The pair
+(saved code, last match byte) then becomes a new table entry.
+
+Widen the code width when the entry count passes mask-2 and the width is still
+below 14, which keeps the average code length near 8 bits across a whole file.
+
+The routine allocates four tables at 0xb74a, and their paragraph counts are worth
+recording because they set the real limits: 0x8D0, 0x468, 0xFA and 0xFFF, stored
+through DOS handles at 0xd8d2, 0xd8da, 0xd8e2 and 0xd8ea. The chain scratch
+buffer is the 0xFA0-byte one that the overflow check at 0xb919 guards.
+
+Those two overflow checks are the trap for anyone porting this. `cmp bp, 0xfa0`
+at 0xb919 walks a pointer that was just incremented, and `cmp bp, 0x8d00` at
+0xb99c follows an `lfs` into the arena. Both compare a *linear address inside the
+heap*, not a table length, so they only make sense against a real DOS allocator
+and will fire spuriously in a flat-memory port. A port has to drop them or place
+its arena below 0x8D00.
+
+## 7.3 Images
+
+All 168 `.LBM` files are IFF ILBM with `BMHD`, `CMAP` and `BODY`, run-length
+compressed, and all carry a full palette inside the file. There are no `.PAL`
+files in the archive and none are needed.
+
+Two body layouts appear, distinguished by the IFF form type:
+
+| Form type | Files | Geometry | Planes | CMAP | Body layout |
+|-----------|-------|----------|--------|------|-------------|
+| `PBM `    | 165   | 320x200  | 8      | 768  | one byte per pixel |
+| `PBM `    | 2     | 320x240  | 8      | 768  | one byte per pixel |
+| `PBM `    | 2     | 320x256  | 8      | 768  | one byte per pixel |
+| `ILBM`    | 3     | 320x256  | 5      | 96   | interleaved bitplanes |
+
+`PAGE2-4.LBM` are the odd ones out: 5 planes, a 32-colour palette and genuine
+interleaved bitplanes. The other 165 declare 8 planes but store one byte per
+pixel - at 320 pixels wide a plane row is 40 bytes, so 8 planes is exactly 320
+bytes and the "planes" are just the 8 bits of one pixel. Masking is 0 in all 168
+files and compression is 1 in all 168, so neither case is stored.
+
+The three chunk layouts in the archive are:
+
+| Count | Chunks |
+|-------|--------|
+| 87  | `BMHD` `BODY` `CMAP` |
+| 78  | `BMHD` `BODY` `CMAP` `CRNG` `DPPS` `TINY` |
+| 3   | `BMHD` `BODY` `CAMG` `CMAP` `DPPS` `DRNG` |
+
+`CAMG` and `DRNG` appear only in the three `ILBM` files. The palette-masking and
+colour-cycling chunks are Deluxe Paint view-state, not image data, so the engine
+skips them.
+
+The `BODY` is one continuous run over the whole chunk, not one per scanline. The
+stream expands to exactly `rowbytes * planes * h` bytes and lands on the final
+output byte for all 168 files, which is what proves there is no row padding and
+no per-row restart. The escape is a control byte `n` where `n < 128` copies the
+next `n+1` bytes literally and `n > 128` repeats the next byte `257-n` times.
+
+Deciding between contiguous and bitplane layouts needed evidence rather than
+convention, because for the 165 `PBM ` files both readings yield exactly the same
+number of bytes and there is no length left over to check against.
+
+The measure used is the mean absolute pixel-index difference across horizontal
+neighbour pairs, averaged over all `h * (w-1)` of them. Real artwork is locally
+coherent, so neighbouring pixels normally hold nearby palette indices; a wrong
+interleave scrambles that and the score explodes. Lower is better.
+
+| File | planes | contiguous | row-interleaved | plane-major |
+|------|--------|-----------|-----------------|-------------|
+| `SCENE02.LBM`  | 8 | **22.46** | 92.62 | 89.61 |
+| `PAGE1.LBM`    | 8 | **0.55**  | 6.54  | 42.67 |
+| `INTRO.LBM`    | 8 | **8.88**  | 64.11 | 64.14 |
+| `CLOS0001.LBM` | 8 | **0.17**  | 43.88 | 58.97 |
+| `LOGO.LBM`     | 8 | **0.18**  | 1.04  | 1.30 |
+| `PAGE2.LBM`    | 5 | n/a       | **0.28** | 0.48 |
+
+For the 8-plane files the contiguous reading wins by a factor of four to two
+hundred, which settles those 165. `PAGE2.LBM` is the converse: it is 5 planes,
+so no contiguous reading is even available, and row-interleaving beats
+plane-major. `PAGE1.LBM` shows the same ordering at 8 planes (6.54 against
+42.67), so the two layouts are being compared on the same terms.
+
+The absolute values for the winning column are not comparable between files, and
+should not be read as image quality. `SCENE02.LBM` scores 22.46 while winning
+because it is a dithered 256-colour backdrop where adjacent palette indices
+genuinely differ; `PAGE2.LBM` scores 0.28 because it is a 32-colour image. Only
+the ordering within a row is meaningful.
+
+## 7.4 Bitmaps
+
+The 49 `.COL` and 48 `.MSK` files are all exactly 8000 bytes: 40 bytes per row
+for 320x200, most significant bit leftmost, one bit per pixel with no row
+padding. They are the per-room collision and walk masks. `BLANK.COL` is all
+zeros and `SCENE02.COL` has 49,997 of 64,000 pixels set, so the two names do
+mean what they say.
+
+## 7.5 Other Contents
+
+The remaining 549 entries are not images and are not covered by the engine:
+
+| Extension | Count | Notes |
+|-----------|-------|-------|
+| `COM`     | 57    | `BACK01.COM` to `BACK58.COM`, with `BACK32.COM` absent; structure undecoded |
+| `MCV`     | 155   | 73 to 64,302 bytes; structure undecoded |
+| `MCB`     | 13    | `BLOCK31A-C`, `ICONS`, `ICONS1`, `MENU_BD`, `SC221` to `SC227` |
+| `BIN`     | 21    | 13 are exactly 64,000 bytes, the rest 3,840 to 56,064 |
+| `ENG` `FRE` `GER` `ITA` `SPA` | 53 each | UI strings in five languages; structure undecoded |
+| `EXE` `BAT` `TXT` | 3 | the game itself, a batch file, and a note from the author |
+
+`README.TXT` decodes to a note from the author, and it is indented as a staircase:
+
+```
+Hello Troy,
+
+	 please run the remake.bat batch file,
+
+		thanks,
+
+			Neil
+```
+
+`REMAKE.BAT` is a single line, `epfs -a universe.epf text46.fre`, which is the
+archive builder. It confirms that `UNIVERSE.EPF` was assembled from loose files
+with a tool of the same name, and it names `TEXT46.FRE` as the source of one
+entry - so the five language variants are interchangeable builds rather than
+different content.
+
+The 13 exact-64,000-byte `BIN` files match the geometry of a 320x200 picture at
+one byte per pixel, which suggests they are raw screen buffers, but that is an
+observation from the size alone and has not been confirmed by content.
+
+## 7.6 Verification
+
+The decoder was ported to LuaJ 3.0.1-compatible Lua for the engine script and
+checked against an independent Python implementation of the same specification,
+written from this document rather than from the engine script:
+
+- all 779 archive entries decompress to exactly their declared decompressed size,
+  with no overflow, no runaway chain and no short stream
+- 265 of 265 image resources decode, 0 failures (168 `.LBM`, 49 `.COL`, 48
+  `.MSK`), plus 2 text resources decoded as text
+- 17,075,200 image bytes byte-identical to the Python reference
+- 203,520 palette bytes byte-identical to the Python reference
+
+The image run was done twice, under Lua 5.5 and under LuaJ 3.0.1, which is the
+runtime the app itself uses. Both produced byte-identical output, and both agreed
+with the Python reference on every byte, so the engine does not depend on any
+Lua 5.3+ behaviour.
+
+The largest single decode is `M5.BIN`, which drives the match table to 16,294
+entries. Two entries exceed the 64 KB boundary that the DOS loader handles
+through a different input-buffering path: `SCENE01.LBM` (66,012 in, 66,012 out)
+and `UNIVERSE.EXE` itself (81,707 in, 94,392 out). Both are treated identically
+in a flat-memory port, since the bit reader only ever walks the buffer forward.

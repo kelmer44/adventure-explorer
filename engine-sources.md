@@ -168,3 +168,14 @@ Key files: resource.cpp, graphics.cpp, sound.cpp, made.cpp
 game in ags/LGOP2
 
 
+### Universe
+No public source or ScummVM engine. Everything was derived by disassembling the
+DOS loader in UNIVERSE.EXE and by decoding UNIVERSE.EPF directly:
+
+- `UNIVERSE.EXE` 0xb4a2  loads the 11-byte EPFS header and the 22-byte-per-entry
+                    directory
+- `UNIVERSE.EXE` 0xb74a  compression method 1, the canonical-code Huffman/LZ
+                    decompressor reimplemented in the engine script
+- `UNIVERSE.EXE` 0xba09  code-width and mask setup (9 bits, widening to 14)
+
+game in ags/universe/

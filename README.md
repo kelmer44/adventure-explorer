@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-30 game engines are currently supported via Lua scripts — no recompilation needed.
+32 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -30,6 +30,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
+| Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
@@ -262,7 +263,7 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 31 engine scripts (Lua)
+│   └── engines/                  # 33 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
@@ -270,6 +271,7 @@ adventure-explorer/
 │       ├── comet/engine.lua      # Shadow of the Comet
 │       ├── cruise/engine.lua     # Cruise for a Corpse
 │       ├── curseofenchantia/     # Curse of Enchantia
+│       ├── universe/             # Universe
 │       ├── darkseed/engine.lua   # Dark Seed
 │       ├── darkseed2/engine.lua  # Dark Seed 2
 │       ├── gob/engine.lua        # Gobliiins series
@@ -322,7 +324,7 @@ adventure-explorer/
 - [ ] Support for all scumm games
 - [ ] Support for all Coktel games
 - [ ] Support for Capstone games
-- [ ] Support for Curse of Enchantia & Universe
+- [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
 - [ ] Support for Sanitarium
 - [ ] Support for Microprose adventures
