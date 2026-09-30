@@ -1,0 +1,198 @@
+name: Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: latest
+
+jobs:
+  check:
+    name: Compile Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Compile
+        run: ./gradlew compileKotlin --no-daemon
+
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      app_changed: ${{ steps.detect.outputs.app_changed }}
+      notes: ${{ steps.detect.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare against previous release
+        id: detect
+        run: |
+          set -euo pipefail
+
+          APP_PATTERN='^(src/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|gradle/wrapper/)'
+          SCRIPTS_PATTERN='^scripts/'
+
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          if PREV="$(git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" 2>/dev/null)"; then
+            RANGE="$PREV..$HEAD_SHA"
+          else
+            RANGE=""
+          fi
+
+          if [ -z "$RANGE" ]; then
+            APP_CHANGED=true
+            SCRIPTS_CHANGED=true
+            CHANGES="- Initial release"
+          else
+            FILES="$(git diff --name-only $RANGE)"
+            if printf '%s\n' "$FILES" | grep -Eq "$APP_PATTERN"; then APP_CHANGED=true; else APP_CHANGED=false; fi
+            if printf '%s\n' "$FILES" | grep -Eq "$SCRIPTS_PATTERN"; then SCRIPTS_CHANGED=true; else SCRIPTS_CHANGED=false; fi
+            CHANGES="$(git log --no-merges --pretty='- %s (`%h`)' $RANGE)"
+            [ -n "$CHANGES" ] || CHANGES="- No source commits"
+          fi
+
+          echo "app_changed=$APP_CHANGED" >> "$GITHUB_OUTPUT"
+
+          if [ "$APP_CHANGED" = "true" ]; then
+            BUILD_NOTE="App rebuilt (macOS DMG, Windows MSI)."
+          else
+            BUILD_NOTE="App code unchanged, binaries carried over from the previous release."
+          fi
+
+          {
+            echo 'notes<<NOTES_EOF'
+            echo "Rolling build of \`${GITHUB_SHA:0:7}\` on \`${GITHUB_REF_NAME}\`."
+            echo ""
+            echo "$BUILD_NOTE"
+            echo ""
+            echo "### Changes"
+            echo "$CHANGES"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  scripts:
+    name: Package Engine Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create scripts archive
+        run: |
+          cd scripts
+          zip -r ../engine-scripts.zip engines/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-scripts
+          path: engine-scripts.zip
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.name }}
+    if: needs.changes.outputs.app_changed == 'true'
+    needs: changes
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (DMG)
+            os: macos-latest
+            task: packageDmg
+            artifact: adventure-explorer-macos
+            pattern: build/compose/binaries/main/dmg/*.dmg
+          - name: Windows (MSI)
+            os: windows-latest
+            task: packageMsi
+            artifact: adventure-explorer-windows
+            pattern: build/compose/binaries/main/msi/*.msi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        if: runner.os != 'Windows'
+        run: chmod +x gradlew
+
+      - name: Run ${{ matrix.task }}
+        run: ./gradlew ${{ matrix.task }} --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.pattern }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Rolling Release
+    needs: [ changes, scripts, build ]
+    if: always() && needs.changes.result == 'success' && needs.scripts.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Carry over binaries from previous release
+        if: needs.changes.outputs.app_changed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts/previous
+          if gh release download "$RELEASE_TAG" --pattern '*.dmg' --pattern '*.msi' --dir artifacts/previous; then
+            echo "Re-using binaries from the previous release."
+          else
+            echo "No previous binaries available, releasing scripts only."
+          fi
+
+      - name: Collect assets
+        run: |
+          mkdir -p assets
+          cp artifacts/engine-scripts/*.zip assets/ 2>/dev/null || true
+          for file in artifacts/adventure-explorer-*/* artifacts/previous/*; do
+            [ -f "$file" ] && cp "$file" assets/
+          done
+          ls -l assets/
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ needs.changes.outputs.notes }}
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" assets/* --clobber
+            gh release edit "$RELEASE_TAG" --title 'Latest' --notes "$NOTES"
+          else
+            gh release create "$RELEASE_TAG" assets/* --title 'Latest' --notes "$NOTES"
+          fi
