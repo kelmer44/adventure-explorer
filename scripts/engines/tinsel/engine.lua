@@ -1,725 +1,648 @@
 -- ============================================================================
 -- Adventure Explorer - Engine Script: Discworld 1 & 2 (Tinsel Engine)
 -- ============================================================================
--- Psygnosis/Perfect Entertainment. Handle-based resource system.
--- DW1: 4x4 block-tiled backgrounds, index (20-byte records), shift 23.
--- DW2: raw 8bpp backgrounds, index (24-byte records), shift 25.
--- Both use an `index` file + data files (.scn/.gra).
--- Verified against ScummVM engines/tinsel/ source code.
+-- Psygnosis / Perfect Entertainment handle based resource system.
+--
+-- Data model (verified against ScummVM engines/tinsel):
+--   * "index" holds fixed size records, one per data file:
+--         V1 (DW1): 20 bytes = name[12], u32 filesize, 4 reserved bytes
+--         V2 (DW2): 24 bytes = name[12], u32 filesize, 4 reserved, u32 flags2
+--   * A SCNHANDLE packs a file index plus a byte offset:
+--         V1: index = h >> 23, offset = h & 0x7FFFFF
+--         V2: index = h >> 25, offset = h & 0x1FFFFFF
+--   * Every data file is a singly linked list of chunks:
+--         u32 chunkType, u32 nextChunkAbsoluteOffset (0 terminates the list)
+--   * CHUNK_IMAGE (0x33340006) holds a flat list of 16 byte records:
+--         i16 width, u16 height, i16 aniX, i16 aniY, u32 hImgBits, u32 hImgPal
+--         the top two bits of height carry the packing type ("c16")
+--   * CHUNK_PALETTE (0x33340005) holds one or more palettes, each of them
+--         i32 numColors followed by numColors COLORREFs (0x00BBGGRR)
+--
+-- Decoders (ScummVM graphics.cpp DrawObject):
+--   DW1  WrtNonZero        4x4 block list, block data at charBase = file+u32@0x10
+--   DW2  WrtAll            raw 8bpp, used for full screen backgrounds
+--   DW2  t2WrtNonZero      byte RLE, used for small c16 == 0 images
+--   DW2  PackedWrtNonZero  run length packing, used for c16 = 1/2/3 images
+--
+-- Image palettes are installed into the video DAC starting at index 1
+-- (palette.cpp: FGND_DAC_INDEX), so colour index 0 is the background colour
+-- and colour n maps to palette entry n-1. That shift is applied when the
+-- 768 entry lookup table is built.
+--
+-- Tinsel has no animation container, so every image is exposed on its own.
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Discworld"
 engine.id          = "tinsel"
 engine.description = "Discworld 1 & 2 (1995/1996, Perfect Entertainment)"
-engine.version     = "2.0"
+engine.version     = "3.0"
 
--- Binary helpers
-local function u8(data, pos)   return data:byte(pos) end
+-- ============================================================================
+-- Binary helpers (positions are 1 based, matching Lua string indexing)
+-- ============================================================================
+
+local function u8(data, pos) return data:byte(pos) end
+
+local function u16le(data, pos)
+    return data:byte(pos) + data:byte(pos + 1) * 256
+end
+
 local function i16le(data, pos)
     local v = data:byte(pos) + data:byte(pos + 1) * 256
     return v < 32768 and v or v - 65536
 end
-local function u16le(data, pos)
-    return data:byte(pos) + data:byte(pos + 1) * 256
-end
+
 local function u32le(data, pos)
     return data:byte(pos) + data:byte(pos + 1) * 256
          + data:byte(pos + 2) * 65536 + data:byte(pos + 3) * 16777216
+end
+
+-- SCNHANDLE is "index in the high bits, byte offset in the low bits".
+local function handle_parts(scnhandle, shift)
+    local span = 2 ^ shift
+    local index = math.floor(scnhandle / span)
+    return index, scnhandle - index * span
 end
 
 -- ============================================================================
 -- Constants
 -- ============================================================================
 
-local CHUNK_IMAGE = string.char(0x06, 0x00, 0x34, 0x33)  -- 0x33340006 LE
-local C16_FLAG_MASK = 0xC000  -- upper 2 bits of imgHeight
+local CHUNK_PALETTE = 0x33340005
+local CHUNK_IMAGE   = 0x33340006
+
+local DW1 = { shift = 23, index_record = 20 }
+local DW2 = { shift = 25, index_record = 24 }
+
+-- A background is the image that covers the whole playfield.
+local DW1_BG_MIN_W, DW1_BG_MIN_H = 300, 150
+local DW2_BG_MIN_W, DW2_BG_MIN_H = 600, 200
+
+-- Discworld 1 always puts the block list of the playfield at this offset.
+local DW1_BG_BITS_OFFSET = 24
 
 -- ============================================================================
 -- Detection
 -- ============================================================================
 
-local function is_dw2(game_path)
-    return file_exists(game_path .. "/dw2.scn") or file_exists(game_path .. "/DW2.SCN")
+local function index_path(game_path)
+    for _, candidate in ipairs({ "index", "INDEX", "Index" }) do
+        if file_exists(game_path .. "/" .. candidate) then
+            return game_path .. "/" .. candidate
+        end
+    end
+    return nil
 end
 
-local function is_dw1(game_path)
-    return file_exists(game_path .. "/dw.scn") or file_exists(game_path .. "/DW.SCN")
-        or file_exists(game_path .. "/dw.gra") or file_exists(game_path .. "/DW.GRA")
+local function is_dw2(game_path)
+    return file_exists(game_path .. "/dw2.scn")
 end
 
 function engine.detect(game_path)
-    if not (file_exists(game_path .. "/index") or file_exists(game_path .. "/INDEX")) then
-        return false
-    end
-    return is_dw2(game_path) or is_dw1(game_path)
+    if not index_path(game_path) then return false end
+    return is_dw2(game_path) or file_exists(game_path .. "/dw.scn")
 end
 
 -- ============================================================================
--- Index file parser
--- DW1: 20-byte records, DW2: 24-byte records
--- Each record: 12-byte filename + u32le filesize (lower 24 bits)
+-- Partial file access
+-- Both data sets are close to a gigabyte in total, so only the byte ranges
+-- that are actually needed are pulled into memory.
 -- ============================================================================
 
-local function parse_index(game_path, dw2)
-    local idx_path = game_path .. "/index"
-    if not file_exists(idx_path) then
-        idx_path = game_path .. "/INDEX"
+local function open_data(game_path, name)
+    if not name then return nil end
+    local path = game_path .. "/" .. name
+    if not file_exists(path) then return nil end
+    local handle = file_open(path)
+    if not handle then return nil end
+    local size = file_size(handle)
+    if not size then
+        file_close(handle)
+        return nil
     end
-    local f = file_open(idx_path)
-    if not f then return nil end
+    return { handle = handle, size = math.floor(size) }
+end
 
-    local fsize = file_size(f)
-    local record_size = dw2 and 24 or 20
+local function close_data(f)
+    if f then file_close(f.handle) end
+end
 
-    if fsize % record_size ~= 0 then
-        record_size = (record_size == 24) and 20 or 24
-        if fsize % record_size ~= 0 then
-            file_close(f)
-            return nil
-        end
-    end
+local function read_at(f, offset, length)
+    if not f or length <= 0 or offset < 0 then return nil end
+    if offset + length > f.size then length = f.size - offset end
+    if length <= 0 then return nil end
+    return file_read(f.handle, offset, length)
+end
 
-    local num_handles = math.floor(fsize / record_size)
-    local raw = file_read(f, 0, fsize)
-    file_close(f)
+-- ============================================================================
+-- Index file
+-- ============================================================================
+
+local function parse_index(game_path, fmt)
+    local path = index_path(game_path)
+    if not path then return nil end
+
+    local handle = file_open(path)
+    if not handle then return nil end
+    local raw = file_read(handle, 0, math.floor(file_size(handle)))
+    file_close(handle)
     if not raw then return nil end
 
-    local handles = {}
-    for i = 0, num_handles - 1 do
-        local base = i * record_size + 1
+    local record
+    if #raw % fmt.index_record == 0 then
+        record = fmt.index_record
+    elseif #raw % 20 == 0 then
+        record = 20
+    else
+        return nil
+    end
 
+    local count = math.floor(#raw / record)
+    local handles, names = {}, {}
+    for i = 0, count - 1 do
+        local base = i * record + 1
         local name = ""
         for c = 0, 11 do
             local b = raw:byte(base + c)
             if not b or b == 0 then break end
             name = name .. string.char(b)
         end
+        if #name > 0 then
+            handles[i] = {
+                name     = name,
+                filesize = u32le(raw, base + 12) % 16777216,
+            }
+            names[#names + 1] = handles[i]
+        end
+    end
 
-        local filesize_raw = u32le(raw, base + 12)
-        local filesize = filesize_raw % 16777216
+    return handles, names
+end
 
-        handles[i] = {
-            name     = name,
-            filesize = filesize,
-            index    = i
+-- ============================================================================
+-- Chunk list
+-- ============================================================================
+
+local function walk_chunks(f)
+    local chunks = {}
+    local off, seen = 0, {}
+    while off + 8 <= f.size and not seen[off] do
+        seen[off] = true
+        local header = read_at(f, off, 8)
+        if not header then break end
+        local chunk = {
+            type = u32le(header, 1),
+            off  = off,
+            next = u32le(header, 5),
         }
+        chunks[#chunks + 1] = chunk
+        if chunk.next == 0 then break end
+        if chunk.next <= off or chunk.next > f.size then break end
+        off = chunk.next
     end
-
-    return handles, num_handles
+    return chunks
 end
 
--- ============================================================================
--- SCNHANDLE resolver
--- Returns (file_data, byte_offset) for given scnhandle
--- ============================================================================
-
-local file_cache = {}
-
-local function resolve_handle(game_path, handles, scnhandle, dw2)
-    if scnhandle == 0 then return nil, 0 end
-
-    local shift = dw2 and 25 or 23
-    local handle_idx = math.floor(scnhandle / (2 ^ shift))
-    local byte_offset = scnhandle % (2 ^ shift)
-
-    local entry = handles[handle_idx]
-    if not entry or #entry.name == 0 then return nil, 0 end
-
-    if not file_cache[entry.name] then
-        local fpath = game_path .. "/" .. entry.name
-        if not file_exists(fpath) then
-            -- Try case variation
-            local upper = entry.name:upper()
-            local lower = entry.name:lower()
-            if file_exists(game_path .. "/" .. upper) then
-                fpath = game_path .. "/" .. upper
-            elseif file_exists(game_path .. "/" .. lower) then
-                fpath = game_path .. "/" .. lower
-            else
-                return nil, 0
-            end
-        end
-        local f = file_open(fpath)
-        if not f then return nil, 0 end
-        local data = file_read(f, 0, file_size(f))
-        file_close(f)
-        file_cache[entry.name] = data
-    end
-
-    return file_cache[entry.name], byte_offset
-end
-
--- ============================================================================
--- Scan data file for CHUNK_IMAGE (0x33340006) markers
--- Returns list of {pos_1based, width, height, anioffX, anioffY, hImgBits, hImgPal}
--- ============================================================================
-
-local function scan_for_images(data)
-    local results = {}
-    local start = 1
-
-    while true do
-        local found = data:find(CHUNK_IMAGE, start, true)
-        if not found then break end
-
-        -- Chunk header: type (4 bytes at found), next_chunk_abs_offset (4 bytes at found+4).
-        -- next_chunk_abs_offset is a 0-based absolute file offset; the chunk data begins at
-        -- found+8 (1-based). In Lua's 1-based indexing the last byte of this chunk's data
-        -- is at position next_abs (since 0-based offset next_abs-1 = 1-based next_abs).
-        local next_abs = u32le(data, found + 4)  -- 0-based absolute offset to next chunk
-        local chunk_end = (next_abs > 0) and next_abs or #data  -- last data byte, 1-based
-
-        -- Iterate ALL 16-byte IMAGE structs packed consecutively in this chunk block.
-        local img_pos = found + 8  -- 1-based, start of first IMAGE struct
-        while img_pos + 15 <= chunk_end do
-            local w     = i16le(data, img_pos)
-            local raw_h = u16le(data, img_pos + 2)
-            local h     = raw_h % 16384  -- strip C16 flags (bits 14-15)
-
-            if w > 0 and h > 0 and w <= 2000 and h <= 2000 then
-                local hImgBits = u32le(data, img_pos + 8)
-                local hImgPal  = u32le(data, img_pos + 12)
-                if hImgBits ~= 0 then
-                    results[#results + 1] = {
-                        pos_1based = img_pos,
-                        width      = w,
-                        height     = h,
-                        raw_height = raw_h,
-                        anioffX    = i16le(data, img_pos + 4),
-                        anioffY    = i16le(data, img_pos + 6),
-                        hImgBits   = hImgBits,
-                        hImgPal    = hImgPal
-                    }
-                end
-            end
-            img_pos = img_pos + 16
-        end
-
-        -- Advance past this chunk to avoid re-scanning its data as a new marker
-        start = (next_abs > 0) and (next_abs + 1) or (#data + 1)
-    end
-
-    return results
-end
-
--- ============================================================================
--- Read PALETTE from resolved position
--- Format: int32le numColors, uint32le[numColors] COLORREF (0x00BBGGRR)
--- ============================================================================
-
-local function read_palette(data, pos)
-    if pos + 3 > #data then return nil end
-    local num_colors = u32le(data, pos)
-    if num_colors < 1 or num_colors > 256 then return nil end
-
-    local palette = {}
-    for i = 0, 255 do
-        palette[i * 3 + 1] = 0; palette[i * 3 + 2] = 0; palette[i * 3 + 3] = 0
-    end
-
-    -- FGND_DAC_INDEX = 1: the first palette color is placed at DAC index 1.
-    -- Pixel value 0 = DAC 0 = transparent background black (already zeroed).
-    -- Pixel value 1 = DAC 1 = palette color 0, pixel value N = palette color N-1.
-    -- So write color i at palette slot (i+1) to match DAC layout.
-    for i = 0, num_colors - 1 do
-        local p = pos + 4 + i * 4
-        if p + 3 > #data then break end
-        local colorref = u32le(data, p)
-        palette[(i + 1) * 3 + 1] = colorref % 256                        -- R
-        palette[(i + 1) * 3 + 2] = math.floor(colorref / 256) % 256      -- G
-        palette[(i + 1) * 3 + 3] = math.floor(colorref / 65536) % 256    -- B
-    end
-
-    return palette
-end
-
--- ============================================================================
--- Decode DW2 RLE sprite (t2WrtNonZero format)
--- Row-by-row RLE: opcode byte per run.
---   bit7=1 → run-length: count = opcode & 0x7F, next byte = color value
---   bit7=0 → raw dump: opcode = count, read 'count' raw pixel bytes
--- Pixel value 0 = transparent (left as 0). Non-zero = DAC index (matches
--- our 1-indexed palette after the FGND_DAC_INDEX fix).
--- ============================================================================
-
-local function decode_dw2_sprite(data, offset, w, h)
-    local pixels = {}
-    local total = w * h
-    for i = 1, total do pixels[i] = 0 end
-
-    local src = offset + 1  -- convert to 1-based
-    for y = 0, h - 1 do
-        local x = 0
-        while x < w do
-            if src > #data then break end
-            local opcode = u8(data, src); src = src + 1
-            if opcode >= 128 then
-                -- RLE run
-                local count = opcode - 128
-                if src > #data then break end
-                local color = u8(data, src); src = src + 1
-                for _ = 1, count do
-                    if x >= w then break end
-                    local dst = y * w + x + 1
-                    if dst <= total then pixels[dst] = color end
-                    x = x + 1
-                end
-            else
-                -- Raw dump
-                local count = opcode
-                for _ = 1, count do
-                    if src > #data then break end
-                    local pixel = u8(data, src); src = src + 1
-                    if x < w then
-                        local dst = y * w + x + 1
-                        if dst <= total then pixels[dst] = pixel end
-                        x = x + 1
-                    end
-                end
-            end
-        end
-    end
-
-    return pixels
-end
-
--- ============================================================================
--- Find palette from a named SCN file (used to supply palette to CDP sprites)
--- Returns a palette table (or nil). Tries each IMAGE in the SCN that has a
--- non-zero hImgPal resolvable via the INDEX.
--- ============================================================================
-
-local function find_palette_in_scn(game_path, handles, dw2, scn_name)
-    local canon = scn_name:upper()
-    local scn_data = file_cache[canon] or file_cache[scn_name]
-    if not scn_data then
-        local fpath = game_path .. "/" .. canon
-        if not file_exists(fpath) then
-            fpath = game_path .. "/" .. scn_name:lower()
-            if not file_exists(fpath) then return nil end
-        end
-        local f = file_open(fpath)
-        if not f then return nil end
-        scn_data = file_read(f, 0, file_size(f))
-        file_close(f)
-        if not scn_data then return nil end
-        file_cache[canon] = scn_data
-    end
-
-    local images = scan_for_images(scn_data)
-    for _, img in ipairs(images) do
-        if img.hImgPal ~= 0 then
-            local pal_data, pal_off = resolve_handle(game_path, handles, img.hImgPal, dw2)
-            if pal_data then
-                local pal = read_palette(pal_data, pal_off + 1)
-                if pal then return pal end
-            end
+-- Byte range of the first chunk of the given type, as (offset, size).
+local function find_chunk(f, chunk_type)
+    for _, chunk in ipairs(walk_chunks(f)) do
+        if chunk.type == chunk_type then
+            local size = (chunk.next > chunk.off + 8) and (chunk.next - chunk.off - 8)
+                      or (f.size - chunk.off - 8)
+            if size < 0 then size = 0 end
+            return chunk.off + 8, size
         end
     end
     return nil
 end
 
 -- ============================================================================
--- Decode DW1 4×4 block-tiled background
--- hImgBits resolves to (file_data, tile_map_offset)
--- charBase offset is at file_data + 0x10 (relative to file base)
--- transOffset is at file_data + 0x14
--- Tile map is an array of int16le indices at tile_map_offset
--- Each tile = 16 bytes (4×4 pixels, 8bpp) in the charBase block
+-- IMAGE records
 -- ============================================================================
 
-local function decode_dw1_background(bits_data, bits_off, img_w, img_h)
-    -- charBase and transOffset are at offset 0x10 and 0x14 from the file base
-    -- (per ScummVM: p + READ_32(p + 0x10), p + READ_32(p + 0x14))
-    if #bits_data < 0x18 then return nil end
+local function read_image_records(f)
+    local out = {}
+    local start, size = find_chunk(f, CHUNK_IMAGE)
+    if not start or size < 16 then return out end
 
-    local char_base_offset = u32le(bits_data, 1 + 0x10)  -- position 17 (1-based)
-    local trans_offset = u32le(bits_data, 1 + 0x14)       -- position 21 (1-based)
+    local raw = read_at(f, start, size)
+    if not raw then return out end
 
-    -- Tile map starts at bits_off within the file
-    local tile_map_pos = bits_off + 1  -- 1-based
+    for pos = 1, #raw - 15, 16 do
+        local w     = i16le(raw, pos)
+        local raw_h = u16le(raw, pos + 2)
+        local h     = raw_h % 16384
+        local hBits = u32le(raw, pos + 8)
 
-    -- Use ceiling division (matches ScummVM: (width + 3) >> 2)
-    -- so non-multiples-of-4 get the extra partial tile column/row
-    local tiles_w = math.floor((img_w + 3) / 4)
-    local tiles_h = math.floor((img_h + 3) / 4)
-    local num_tiles = tiles_w * tiles_h
+        if w > 0 and h > 0 and hBits ~= 0 and w <= 4096 and h <= 4096 then
+            out[#out + 1] = {
+                record   = start + pos - 1,   -- 1 based position in the data file
+                width    = w,
+                height   = h,
+                c16      = math.floor(raw_h / 16384) % 4,
+                anioffX  = i16le(raw, pos + 4),
+                anioffY  = i16le(raw, pos + 6),
+                hImgBits = hBits,
+                hImgPal  = u32le(raw, pos + 12),
+            }
+        end
+    end
 
-    if tile_map_pos + num_tiles * 2 - 1 > #bits_data then return nil end
+    return out
+end
 
-    -- Build output pixels
-    local pixels = {}
-    local total = img_w * img_h
-    for i = 1, total do pixels[i] = 0 end
+-- ============================================================================
+-- Palettes
+-- ============================================================================
 
-    for t = 0, num_tiles - 1 do
-        local tile_idx = i16le(bits_data, tile_map_pos + t * 2)
-        local tx = t % tiles_w
-        local ty = math.floor(t / tiles_w)
+-- One palette: i32 numColors followed by numColors COLORREFs.
+local function read_palette(data, pos)
+    if not data or pos < 1 or pos + 3 > #data then return nil end
+    local num_colors = u32le(data, pos)
+    if num_colors < 1 or num_colors > 1024 then return nil end
+    if pos + 3 + num_colors * 4 > #data then return nil end
 
-        if tile_idx >= 0 then
-            -- Opaque tile: charBase + (indexVal << 4)
-            local block_base = char_base_offset + tile_idx * 16 + 1  -- 1-based
+    local rgb = {}
+    for i = 0, num_colors - 1 do
+        local ref = u32le(data, pos + 4 + i * 4)
+        rgb[i] = { ref % 256, math.floor(ref / 256) % 256, math.floor(ref / 65536) % 256 }
+    end
+    return rgb
+end
 
-            for py = 0, 3 do
-                for px = 0, 3 do
-                    local src = block_base + py * 4 + px
-                    local dst = (ty * 4 + py) * img_w + (tx * 4 + px) + 1
-                    if dst >= 1 and dst <= total and src >= 1 and src <= #bits_data then
-                        pixels[dst] = u8(bits_data, src)
-                    end
-                end
+-- The palette is reached through its own SCNHANDLE, so it can live in a
+-- different data file than the image. A null handle is common in Discworld 2
+-- and there the PALETTE chunk of the image's own file is used instead.
+local function resolve_palette(game_path, handles, fmt, file_name, record)
+    local rgb
+
+    if record.hImgPal ~= 0 then
+        local index, offset = handle_parts(record.hImgPal, fmt.shift)
+        local owner = handles[index]
+        if owner then
+            local pf = open_data(game_path, owner.name)
+            if pf then
+                local data = read_at(pf, offset, 1028)
+                rgb = data and read_palette(data, 1)
+                close_data(pf)
             end
-        else
-            -- Transparent tile: indexVal &= 0x7FFF
-            local unsigned_idx = (65536 + tile_idx) % 32768
-            if unsigned_idx > 0 then
-                -- charBase + ((transOffset + indexVal) << 4)
-                local block_base = char_base_offset + (trans_offset + unsigned_idx) * 16 + 1
+        end
+    end
 
+    if not rgb then
+        local f = open_data(game_path, file_name)
+        if f then
+            local start, size = find_chunk(f, CHUNK_PALETTE)
+            if start then
+                local data = read_at(f, start, math.min(size, 1028))
+                rgb = data and read_palette(data, 1)
+            end
+            close_data(f)
+        end
+    end
+
+    return rgb
+end
+
+-- 768 entry lookup table for image_create_indexed. Index 0 is the DAC
+-- background colour, index n uses palette entry n-1.
+local function palette_table(rgb)
+    local t = {}
+    for i = 0, 255 do
+        local c = (i > 0) and rgb[i - 1] or nil
+        t[i * 3 + 1] = c and c[1] or 0
+        t[i * 3 + 2] = c and c[2] or 0
+        t[i * 3 + 3] = c and c[3] or 0
+    end
+    return t
+end
+
+local function grayscale_table()
+    local t = {}
+    for i = 0, 255 do
+        t[i * 3 + 1] = i
+        t[i * 3 + 2] = i
+        t[i * 3 + 3] = i
+    end
+    return t
+end
+
+-- ============================================================================
+-- Decoders
+-- All of them return a 1 based table of colour indexes.
+-- ============================================================================
+
+-- DW1 WrtNonZero: a list of 4x4 block indexes plus a block matrix that lives
+-- at an absolute offset inside the same file. A negative index selects a
+-- transparent block, and only its non zero pixels are written.
+local function decode_dw1(f, bits_off, w, h)
+    local header = read_at(f, 0x10, 8)
+    if not header then return nil end
+    local char_base = u32le(header, 1)
+    local trans_off = u32le(header, 5)
+    if char_base <= 0 or char_base >= f.size then return nil end
+
+    local blocks_w = math.floor((w + 3) / 4)
+    local blocks_h = math.floor((h + 3) / 4)
+    local index_data = read_at(f, bits_off, blocks_w * blocks_h * 2)
+    if not index_data or #index_data < blocks_w * blocks_h * 2 then return nil end
+
+    local matrix = read_at(f, char_base, f.size - char_base)
+    if not matrix then return nil end
+
+    local pixels = {}
+
+    for t = 0, blocks_w * blocks_h - 1 do
+        local value = i16le(index_data, t * 2 + 1)
+        local bx, by = (t % blocks_w) * 4, math.floor(t / blocks_w) * 4
+
+        local block, transparent
+        if value >= 0 then
+            block, transparent = value, false
+        else
+            value = value % 32768
+            if value > 0 then
+                block, transparent = trans_off + value, true
+            end
+        end
+
+        if block then
+            local base = block * 16 + 1
+            if base + 15 <= #matrix then
                 for py = 0, 3 do
-                    for px = 0, 3 do
-                        local src = block_base + py * 4 + px
-                        local dst = (ty * 4 + py) * img_w + (tx * 4 + px) + 1
-                        if dst >= 1 and dst <= total and src >= 1 and src <= #bits_data then
-                            local pixel = u8(bits_data, src)
-                            if pixel ~= 0 then
-                                pixels[dst] = pixel
+                    local yy = by + py
+                    if yy < h then
+                        local row = yy * w
+                        for px = 0, 3 do
+                            local xx = bx + px
+                            if xx < w then
+                                local p = u8(matrix, base + py * 4 + px)
+                                if p ~= 0 or not transparent then
+                                    pixels[row + xx + 1] = p
+                                end
                             end
                         end
                     end
                 end
             end
-            -- unsigned_idx == 0: fully transparent, pixels already 0
         end
     end
 
     return pixels
 end
 
--- ============================================================================
--- Single-frame decoder (shared by load_resource and animation handler)
--- ============================================================================
-
-local function load_file_to_cache(game_path, file_name)
-    if file_cache[file_name] then return file_cache[file_name] end
-    local fpath = game_path .. "/" .. file_name
-    if not file_exists(fpath) then
-        fpath = game_path .. "/" .. file_name:upper()
-        if not file_exists(fpath) then
-            fpath = game_path .. "/" .. file_name:lower()
-        end
+-- DW2 WrtAll: plain 8bpp, row major.
+local function decode_dw2_raw(f, off, w, h)
+    local data = read_at(f, off, w * h)
+    if not data or #data < w * h then return nil end
+    local pixels = {}
+    for i = 0, w * h - 1 do
+        pixels[i + 1] = u8(data, i + 1)
     end
-    local f = file_open(fpath)
-    if not f then return nil end
-    local data = file_read(f, 0, file_size(f))
-    file_close(f)
-    if not data then return nil end
-    file_cache[file_name] = data
-    return data
+    return pixels
 end
 
-local function decode_one_frame(game_path, handles, dw2, file_name, img_pos)
-    local data = load_file_to_cache(game_path, file_name)
+-- RLE and packed streams are variable length: a row can encode to fewer or
+-- more bytes than its width, and the final run may read a little past the
+-- last pixel. Over reading is harmless, the decoders stop after h rows.
+local function read_stream(f, off, w, h)
+    return read_at(f, off, math.max(w * h * 2, 4096))
+end
+
+-- DW2 t2WrtNonZero: byte oriented RLE, one row at a time. A set bit in the
+-- opcode introduces a run of a single colour, colour 0 being transparent.
+local function decode_dw2_rle(f, off, w, h)
+    local data = read_stream(f, off, w, h)
     if not data then return nil end
-    if img_pos + 15 > #data then return nil end
+    local total, src = #data, 1
+    local pixels = {}
 
-    local w        = i16le(data, img_pos)
-    local raw_h    = u16le(data, img_pos + 2)
-    local h        = raw_h % 16384
-    local c16      = math.floor(raw_h / 16384) % 4
-    local hImgBits = u32le(data, img_pos + 8)
-    local hImgPal  = u32le(data, img_pos + 12)
+    for y = 0, h - 1 do
+        local row, x = y * w, 0
+        while x < w do
+            if src > total then return pixels end
+            local opcode = u8(data, src); src = src + 1
 
-    if w <= 0 or h <= 0 or hImgBits == 0 then return nil end
-
-    local is_cdp = dw2 and file_name:upper():match("%.CDP$") ~= nil
-    local DW2_OFFSET_MOD = 2 ^ 25
-
-    -- Resolve palette
-    local palette
-    if is_cdp then
-        local scn_name = file_name:upper():sub(1, -4) .. "SCN"
-        palette = find_palette_in_scn(game_path, handles, dw2, scn_name)
-        if not palette then
-            palette = find_palette_in_scn(game_path, handles, dw2, "OBJECTS.SCN")
-        end
-    elseif hImgPal ~= 0 then
-        local pal_data, pal_off = resolve_handle(game_path, handles, hImgPal, dw2)
-        if pal_data then
-            palette = read_palette(pal_data, pal_off + 1)
-        end
-    end
-
-    if not palette then
-        palette = {}
-        for i = 0, 255 do
-            palette[i*3+1] = i; palette[i*3+2] = i; palette[i*3+3] = i
+            if opcode % 128 >= 128 then
+                local run = opcode % 128
+                if src > total then return pixels end
+                local color = u8(data, src); src = src + 1
+                for _ = 1, run do
+                    if x < w and color ~= 0 then pixels[row + x + 1] = color end
+                    x = x + 1
+                end
+            else
+                for _ = 1, opcode do
+                    if src > total then return pixels end
+                    if x < w then pixels[row + x + 1] = u8(data, src) end
+                    src = src + 1
+                    x = x + 1
+                end
+            end
         end
     end
 
-    -- Resolve pixel data
-    local bits_data, bits_off
-    if is_cdp then
-        bits_data = data
-        bits_off  = hImgBits % DW2_OFFSET_MOD
+    return pixels
+end
+
+-- DW2 PackedWrtNonZero: run length packing, packing types 1, 2 and 3.
+local function decode_dw2_packed(f, off, w, h, pack_type)
+    local data = read_stream(f, off, w, h)
+    if not data then return nil end
+    local total, src = #data, 1
+    local color_table, base_col
+
+    if pack_type == 3 then
+        if src > total then return nil end
+        local count = u8(data, src); src = src + 1
+        if src + count - 1 > total then return nil end
+        color_table = {}
+        for i = 0, count - 1 do
+            color_table[i] = u8(data, src + i)
+        end
+        src = src + count
+    elseif pack_type == 1 then
+        base_col = 0xF0
     else
-        bits_data, bits_off = resolve_handle(game_path, handles, hImgBits, dw2)
+        base_col = 0xE0
     end
-    if not bits_data then return nil end
 
+    local pixels = {}
+
+    for y = 0, h - 1 do
+        local row, x, eol = y * w, 0, false
+        if src > total then break end
+        local x_offset = u8(data, src); src = src + 1
+
+        while x < w do
+            local color, num_bytes
+            while true do
+                if x_offset > 0 then
+                    x = x + x_offset
+                    x_offset = 0
+                end
+                if src > total then return pixels end
+                local v = u8(data, src); src = src + 1
+                num_bytes = v % 16
+                color = color_table and color_table[math.floor(v / 16)]
+                          or (base_col + math.floor(v / 16))
+                if num_bytes ~= 0 then break end
+                if src > total then return pixels end
+                num_bytes = u8(data, src); src = src + 1
+                if num_bytes >= 16 then break end
+                x_offset = num_bytes + v
+                if x_offset == 0 then
+                    eol = true
+                    break
+                end
+            end
+            if eol then break end
+            for _ = 1, num_bytes do
+                if x < w then pixels[row + x + 1] = color end
+                x = x + 1
+            end
+        end
+
+        -- A row that reached the right edge is followed by an end marker.
+        if not eol then src = src + 2 end
+    end
+
+    return pixels
+end
+
+-- ============================================================================
+-- Classification
+-- ============================================================================
+
+-- A background is the image that covers the whole playfield, and it is the
+-- only kind stored as plain 8bpp pixel data. The packing type alone does not
+-- say so, because Tinsel picks the decoder from the object flags and those
+-- live in the scene object table, not in the IMAGE record. Two rules narrow it
+-- down: only a playfield sized image is a background, and its pixel data has
+-- to actually be there. Discworld 2 has a few large RLE cutscene frames
+-- (BONEDIE, COMPUTER, FILMSET, GIMLETS) that only the second rule rules out.
+local function is_background(fmt, img, file_size)
+    if fmt == DW2 then
+        if img.c16 ~= 0 then return false end
+        if img.width < DW2_BG_MIN_W or img.height < DW2_BG_MIN_H then return false end
+        local _, bits_off = handle_parts(img.hImgBits, DW2.shift)
+        return bits_off + img.width * img.height <= file_size
+    end
+    local _, bits_off = handle_parts(img.hImgBits, DW1.shift)
+    return bits_off == DW1_BG_BITS_OFFSET
+       and img.width >= DW1_BG_MIN_W and img.height >= DW1_BG_MIN_H
+end
+
+-- ============================================================================
+-- Decoding a single image record
+-- ============================================================================
+
+local function decode_image(game_path, handles, fmt, file_name, record)
+    local bits_index, bits_off = handle_parts(record.hImgBits, fmt.shift)
+    local owner = handles[bits_index]
+
+    -- The pixels are described by their own handle, which normally points at
+    -- the file the record was read from.
+    local bits_file = open_data(game_path, (owner and owner.name) or file_name)
+    if not bits_file then return nil end
+
+    local w, h = record.width, record.height
     local pixels
-    if dw2 then
-        if c16 ~= 0 then
-            pixels = decode_dw2_sprite(bits_data, bits_off, w, h)
+    if fmt == DW2 then
+        if record.c16 ~= 0 then
+            pixels = decode_dw2_packed(bits_file, bits_off, w, h, record.c16)
+        elseif is_background(DW2, record, bits_file.size) then
+            pixels = decode_dw2_raw(bits_file, bits_off, w, h)
         else
-            pixels = {}
-            local start = bits_off + 1
-            local total = w * h
-            for i = 1, total do
-                pixels[i] = (start + i - 1 <= #bits_data) and u8(bits_data, start + i - 1) or 0
-            end
+            pixels = decode_dw2_rle(bits_file, bits_off, w, h)
         end
     else
-        pixels = decode_dw1_background(bits_data, bits_off, w, h)
-        if not pixels then
-            pixels = {}
-            local start = bits_off + 1
-            local total = w * h
-            for i = 1, total do
-                pixels[i] = (start + i - 1 <= #bits_data) and u8(bits_data, start + i - 1) or 0
-            end
-        end
+        pixels = decode_dw1(bits_file, bits_off, w, h)
     end
+
+    local rgb = resolve_palette(game_path, handles, fmt, file_name, record)
+    close_data(bits_file)
 
     if not pixels then return nil end
-    return image_create_indexed(w, h, pixels, palette)
+
+    return image_create_indexed(w, h, pixels, rgb and palette_table(rgb) or grayscale_table())
 end
 
 -- ============================================================================
 -- Resource tree
 -- ============================================================================
 
+local function image_id(file_name, record)
+    return string.format("img_%s_%d", file_name, record.record)
+end
+
 function engine.get_resources(game_path)
-    file_cache = {}
+    if not engine.detect(game_path) then return {} end
 
-    local dw2 = is_dw2(game_path)
-    local game_label = dw2 and "Discworld 2" or "Discworld 1"
-
-    local handles, num = parse_index(game_path, dw2)
+    local fmt = is_dw2(game_path) and DW2 or DW1
+    local label = (fmt == DW2) and "Discworld 2" or "Discworld 1"
+    local handles, files = parse_index(game_path, fmt)
     if not handles then return {} end
 
-    -- Collect unique data files from index
-    local data_files = {}
-    local seen = {}
-    for i = 0, num - 1 do
-        local h = handles[i]
-        if h and #h.name > 0 and not seen[h.name:lower()] then
-            seen[h.name:lower()] = true
-            data_files[#data_files + 1] = { name = h.name, index = i }
-        end
-    end
+    local backgrounds, sprite_groups, sprite_total = {}, {}, 0
 
-    -- For DW2: also scan .CDP files (not in INDEX but contain graphics data)
-    if dw2 then
-        local all_files = list_files(game_path)
-        if all_files then
-            for _, fname in ipairs(all_files) do
-                if fname:upper():match("%.CDP$") and not seen[fname:lower()] then
-                    seen[fname:lower()] = true
-                    data_files[#data_files + 1] = { name = fname, index = -1 }
+    for _, entry in ipairs(files) do
+        local f = open_data(game_path, entry.name)
+        if f then
+            local images = read_image_records(f)
+            close_data(f)
+
+            local seen, sprites = {}, {}
+            for _, img in ipairs(images) do
+                -- Many records point at identical pixel data, list it once.
+                if not seen[img.hImgBits] then
+                    seen[img.hImgBits] = true
+                    if is_background(fmt, img, f.size) then
+                        backgrounds[#backgrounds + 1] = {
+                            id   = image_id(entry.name, img),
+                            name = string.format("%s - %dx%d",
+                                entry.name:upper(), img.width, img.height),
+                            type = "image",
+                        }
+                    else
+                        sprites[#sprites + 1] = {
+                            id   = image_id(entry.name, img),
+                            name = string.format("%dx%d", img.width, img.height),
+                            type = "image",
+                        }
+                    end
                 end
+            end
+
+            if #sprites > 0 then
+                sprite_total = sprite_total + #sprites
+                sprite_groups[#sprite_groups + 1] = {
+                    id       = "sprites_" .. entry.name,
+                    name     = string.format("%s (%d)", entry.name:upper(), #sprites),
+                    type     = "category",
+                    children = sprites,
+                }
             end
         end
     end
 
     local resources = {}
-    -- For DW1 (and DW2 SCN small images): collected cross-file for animation grouping
-    local all_bg  = {}  -- { id, name } background image entries
-    local all_scn_sp = {}  -- { fname, pos, w, h } for DW1 cross-file sprite grouping
-
-    for _, df in ipairs(data_files) do
-        local data = load_file_to_cache(game_path, df.name)
-        if data then
-            local images = scan_for_images(data)
-
-            -- DW2 CDP: all images are character sprites; never backgrounds
-            local is_cdp = dw2 and df.name:upper():match("%.CDP$") ~= nil
-
-            local bg_images = {}
-            local sp_images = {}
-            for _, img in ipairs(images) do
-                if img.hImgBits ~= 0 and img.width >= 4 and img.height >= 4 then
-                    if is_cdp then
-                        -- CDP files hold character sprites exclusively
-                        sp_images[#sp_images + 1] = img
-                    elseif dw2 then
-                        -- DW2: c16==0 (raw 8bpp WrtAll) + wide → background;
-                        -- c16!=0 (t2WrtNonZero RLE) → sprite
-                        local c16 = math.floor(img.raw_height / 16384) % 4
-                        if c16 == 0 and img.width >= 300 then
-                            bg_images[#bg_images + 1] = img
-                        elseif img.width >= 4 and img.height >= 4 then
-                            sp_images[#sp_images + 1] = img
-                        end
-                    elseif img.width >= 300 and img.height >= 80 then
-                        -- DW1: use size heuristic (no reliable c16 distinction)
-                        bg_images[#bg_images + 1] = img
-                    elseif img.width >= 4 and img.height >= 4 then
-                        sp_images[#sp_images + 1] = img
-                    end
-                end
-            end
-
-            -- Backgrounds: group same-dimension images within the same file as animation frames.
-            -- This handles wide scrolling backgrounds stored as multiple layers.
-            if #bg_images > 0 then
-                local bg_groups = {}
-                local bg_order  = {}
-                for _, img in ipairs(bg_images) do
-                    local key = img.width .. "x" .. img.height
-                    if not bg_groups[key] then
-                        bg_groups[key] = {}
-                        bg_order[#bg_order + 1] = key
-                    end
-                    bg_groups[key][#bg_groups[key] + 1] = img
-                end
-                for _, key in ipairs(bg_order) do
-                    local group = bg_groups[key]
-                    local first = group[1]
-                    local entry
-                    if #group == 1 then
-                        entry = {
-                            id   = string.format("img_%s_%d", df.name, first.pos_1based),
-                            name = string.format("%s - %dx%d", df.name, first.width, first.height),
-                        }
-                    else
-                        local parts = {}
-                        for _, img in ipairs(group) do
-                            parts[#parts + 1] = df.name .. ":" .. img.pos_1based
-                        end
-                        entry = {
-                            id   = "anim_" .. table.concat(parts, "|"),
-                            name = string.format("%s - %dx%d \xc3\x97 %d layers",
-                                df.name, first.width, first.height, #group),
-                        }
-                    end
-                    all_bg[#all_bg + 1] = entry
-                end
-            end
-
-            if is_cdp then
-                -- DW2 CDP: group images by (w×h) within the same file → animation frames
-                local groups  = {}
-                local order   = {}
-                for _, img in ipairs(sp_images) do
-                    local key = img.width .. "x" .. img.height
-                    if not groups[key] then
-                        groups[key] = {}
-                        order[#order + 1] = key
-                    end
-                    groups[key][#groups[key] + 1] = img
-                end
-
-                local children = {}
-                for _, key in ipairs(order) do
-                    local group = groups[key]
-                    local first = group[1]
-                    if #group == 1 then
-                        children[#children + 1] = {
-                            id   = string.format("img_%s_%d", df.name, first.pos_1based),
-                            name = string.format("%dx%d", first.width, first.height),
-                            type = "image",
-                        }
-                    else
-                        local parts = {}
-                        for _, img in ipairs(group) do
-                            parts[#parts + 1] = df.name .. ":" .. img.pos_1based
-                        end
-                        children[#children + 1] = {
-                            id   = "anim_" .. table.concat(parts, "|"),
-                            name = string.format("%dx%d \xc3\x97 %d frames",
-                                first.width, first.height, #group),
-                            type = "animation",
-                        }
-                    end
-                end
-
-                if #children > 0 then
-                    resources[#resources + 1] = {
-                        id       = "sprites_" .. df.name,
-                        name     = string.format("DW2 - %s (%d sprites)", df.name, #sp_images),
-                        type     = "category",
-                        children = children,
-                    }
-                end
-            else
-                -- DW1 or DW2 SCN sprites: collect for cross-file animation grouping
-                for _, img in ipairs(sp_images) do
-                    all_scn_sp[#all_scn_sp + 1] = {
-                        fname = df.name, pos = img.pos_1based,
-                        w = img.width,   h   = img.height,
-                    }
-                end
-            end
-        end
-    end
-
-    -- Backgrounds category (DW1 and DW2 SCN backgrounds)
-    if #all_bg > 0 then
-        local bg_children = {}
-        for _, bg in ipairs(all_bg) do
-            local bg_type = bg.id:sub(1, 5) == "anim_" and "animation" or "image"
-            bg_children[#bg_children + 1] = { id = bg.id, name = bg.name, type = bg_type }
-        end
-        table.insert(resources, 1, {
+    if #backgrounds > 0 then
+        resources[#resources + 1] = {
             id       = "cat_backgrounds",
-            name     = string.format("%s - Backgrounds (%d)", game_label, #all_bg),
+            name     = string.format("%s - Backgrounds (%d)", label, #backgrounds),
             type     = "category",
-            children = bg_children,
-        })
+            children = backgrounds,
+        }
     end
-
-    -- Sprites / animations category (DW1 cross-file grouping; DW2 SCN small objects)
-    if #all_scn_sp > 0 then
-        local groups = {}
-        local order  = {}
-        for _, sp in ipairs(all_scn_sp) do
-            local key = sp.w .. "x" .. sp.h
-            if not groups[key] then groups[key] = {}; order[#order + 1] = key end
-            groups[key][#groups[key] + 1] = sp
-        end
-
-        local sp_children = {}
-        for _, key in ipairs(order) do
-            local group = groups[key]
-            local first = group[1]
-            if #group == 1 then
-                sp_children[#sp_children + 1] = {
-                    id   = string.format("img_%s_%d", first.fname, first.pos),
-                    name = string.format("%dx%d  [%s]", first.w, first.h, first.fname),
-                    type = "image",
-                }
-            else
-                local parts = {}
-                for _, sp in ipairs(group) do
-                    parts[#parts + 1] = sp.fname .. ":" .. sp.pos
-                end
-                sp_children[#sp_children + 1] = {
-                    id   = "anim_" .. table.concat(parts, "|"),
-                    name = string.format("%dx%d \xc3\x97 %d frames", first.w, first.h, #group),
-                    type = "animation",
-                }
-            end
-        end
-
-        table.insert(resources, 2, {
+    if #sprite_groups > 0 then
+        resources[#resources + 1] = {
             id       = "cat_sprites",
-            name     = string.format("%s - Sprites (%d sizes)", game_label, #sp_children),
+            name     = string.format("%s - Sprites (%d)", label, sprite_total),
             type     = "category",
-            children = sp_children,
-        })
+            children = sprite_groups,
+        }
     end
 
     return resources
@@ -729,45 +652,52 @@ end
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id, palette_id)
-    local dw2 = is_dw2(game_path)
-    local handles, num = parse_index(game_path, dw2)
+function engine.load_resource(game_path, resource_id)
+    if not engine.detect(game_path) then return nil end
+
+    local file_name, record_pos = tostring(resource_id):match("^img_(.+)_(%d+)$")
+    if not file_name or not record_pos then
+        return { type = "text", text = "Unknown resource: " .. tostring(resource_id) }
+    end
+    record_pos = tonumber(record_pos)
+
+    local fmt = is_dw2(game_path) and DW2 or DW1
+    local handles = parse_index(game_path, fmt)
     if not handles then return nil end
 
-    -- Animation: "anim_FNAME1:POS1|FNAME2:POS2|..."
-    if resource_id:sub(1, 5) == "anim_" then
-        local anim_str = resource_id:sub(6)
-        local frames   = {}
-        for part in (anim_str .. "|"):gmatch("([^|]+)|") do
-            local fname, pos_s = part:match("^(.+):(%d+)$")
-            if fname and pos_s then
-                local img = decode_one_frame(game_path, handles, dw2, fname, tonumber(pos_s))
-                if img then frames[#frames + 1] = img end
-            end
-        end
-        if #frames > 0 then
-            return {
-                type        = "animation",
-                frames      = frames,
-                description = string.format("%s - %d frames",
-                    dw2 and "Discworld 2" or "Discworld 1", #frames),
-            }
-        end
-        return { type = "text", text = "No frames decoded: " .. resource_id }
+    local f = open_data(game_path, file_name)
+    if not f then
+        return { type = "text", text = "Cannot open: " .. file_name }
+    end
+    local raw = read_at(f, record_pos, 16)
+    close_data(f)
+    if not raw then
+        return { type = "text", text = "Cannot read image record: " .. resource_id }
     end
 
-    -- Single image: "img_FILENAME_pos"
-    local file_name, pos_str = resource_id:match("^img_(.+)_(%d+)$")
-    if not file_name or not pos_str then return nil end
-    local img = decode_one_frame(game_path, handles, dw2, file_name, tonumber(pos_str))
-    if not img then
+    local raw_h = u16le(raw, 3)
+    local record = {
+        record   = record_pos,
+        width    = i16le(raw, 1),
+        height   = raw_h % 16384,
+        c16      = math.floor(raw_h / 16384) % 4,
+        anioffX  = i16le(raw, 5),
+        anioffY  = i16le(raw, 7),
+        hImgBits = u32le(raw, 9),
+        hImgPal  = u32le(raw, 13),
+    }
+
+    local ok, img = pcall(decode_image, game_path, handles, fmt, file_name, record)
+    if not ok or not img then
         return { type = "text", text = "Cannot decode: " .. resource_id }
     end
+
     return {
         type        = "image",
         image       = img,
-        description = string.format("%s - %s",
-            dw2 and "Discworld 2" or "Discworld 1", file_name),
+        description = string.format("%s - %s %dx%d",
+            (fmt == DW2) and "Discworld 2" or "Discworld 1", file_name:upper(),
+            record.width, record.height),
     }
 end
 
