@@ -70,6 +70,32 @@ https://moddingwiki.shikadi.net/wiki/MegaTech_VOL_Format
 
 games in ags/COBRA
 
+### CURSE OF ENCHANTIA
+No ScummVM engine exists for this game, so the format was reverse engineered from
+the data itself. Both image containers are Rob Northen Compression (ProPack)
+streams, decoded from the public ProPack source:
+http://www.codersnotes.com/solaris/pack/propack.zip and the method 1 description
+at http://www.codersnotes.com/solaris/pack/rnc_format.html
+
+Method 1 (Huffman) appears in CORE.DAT, MENU.DAT and TITLE.DAT, method 2 in the
+rest. Both header CRCs are CRC-16/ARC and every block is verified on decode.
+
+Two containers sit on top of that:
+- `.MAP` room backgrounds: a 576 byte palette (192 RGB triples, six bits per
+  channel) at offset 0, then two bytes, then a u16 count N followed by N
+  16-byte room records, then a chain of RNC blocks that are each one 32x200
+  vertical strip stored left to right. N strips form a (32*N)x200 room. The
+  palette is per room, not shared: BASEBAT.MAP's is 177/192 entries
+  byte-identical to BASEBALL.PAL.
+- `.DAT` full-screen images: a single RNC block, 320x200 (320x32 for MENU.DAT).
+  These take their palette from a matching `.PAL` file.
+
+Standalone `.PAL` files are 768 bytes, 256 RGB triples, six bits per channel, so
+every component scales by 4. CORE.PAL is the exception: only its first 16
+entries carry colour, and CORE.DAT is the one .DAT that stays inside that range.
+
+games in ags/CURSE
+
 ### Dark Seed
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 

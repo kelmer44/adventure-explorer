@@ -1397,3 +1397,136 @@ All 83 are `biCompression = 0`, so background decoding never touches the
 scanline format of 5.4. That format is implemented and verified (against 30
 sampled scanline images plus 11 `BI_RGB` ones, pixels and palettes matching a
 separate decoder byte for byte), but the engine only lists backgrounds for now.
+
+---
+
+# Part 6: Curse of Enchantia RNC Images & Room Backgrounds
+
+No ScummVM engine exists for Curse of Enchantia, so the format was derived from
+the game data itself, using the public ProPack source and the RNC method 1
+description at http://www.codersnotes.com/solaris/pack/rnc_format.html
+Engine script: `scripts/engines/curseofenchantia/engine.lua`
+Game location: `ags/CURSE`
+
+## 6.1 Top Level Layout
+
+Every asset is a single flat file under `DATA/`, with no archives and no
+directory tree. That makes the whole resource list buildable by directory scan
+alone: 56 `.MAP` room backgrounds, 20 `.DAT` files and 6 `.PAL` palettes.
+
+## 6.2 RNC Stream (Rob Northen Compression / ProPack)
+
+Both image containers are RNC streams. The 18-byte header is big-endian:
+
+```
+0   'R' 'N' 'C' <method>
+4   u32 unpackedSize
+8   u32 packedSize
+12  u16 unpackedCRC
+14  u16 packedCRC
+16  2 reserved bytes
+18  packed data
+```
+
+Both CRCs are CRC-16/ARC (reflected, poly 0xA001). Checking them is what makes
+the format trustworthy: a block is only accepted once its packed bytes **and**
+its decoded bytes both hash correctly, so any image the engine returns has been
+proven correct rather than merely plausible.
+
+| Method | Used by | Shape |
+|--------|---------|-------|
+| 1 | `CORE.DAT`, `MENU.DAT`, `TITLE.DAT` | Series of sections, each with three Huffman tables (raw run, match offset, match length) and a u16 chunk count |
+| 2 | everything else | MSB-first bit reader; literals, matches, and a key that rotates by one bit per literal |
+
+Method 2 is the interesting one for a decoder without bitwise operators: the
+running key has to be rotated right, which is why the engine builds a full
+`XOR8[a][b]` table from `2*XOR8[a>>1][b>>1] + ((a%2) XOR (b%2))` and does all
+256-bit arithmetic in floating point.
+
+## 6.3 `.MAP` Room Backgrounds
+
+A `.MAP` is not a plain RNC stream. It opens with its own colour table:
+
+```
+0     576 bytes  palette, 192 RGB triples, six bits per channel
+576   2 bytes    unknown
+578   u16 count N, then N 16-byte room records (N * 16 bytes)
+...   a chain of RNC blocks
+```
+
+The chain decodes to 6,400-byte blocks, and `6400 = 32 x 200`: each block is
+one **32-pixel-wide vertical strip**, stored left to right. Room width therefore
+follows from the strip count, with no width field anywhere in the file.
+
+| File | Strips | Size |
+|------|--------|------|
+| `GRAVE.MAP` | 4 | 128x200 |
+| `BENN.MAP` | 8 | 256x200 |
+| `CAVE.MAP` | 10 | 320x200 (one screen) |
+| `CAVECOR.MAP` | 20 | 640x200 |
+| `SNOWAST2.MAP` | 34 | 1088x200 (widest in the game) |
+
+The first 576 bytes were confirmed to be a palette three independent ways.
+1. All components fall in 0..63, the VGA DAC range, so it scales by 4 exactly
+   like the standalone `.PAL` files.
+2. The header size is always `576 + 2 + N*16`, and the u16 at 578 always equals
+   N, so the region is accounted for exactly with no slack.
+3. Correlation between the index difference and the colour difference across
+   horizontally adjacent pixels scores 0.84-0.96 for the embedded palette
+   against at most 0.86 for any `.PAL`, and 0.03 for `CORE.PAL`.
+
+**The palette is per room, not shared.** All 56 rooms carry a different one. The
+decisive evidence is `BASEBAT.MAP`, whose embedded table is **177 of 192 entries
+byte-identical to `BASEBALL.PAL`**, while every other room matches every `.PAL`
+in at most 2 entries. That single near-identity is what links the room files to
+the standalone screens and confirms the whole reading.
+
+25 of the 56 rooms also reference indices 192..255, which the file never
+stores. Those pixels are sparse (0.00% to 8%, non-contiguous), consistent with
+the game retargeting those slots at runtime for effects such as water and fire.
+The engine pads them with a grey ramp so they stay visible instead of going
+black, and documents it as a guess rather than a decode.
+
+## 6.4 `.DAT` Full-Screen Images and `.PAL` Palettes
+
+A `.DAT` is a single RNC block holding one indexed image: 320x200, except
+`MENU.DAT` at 320x32. 19 of the 20 are images; `BOXDET.DAT` is a plain offset
+table with no RNC magic and is skipped.
+
+`.PAL` files are 768 bytes, 256 RGB triples, six bits per channel, scaling by 4
+to reach 0..252. `CORE.PAL` is the exception and behaves like a 16-colour VGA
+palette: its first 16 entries carry colour and the other 240 are black.
+`CORE.DAT` is exactly the one `.DAT` that stays inside 0..15, which is a
+confirmation rather than a coincidence.
+
+Palette assignment for the screens is taken from the game's own naming
+(`BALCONY1-5` to `BALCONY.PAL`, `BASEBAL1-6` and `BASEBAT` to `BASEBALL.PAL`,
+`CAULDRN1-4` to `CAULDRN.PAL`, `CORE.DAT` to `CORE.PAL`, `TITLE.DAT` to
+`TITLE.PAL`). `MENU.DAT` has no matching name, and it is provably not a `CORE`
+image: 99.4% of its pixels sit above index 15, so `CORE.PAL` would render it
+almost entirely black. It is mapped to `TITLE.PAL` as the remaining full
+256-colour palette. This one mapping is inferred rather than confirmed.
+
+Several palette tests were tried and rejected as evidence, which is worth
+recording so they are not retried:
+- **Mean absolute colour difference between neighbours.** Always picks
+  `SPRITES.PAL`, because that palette is 192/256 black, so a low-contrast table
+  wins regardless of the image.
+- **Correlation between index delta and colour delta.** Favours any globally
+  sorted ramp, so it rated `TITLE.PAL` above `BALCONY.PAL` for balcony art, and
+  after subtracting each palette's mean score it picked `BASEBALL.PAL` for
+  `BALCONY1.DAT`. It is only trustworthy where the palette is already known by
+  construction, as with the embedded `.MAP` tables.
+
+A useful positive result from the same data: `BALCONY1-5`, `CAULDRN1-4` and
+`BASEBAL1-6` are 94-99% pixel-identical to the first file in their group, so
+each set is an animation sharing one palette.
+
+## 6.5 Verification
+
+Decoding was cross-checked against an independent Python implementation of
+both RNC methods under LuaJ 3.0.1, the same runtime the app uses:
+
+- 75 of 75 resources decode, 0 failures, about 12.6 s total
+- 5,879,040 image bytes byte-identical to the reference
+- 57,600 palette bytes byte-identical to the reference
