@@ -116,6 +116,17 @@ archive container and its LZ variant).
 
 game in ags/DARKSEED2
 
+### DRASCULA
+ScummVM source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
+game in ags/DRASCULA
+Key references used:
+- `engines/drascula/graphics.cpp` - `loadPic` (`.ALG` layout), `decodeRLE`
+- `engines/drascula/rooms.cpp` - `enterRoom`, the `.ALD` room description layout
+- `engines/drascula/resource.cpp` - `TextResourceParser` (files are bit-inverted)
+- `engines/drascula/drascula.h` - `OBJWIDTH`/`OBJHEIGHT`, character sheet constants
+- `engines/drascula/detection.cpp` - `14.ALD` as the unpacked-release marker
+- `engines/drascula/actors.cpp` - character sheets cut out of `.ALG` surfaces
+
 ### HARVESTER
 Harvester branch in this scummvm fork https://github.com/alexbevi/scummvm/tree/harvester
 

@@ -1839,7 +1839,7 @@ was reported with Maniac Mansion's 54 room files. Two changes fix this.
 - The `.LFL` fallback only offers rooms whose file actually exists, so a bundled
   sub-game's rooms can never be attributed to the parent game.
 
-Result on the local `ags/scumm/DOTT` copy:
+An incomplete install now still reports itself honestly:
 
 ```
 detect(.../DOTT) = true
@@ -1847,24 +1847,172 @@ total leaf resources: 0
 TENTACLE: index declares 91 rooms but data part(s) TENTACLE.001 are not installed
 ```
 
+With the full data part installed the same folder yields the complete game, so
+the partial-install path is a diagnostic rather than a dead end:
+
+```
+detect(.../DOTT) = true
+total leaf resources: 823
+```
+
 ## 8.4 Verification
 
-- `TENTACLE.000` in the local `ags/scumm/DOTT` copy decrypts to the block list
-  above and declares 91 rooms, 89 of them in data part 1. It is index-only:
-  7932 bytes, no `LECF`, `LFLF` or `ROOM` block, and every `DROO` offset is zero.
-- `TENTACLE.001` is not installed, and it is not present anywhere on this
-  machine. `MONSTER.SOU` is an unencrypted `SOU ` audio resource, and neither
-  `TENTACLE.EXE` nor `DOTT.EXE` contains a `DROO`, `LECF`, `LFLF` or `ROOM` tag,
-  so no room data is recoverable from this folder — 91 rooms of 320x200 VGA
-  artwork cannot fit in the 4 MB present, 3.8 MB of which is the sound bank.
-- A `MANIAC/` directory once sat beside it holding `00.LFL`-`53.LFL` that are
-  byte-identical to the real Maniac Mansion files and decrypt to `BJ` V2 data
-  under `0xFF`; they are from a different game and contain no DOTT rooms.
-- Multi-part loading was validated with a synthesized `TENTACLE.001` carrying a
-  `LECF` header, an offset-16 room table and two `LFLF` room blocks: rooms 1 and
-  72 were both discovered through DROO's part assignment and decoded correctly
-  (320x200, 240 and 174 unique colours).
+- `TENTACLE.000` decrypts to the block list above and declares 91 rooms, 89 of
+  them in data part 1. It carries no `LECF`, `LFLF` or `ROOM` block and every
+  `DROO` offset is zero, which is exactly why it is useless as a room directory
+  and why DROO alone cannot locate a room's data.
+- `TENTACLE.001` (11,378,198 bytes) holds the real room data. The engine reads
+  its offset-16 table, follows DROO's part assignment, and walks part 1 to 0x015.
+  All 823 leaves load with zero exceptions: 91 backgrounds, 91 palettes and 641
+  object-sprite images grouped under a per-room `Object sprites` sub-category.
+  `bg:TENTACLE:72` decodes to 320x200 with 128 unique colours and
+  `bg:TENTACLE:1` to 784x200 with 170, so the previously blank rooms are real.
+- Room dimensions vary as expected for V6: 320x200, 784x200, 632x144. Room 1's
+  784x200 width is the V6 wide-screen layout, not a decode error.
+- Multi-part loading was additionally validated against a synthesized
+  `TENTACLE.001` carrying a `LECF` header, an offset-16 room table and two `LFLF`
+  room blocks before the real part was present; rooms 1 and 72 were both
+  discovered through DROO's part assignment.
+- Some rooms legitimately have no objects — rooms 1, 2 and 72 expose only a
+  background and a palette. `load_resource` on a missing object warns
+  (`Object 1 state 0 not found in room 72`) instead of raising, and a malformed
+  `obj:` id is rejected up front with the expected shape.
+- `MANIAC/` holds `00.LFL`-`53.LFL` that are byte-identical to the real Maniac
+  Mansion files and decrypt to `BJ` V2 data under `0xFF`; they are from a
+  different game and contribute nothing to the 823 DOTT resources.
 - No other title changed: MONKEY2 1231, ATLANTIS 1499, Monkey 869, DIG 689
   leaf resources. `MANIAC` is still correctly *not* detected by the V5-V7 engine
   while `scummv2` still detects it with 53 resources, so there is no
   cross-detection between the two engines.
+
+# Part 9: Drascula — The Vampire Strikes Back
+
+Source: ScummVM `engines/drascula/` — `graphics.cpp`, `rooms.cpp`,
+`resource.cpp`, `drascula.h`, `detection.cpp`.
+
+## 9.1 File Set
+
+The unpacked DOS release is flat, with one file per asset kind. There is no
+archive and no index:
+
+| Extension | Role |
+|---|---|
+| `NN.ALG` | 320x200 indexed picture — room backgrounds, character sheets, cutscene art |
+| `NN.ALD` | room description: music, layered surface, palette level, object list |
+| `NN.ALS` | sound (`sound.cpp` builds `"s%i.als"`) |
+| `NN.CAL` | screenplay |
+| `*.ALG` | named surfaces: `AUX*.ALG`, `PLAN*.ALG`, `CIELO*.ALG`, … |
+| `*.BIN` | engine tables and script data |
+
+`.ALS` is sound, not sprites. Pictures are `.ALG` throughout.
+
+## 9.2 `.ALG` — plain header, RLE body, trailing palette
+
+`DrasculaEngine::loadPic` gives the whole layout:
+
+```
+offset 0    128 bytes   header, zero-filled
+offset 128  size-896    run-length encoded pixels
+tail        768 bytes   256 * 3 RGB
+```
+
+There is no tag, no magic number, no compression id. `decodeRLE`:
+
+```c
+pixel = *src++;
+repeat = 1;
+if ((pixel & 192) == 192) {   // 11xxxxxx
+    repeat = pixel & 63;
+    pixel = *src++;
+}
+for (j = 0; j < repeat; j++) {
+    *dst++ = pixel;
+    if (++col >= 320) { col = 0; if (++line >= 200) done; }
+}
+```
+
+A byte with both top bits set is a run header: the low six bits are the pixel
+count and the next byte is the colour. Any other byte is a literal pixel.
+Note that `repeat` is the raw low-six-bits value with no `+1`, so a run can be
+zero pixels long — the original relies on that only for padding.
+
+Room backgrounds load with `HALF_PAL` (128) and character sheets with the full
+256, which is visible in the data: room pictures use 127-134 distinct indices,
+sheets 17-32.
+
+## 9.3 `.ALD` — inverted text, three layouts
+
+`TextResourceParser::getLine` reads `~byte`, discards CR and ends a line on LF,
+so the entire file is bit-inverted. Lines are plain ASCII; there are exactly as
+many values as the reader asks for.
+
+`enterRoom` reads, in order:
+
+```
+roomNumber, music, roomDisk, palLevel
+[chapter 2 only]
+    overriddenWidth
+    if overriddenWidth != 0:
+        curHeight, feetHeight, stepX, stepY
+        frontSurface, extraSurface, unusedSurface, backSurface
+numRoomObjs
+    per object:
+        objectNum, objName, x1, y1, x2, y2, x, y, track, visible, isDoor
+        if isDoor: destRoom, x, y, trackAlkeva, exitId
+walkRect: x1, y1, x2, y2
+[chapter != 2] upperLimit, lowerLimit
+```
+
+The chapter is only known at runtime, so rather than hard-code a chapter table
+the engine tries each layout and keeps the one that consumes the file exactly.
+Across all 57 `.ALD` files in the local copy each file has exactly one fitting
+layout — no ambiguity, and a file that fails to parse exactly is rejected:
+
+| layout | header | trailing | files |
+|---|---|---|---|
+| plain room | 4 | 2 | 40 |
+| chapter 2, `overriddenWidth == 0` | 5 | 0 | 7 |
+| chapter 2, `overriddenWidth != 0` | 13 | 0 | 9 |
+| chapter 2 header *and* limits | 13 | 2 | 1 (`2.ALD`) |
+
+`2.ALD` is the one file that mixes both: it has the chapter-2 surface block and
+still ends with `upperLimit`/`lowerLimit`. Trying all six combinations handles it
+without a special case. Object rectangles can be negative (`SALIDA` is
+`[-1,141,24,197]`) and one object in `3.ALD` is degenerate (`[0,0,0,0]`), so no
+coordinate is assumed to be in range.
+
+## 9.4 Sprites
+
+There are no sprite files. A room's interactive objects are rectangles of the
+room picture listed in the `.ALD`:
+
+```
+x1 y1 x2 y2   the rectangle, drawn straight onto the background
+x   y         where the object sits when the player walks up to it
+```
+
+So sprites are recovered by cropping `_objectRect` out of the decoded `.ALG`.
+The character is the exception: `placeIgor`, `placeDrascula` and the protagonist
+draw cut rectangles out of `extraSurface` / `frontSurface` / `backSurface`, which
+are themselves `.ALG` sheets — `96.alg`, `97.alg`, `99.alg` for chapter 2, plus
+the `96x`/`97x`/`98x`/`99x` variants. Those sheets show the walk cycle repeated
+across each row, which is why they decode to 17-32 distinct indices rather than
+128.
+
+Of the 85 numbered `.ALG` files, 57 are room backgrounds named by a `.ALD`. The
+other 28 (`46`, `47`, `48`, `95`-`104`, `961`-`964`, `971`-`974`, `981`-`984`,
+`991`-`994`) are surfaces referenced by name from room descriptions and scripts
+rather than by room number, and are exposed as sheets.
+
+## 9.5 Verification
+
+- 354 leaf resources (57 backgrounds + 269 object sprites + 28 sheets); all 354
+  decode, 0 failures, 5.4 s for the full sweep under LuaJ 3.0.1.
+- The Lua decoder was checked against an independent Python implementation
+  written from this document: `1.ALG`, `96.ALG` and `102.ALG` match on all
+  64,000 pixels each, and object crops `obj:DRASCULA:1:1` (93x91) and
+  `obj:DRASCULA:62:7` (`PIZARRA`, 16x16 at 73,66) match exactly.
+- Room descriptions: all 57 files have exactly one valid layout; the object
+  names recovered (`PUERTA`, `VENTANA`, `SALIDA`, `CEMENTERIO`, `CABAÑA`,
+  `PIZARRA`, `BORRACHO`, …) are consistent with the Spanish original, which
+  confirms the field alignment rather than just the token count.

@@ -1309,6 +1309,12 @@ local function parse_resource_id(resource_id)
     if not id.res_type or not id.base_name or not id.room_id then
         return nil
     end
+    if id.res_type == "obj" and (not id.obj_id or not id.state) then
+        log_warn(string.format(
+            "Malformed object id %q — expected obj:%s:<room>:<object>:<state>",
+            resource_id, id.base_name))
+        return nil
+    end
     return id
 end
 

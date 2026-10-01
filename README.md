@@ -33,6 +33,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
+| Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
@@ -274,6 +275,7 @@ adventure-explorer/
 │       ├── universe/             # Universe
 │       ├── darkseed/engine.lua   # Dark Seed
 │       ├── darkseed2/engine.lua  # Dark Seed 2
+│       ├── drascula/engine.lua   # Drascula: The Vampire Strikes Back
 │       ├── gob/engine.lua        # Gobliiins series
 │       ├── harvester/engine.lua  # Harvester
 │       ├── hollywoodmonsters/    # Hollywood Monsters
