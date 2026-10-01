@@ -1772,3 +1772,99 @@ entries. Two entries exceed the 64 KB boundary that the DOS loader handles
 through a different input-buffering path: `SCENE01.LBM` (66,012 in, 66,012 out)
 and `UNIVERSE.EXE` itself (81,707 in, 94,392 out). Both are treated identically
 in a flat-memory port, since the bit reader only ever walks the buffer forward.
+
+# Part 8: SCUMM V5-V7 Resource Layout
+
+Source: ScummVM `engines/scumm/` — `resource.cpp`, `resource.h`, `object.h`,
+`object.cpp`, `gfx.h`, `gfx.cpp`, `detection_tables.h`.
+
+## 8.1 Data File Conventions
+
+V5-V7 games ship an index file plus one or more data files. The index carries a
+`DROO` block; the data files carry the room blocks themselves.
+
+| Pattern | Games |
+|---|---|
+| `<BASE>.000` + `<BASE>.001` | Monkey Island 2, Atlantis, Indy 4 |
+| `<BASE>.LA0` + `<BASE>.LA1` | later HE/V7 releases |
+| `<BASE>.SM0` + `<BASE>.SM1` | Space Quest V5/V6 |
+| `<BASE>.000` .. `<BASE>.015` | Day of the Tentacle |
+| `<BASE>.000` + `ROOM/%02d.LFL` | standalone per-room-file releases |
+
+Day of the Tentacle is *not* a `MANIAC/%02d.LFL` release: `detection_tables.h`
+registers it as `tentacle.%03d` with `kGenDiskNum`, i.e. numbered data parts.
+
+All V5-V7 files are XOR-encrypted with `0x69`; the key is verified per file by
+decrypting the 8-byte header and checking for a known tag (`DROO`, `LECF`,
+`LFLF`, `ROOM`), with `0x00` and `0xFF` tried as fallbacks.
+
+## 8.2 The Room Directory Is Not In DROO
+
+`DROO` looks like a room directory — `u16 count`, then `count` bytes of data-file
+numbers, then `count` `u32` offsets — but the offsets are **zero on multi-part
+releases**. Treating DROO as authoritative yields offset 0 for every room.
+
+The real directory is a table stored at **offset 16 of each data file**, read by
+`ScummEngine::readRoomsOffsets`:
+
+```
+u8   count            // 0-based offset 16, i.e. immediately after the 16-byte LECF header
+repeat count times:
+    u8   roomId
+    u32le offset       // 0-based, absolute within THIS data part
+```
+
+`LOFF` inside `LECF` is the same table for single-part games, and the two agree
+byte for byte on every title checked (Monkey Island 2, Atlantis). So the engine
+prefers the offset-16 table, falling back to `LOFF`, and uses DROO only to pick
+*which part* a room lives in.
+
+## 8.3 Detection and Broken Installs
+
+A V5-V7 game is identified by its index alone: the decrypted header must walk
+into at least three blocks, include both `DROO` and `MAXS`, and end on a block
+boundary. `RNAM`, `MAXS`, `DROO`, `DSCR`, `DSOU`, `DCOS`, `DCHR`, `DOBJ`, `AARY`
+is the signature — that check is strict enough to key detection even when every
+data part is missing, which is what makes an incomplete install reportable
+instead of invisible.
+
+Day of the Tentacle ships Maniac Mansion as a bonus game in a `MANIAC/`
+subdirectory. Because a V6 index with no data parts used to fall back to
+"whatever directory has `.LFL` files", the bundled game hijacked detection: DOTT
+was reported with Maniac Mansion's 54 room files. Two changes fix this.
+
+- Detection no longer requires a data part, so a game with a valid index is
+  registered even when incomplete, and `get_resources` can name the part that is
+  missing instead of the game silently not being detected.
+- The `.LFL` fallback only offers rooms whose file actually exists, so a bundled
+  sub-game's rooms can never be attributed to the parent game.
+
+Result on the local `ags/scumm/DOTT` copy:
+
+```
+detect(.../DOTT) = true
+total leaf resources: 0
+TENTACLE: index declares 91 rooms but data part(s) TENTACLE.001 are not installed
+```
+
+## 8.4 Verification
+
+- `TENTACLE.000` in the local `ags/scumm/DOTT` copy decrypts to the block list
+  above and declares 91 rooms, 89 of them in data part 1. It is index-only:
+  7932 bytes, no `LECF`, `LFLF` or `ROOM` block, and every `DROO` offset is zero.
+- `TENTACLE.001` is not installed, and it is not present anywhere on this
+  machine. `MONSTER.SOU` is an unencrypted `SOU ` audio resource, and neither
+  `TENTACLE.EXE` nor `DOTT.EXE` contains a `DROO`, `LECF`, `LFLF` or `ROOM` tag,
+  so no room data is recoverable from this folder — 91 rooms of 320x200 VGA
+  artwork cannot fit in the 4 MB present, 3.8 MB of which is the sound bank.
+- A `MANIAC/` directory once sat beside it holding `00.LFL`-`53.LFL` that are
+  byte-identical to the real Maniac Mansion files and decrypt to `BJ` V2 data
+  under `0xFF`; they are from a different game and contain no DOTT rooms.
+- Multi-part loading was validated with a synthesized `TENTACLE.001` carrying a
+  `LECF` header, an offset-16 room table and two `LFLF` room blocks: rooms 1 and
+  72 were both discovered through DROO's part assignment and decoded correctly
+  (320x200, 240 and 174 unique colours).
+- No other title changed: MONKEY2 1231, ATLANTIS 1499, Monkey 869, DIG 689
+  leaf resources. `MANIAC` is still correctly *not* detected by the V5-V7 engine
+  while `scummv2` still detects it with 53 resources, so there is no
+  cross-detection between the two engines.

@@ -3,6 +3,13 @@
 ### SCUMM
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/scumm folder
+Key references used:
+- `engines/scumm/object.h` - ImageHeader (old/v7/v8), CodeHeader, RoomHeader layouts
+- `engines/scumm/object.cpp` - OBIM/OBCD parsing, `getObjectImage` (IMxx state mapping)
+- `engines/scumm/gfx.h` / `gfx.cpp` - BMCOMP_* strip codecs and SMAP decompression
+- `engines/scumm/resource.cpp` - block search (`findResource`), tag aliasing, `readRoomsOffsets` (room table at offset 16 of each data part)
+- `engines/scumm/detection_tables.h` - per-game data file conventions (e.g. DOTT `tentacle.%03d` with `kGenDiskNum`)
+- `engines/scumm/metaengine.cpp` - generated per-room filenames (`%02d.LFL` / `%03d.LFL`)
 
 ### SCI
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)

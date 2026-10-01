@@ -42,7 +42,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
 | The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
-| SCUMM V5 (Monkey Island 2, Indiana Jones 4…) | 1991-93 | `scumm` | Backgrounds, Palettes | ✅ Working |
+| SCUMM V5-V7 (Monkey Island 2, Atlantis, The Dig, Day of the Tentacle…) | 1991-95 | `scumm` | Backgrounds, Palettes, Object Sprites | ✅ Working |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
 | The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
@@ -282,9 +282,8 @@ adventure-explorer/
 │       ├── kyra2/engine.lua      # Hand of Fate
 │       ├── lastexpress/          # The Last Express
 │       ├── pelrock/engine.lua    # Alfred Pelrock
-│       ├── scumm/engine.lua      # SCUMM V5
 │       ├── sci/engine.lua        # Sierra SCI (SCI0)
-│       ├── scumm/engine.lua      # SCUMM V5
+│       ├── scumm/engine.lua      # SCUMM V5-V7
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)

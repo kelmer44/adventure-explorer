@@ -1,19 +1,27 @@
 -- ============================================================================
--- Adventure Explorer - Engine Script: SCUMM V5 (1991-1993, DOS VGA)
+-- Adventure Explorer - Engine Script: SCUMM V5-V7 (1991-1995, DOS VGA)
 -- ============================================================================
--- Reads SCUMM V5 data files (.000 index + .001 data)
--- XOR 0x69 encrypted (V5 DOS games: Monkey Island 2, Indiana Jones 4, etc.)
+-- Reads SCUMM V5-V7 data files:
+--   .000 index + .001 data        (Monkey Island 2, Atlantis, Indy 4, The Dig)
+--   .LA0 index + .LA1 data        (later HE/V7 releases)
+--   .SM0 index + .SM1 data        (Space Quest V5/V6)
+--   <BASE>.000..<BASE>.015         (Day of the Tentacle, multiple data parts)
+--   <BASE>.000 + ROOM/%02d.LFL      (standalone per-room-file releases)
+-- Encryption is auto-detected per file: 0x00 plain, 0x69 XOR (V5/V6),
+-- 0xFF XOR (old bundle / standalone LFL).
 -- IFF-like block structure: 4-byte ASCII tag + 4-byte BE size
 -- Room backgrounds: strip-based compression (SMAP), 8px wide vertical strips
--- Palettes: CLUT block, 256 * 3 bytes RGB (full 8-bit values)
+-- Palettes: CLUT block (V5/V6) or PALS/WRAP/APAL (V7), 256 * 3 bytes RGB
+-- Object sprites: OBIM/IMHD/IMxx/SMAP, V5/V6 widths from the old IMHD
+-- layout, V7 from the v7 IMHD layout
 -- ============================================================================
 
 local engine = {}
 
 engine.name        = "SCUMM"
 engine.id          = "scumm"
-engine.description = "SCUMM V5 (LucasArts, 1991-1993)"
-engine.version     = "1.0"
+engine.description = "SCUMM V5-V7 (LucasArts, 1991-1995)"
+engine.version     = "2.0"
 
 local band   = bit32.band
 local bor    = bit32.bor
@@ -100,6 +108,41 @@ local function find_block(blocks, tag_name)
     return nil
 end
 
+-- ── Key sniffing ────────────────────────────────────────────────
+-- SCUMM games use one of three obfuscation keys:
+--   0x00  - plaintext        (V6/V7 HE games: The Dig)
+--   0x69  - GF_USE_KEY       (V5/V6 floppy releases: MI2, Atlantis, DOTT)
+--   0xFF  - old-bundle V0-V3 (Maniac Mansion)
+local KEY_CANDIDATES = { 0x00, 0x69, 0xFF }
+local DEFAULT_KEY = 0x69
+
+-- Sniff the key of a data file by checking for the LECF container signature.
+local function sniff_data_key(data)
+    if not data or #data < 4 then return nil end
+    for _, key in ipairs(KEY_CANDIDATES) do
+        local probe = (key == 0) and data:sub(1, 4) or xor_decrypt(data:sub(1, 4), key)
+        if probe == "LECF" then return key end
+    end
+    return nil
+end
+
+-- Sniff the key of an index file by requiring a coherent chain of IFF blocks
+-- that includes both DROO and MAXS. Random bytes satisfy this essentially never.
+local function sniff_index_key(data)
+    if not data or #data < 16 then return nil end
+    for _, key in ipairs(KEY_CANDIDATES) do
+        local dec = (key == 0) and data or xor_decrypt(data, key)
+        local blocks = scan_blocks(dec, 1, #dec)
+        if #blocks >= 3 and find_block(blocks, "DROO") and find_block(blocks, "MAXS") then
+            local last = blocks[#blocks]
+            if last.offset + last.size - 1 >= #dec - 16 then
+                return key
+            end
+        end
+    end
+    return nil
+end
+
 -- ── Index file parsing ──────────────────────────────────────────
 -- V5 index: blocks RNAM, MAXS, DROO, DSCR, DSOU, DCOS, DCHR, DOBJ
 
@@ -168,11 +211,72 @@ local function parse_loff(data)
         local offset  = u32le(data, pos + 1)
         pos = pos + 5
         if room_id > 0 and offset > 0 then
+            -- LOFF offsets are relative to the single data part (file 1)
+            rooms[#rooms + 1] = { id = room_id, file = 1, offset = offset }
+        end
+    end
+
+    return rooms
+end
+
+--- Every numbered data part opens with a LECF header followed by a room
+--- offset table: u8 count, then count entries of (u8 roomId, u32le offset).
+--- This is what ScummEngine::readRoomsOffsets reads, and it -- not DROO --
+--- is the authoritative room directory: DROO's offsets are zero on
+--- multi-part releases such as Day of the Tentacle.
+local function parse_room_offset_table(data)
+    local rooms = {}
+    if tag4(data, 1) ~= "LECF" then return rooms end
+
+    local n = #data
+    if n < 17 then return rooms end
+
+    local count = u8(data, 17)          -- 0-based offset 16
+    if count == 0 or count > 512 then return rooms end
+
+    local pos = 18
+    for _ = 1, count do
+        if pos + 5 > n then break end
+        local room_id = u8(data, pos)
+        local offset  = u32le(data, pos + 1)
+        pos = pos + 5
+        if room_id > 0 and offset > 0 then
             rooms[#rooms + 1] = { id = room_id, offset = offset }
         end
     end
 
     return rooms
+end
+
+-- Room directory of one data part: the offset-16 table, falling back to LOFF.
+local function part_room_table(path, key)
+    local f = file_open(path)
+    if not f then return nil end
+    local head = file_read(f, 0, 65536)
+    file_close(f)
+    if not head or #head < 17 then return nil end
+
+    local dec = (key == 0) and head or xor_decrypt(head, key)
+    local rooms = parse_room_offset_table(dec)
+    if #rooms > 0 then return rooms end
+    return parse_loff(dec)
+end
+
+-- Count the strips in an SMAP by walking its offset table. Used when the
+-- image width is unknown (V5/V6 IMHD omits it): real offsets are strictly
+-- increasing and point inside the block, so the first entry that does not
+-- marks the end of the table.
+local function smap_strip_count(data, smap_offset, smap_size)
+    local n, prev = 0, 0
+    while true do
+        local p = smap_offset + 8 + n * 4
+        if p + 3 > smap_offset + smap_size - 1 then break end
+        local off = u32le(data, p)
+        if off < 8 or off >= smap_size or off <= prev then break end
+        prev = off
+        n = n + 1
+    end
+    return n
 end
 
 -- ── Room parsing ────────────────────────────────────────────────
@@ -208,12 +312,22 @@ local function parse_room(data, room_offset, data_size)
     local room_end = room_block_pos + block_size - 1
     local room_blocks = scan_blocks(data, room_block_pos + 8, room_end)
 
-    -- RMHD: room header
+    -- RMHD: room header.
+    --   V5/V6: u16 width, u16 height, u16 numObjects
+    --   V7:    u32 version (e.g. 730), u16 width, u16 height, u16 numObjects
     local rmhd = find_block(room_blocks, "RMHD")
     if rmhd then
-        result.width  = u16le(data, rmhd.data_start)
-        result.height = u16le(data, rmhd.data_start + 2)
-        result.num_objects = u16le(data, rmhd.data_start + 4)
+        local version = u32le(data, rmhd.data_start)
+        if version >= 700 and version < 1000 then
+            result.version     = version
+            result.width       = u16le(data, rmhd.data_start + 4)
+            result.height      = u16le(data, rmhd.data_start + 6)
+            result.num_objects = u16le(data, rmhd.data_start + 8)
+        else
+            result.width       = u16le(data, rmhd.data_start)
+            result.height      = u16le(data, rmhd.data_start + 2)
+            result.num_objects = u16le(data, rmhd.data_start + 4)
+        end
     end
 
     -- TRNS: transparent color
@@ -256,6 +370,101 @@ local function parse_room(data, room_offset, data_size)
             if smap then
                 result.smap_offset = smap.offset  -- absolute position in data
                 result.smap_size   = smap.size
+            end
+        end
+    end
+
+    -- PALS (V6/V7): payload is a single WRAP block holding a padded OFFS
+    -- directory followed by one APAL block per palette (768 bytes of RGB).
+    -- The OFFS table cannot be used to count palettes -- its declared size is
+    -- padded into the following APAL header -- so scan for the APAL children.
+    local pals = find_block(room_blocks, "PALS")
+    if pals then
+        local pals_end = pals.offset + pals.size - 1
+        local wrap = find_block(scan_blocks(data, pals.data_start, pals_end), "WRAP")
+        if wrap then
+            local wrap_end = wrap.offset + wrap.size - 1
+            for _, child in ipairs(scan_blocks(data, wrap.data_start, wrap_end)) do
+                if child.tag == "APAL" then
+                    local pal = {}
+                    for i = 0, 767 do
+                        pal[i + 1] = u8(data, child.data_start + i) or 0
+                    end
+                    result.palettes = result.palettes or {}
+                    result.palettes[#result.palettes + 1] = pal
+                end
+            end
+        end
+    end
+    if result.palettes and result.palettes[1] then
+        result.palette = result.palettes[1]
+    end
+
+    -- OBIM blocks (V5-V7): each holds an IMHD header plus IMxx image states.
+    -- IMxx payloads contain an SMAP. IMHD.width is in pixels, so the strip
+    -- count is ceil(width / 8) -- each strip covers 8 horizontal pixels.
+    result.objects = {}
+    for _, obim in ipairs(room_blocks) do
+        if obim.tag == "OBIM" then
+            local obim_end = obim.offset + obim.size - 1
+            local obim_blocks = scan_blocks(data, obim.data_start, obim_end)
+            local imhd = find_block(obim_blocks, "IMHD")
+
+            local obj
+            if imhd then
+                local version = u32le(data, imhd.data_start)
+                if version >= 700 and version < 1000 then
+                    obj = {
+                        obj_id = u16le(data, imhd.data_start + 4),
+                        states = u16le(data, imhd.data_start + 6),
+                        x      = u16le(data, imhd.data_start + 8),
+                        y      = u16le(data, imhd.data_start + 10),
+                        width  = u16le(data, imhd.data_start + 12),
+                        height = u16le(data, imhd.data_start + 14),
+                        images = {}
+                    }
+                else
+                    -- V5/V6 ("old") IMHD: u16 objId, u16 imageCount,
+                    -- u16 unk, u8 flags, u8 unk1, u16 unk2[2],
+                    -- u16 width, u16 height, u16 hotspotCount, i16 hotspot[15][2]
+                    obj = {
+                        obj_id = u16le(data, imhd.data_start),
+                        states = u16le(data, imhd.data_start + 2),
+                        x      = u16le(data, imhd.data_start + 4),
+                        y      = u16le(data, imhd.data_start + 6),
+                        width  = u16le(data, imhd.data_start + 12),
+                        height = u16le(data, imhd.data_start + 14),
+                        images = {}
+                    }
+                end
+            end
+
+            if obj then
+                for _, im in ipairs(obim_blocks) do
+                    local state = tonumber(im.tag:match("^IM(%d%d)$"))
+                    if state then
+                        local smap = find_block(
+                            scan_blocks(data, im.data_start, im.offset + im.size - 1), "SMAP")
+                        if smap then
+                            local width = obj.width
+                                  or smap_strip_count(data, smap.offset, smap.size) * 8
+                            local height = obj.height
+                            if height and height > 0 then
+                                obj.images[#obj.images + 1] = {
+                                    state       = state,
+                                    smap_offset = smap.offset,
+                                    smap_size   = smap.size,
+                                    width       = width,
+                                    height      = height
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+
+            if obj and #obj.images > 0 then
+                result.objects[#result.objects + 1] = obj
             end
         end
     end
@@ -557,29 +766,23 @@ local function decode_strip(strip_data, height, trans_color)
     end
 end
 
--- ── Decode full room background from SMAP ───────────────────────
+-- ── Decode a full SMAP bitmap ───────────────────────────────────
+-- SMAP strip offsets are u32 values relative to the SMAP *tag* position
+-- (not its payload), so every offset is resolved against smap_offset.
+-- num_strips is counted in 8-pixel strips; width/height are in pixels.
 
-local function decode_room_background(data, room_info)
-    if not room_info.smap_offset or not room_info.width or not room_info.height then
+local function decode_smap(data, smap_offset, smap_size, width, height, num_strips, trans_color)
+    if not smap_offset or not smap_size or not width or not height then
         return nil
     end
+    num_strips = num_strips or math.ceil(width / 8)
+    if num_strips <= 0 then return nil end
 
-    local width  = room_info.width
-    local height = room_info.height
-    local num_strips = math.floor(width / 8)
-    local trans_color = room_info.transparent_color or 0
-
-    local smap_start = room_info.smap_offset  -- 1-based position of "SMAP" tag
-    local smap_size  = room_info.smap_size
-
-    -- Strip offset table starts at smap_start + 8 (after 8-byte header)
-    -- Each offset is u32le, relative to smap_start (the "SMAP" tag position)
     local offsets = {}
     for s = 0, num_strips - 1 do
-        local off_pos = smap_start + 8 + s * 4
-        if off_pos + 3 <= #data then
-            offsets[s] = u32le(data, off_pos)
-        end
+        local off_pos = smap_offset + 8 + s * 4
+        if off_pos + 3 > #data then return nil end
+        offsets[s] = u32le(data, off_pos)
     end
 
     -- Pixel buffer: row-major, width * height
@@ -590,15 +793,14 @@ local function decode_room_background(data, room_info)
 
     for s = 0, num_strips - 1 do
         if offsets[s] and offsets[s] > 0 then
-            -- Strip data starts at smap_start + offsets[s] (1-based)
-            local strip_pos = smap_start + offsets[s]
+            local strip_pos = smap_offset + offsets[s]
 
-            -- Determine strip data length (to next strip or end of SMAP)
+            -- Strip data runs until the next strip (or the end of the SMAP)
             local strip_end
             if s < num_strips - 1 and offsets[s + 1] and offsets[s + 1] > offsets[s] then
-                strip_end = smap_start + offsets[s + 1] - 1
+                strip_end = smap_offset + offsets[s + 1] - 1
             else
-                strip_end = smap_start + smap_size - 1
+                strip_end = smap_offset + smap_size - 1
             end
 
             local strip_len = strip_end - strip_pos + 1
@@ -632,6 +834,17 @@ local function decode_room_background(data, room_info)
     return pixels, width, height
 end
 
+-- Decode a room background: the room width counts pixels, strips are 8px wide.
+local function decode_room_background(data, room_info)
+    if not room_info.smap_offset or not room_info.width or not room_info.height then
+        return nil
+    end
+    return decode_smap(data, room_info.smap_offset, room_info.smap_size,
+        room_info.width, room_info.height,
+        math.ceil(room_info.width / 8),
+        room_info.transparent_color or 0)
+end
+
 -- ── Palette swatch ──────────────────────────────────────────────
 
 local function build_palette_swatch(palette)
@@ -653,78 +866,117 @@ local function build_palette_swatch(palette)
 end
 
 -- ── Game file discovery ─────────────────────────────────────────
--- Returns list of {base_name, index_path, data_path, xor_key}
 
+-- Read an entire file into a binary string (nil when unreadable/empty)
+local function read_whole_file(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local size = file_size(f)
+    if not size or size <= 0 then file_close(f); return nil end
+    local data = file_read(f, 0, size)
+    file_close(f)
+    return data
+end
+
+-- Sniff a data file's key from its first bytes (avoids loading huge files)
+local function sniff_data_file_key(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local head = file_read(f, 0, 8)
+    file_close(f)
+    return sniff_data_key(head)
+end
+
+-- Some releases ship one .LFL per room instead of a single data file
+-- (Day of the Tentacle). Locate the directory holding them, if any.
+local function find_room_file_dir(game_path)
+    for _, name in ipairs(list_files(game_path)) do
+        if name:upper():match("%.LFL$") then return "" end
+    end
+    for _, sub in ipairs(list_files(game_path)) do
+        local found
+        for _, name in ipairs(list_files(game_path .. "/" .. sub)) do
+            if name:upper():match("%.LFL$") then found = sub; break end
+        end
+        if found then return found end
+    end
+    return nil
+end
+
+-- Returns list of game records:
+--   { dir, base_name, index_path, data_path, data_files, xor_key, data_key, room_dir }
+-- data_path is nil when rooms live in standalone .LFL files (room_dir set).
+-- data_files maps DROO file numbers to paths for multi-part releases
+-- (Day of the Tentacle: TENTACLE.000 index + TENTACLE.001/.002/.003 rooms).
 local function find_scumm_games(game_path)
     local games = {}
     local files = list_files(game_path)
 
-    -- Build lookup for case-insensitive matching
-    local name_map = {}  -- uppercase -> actual name
+    -- Case-insensitive lookup: UPPERCASE -> actual filename
+    local name_map = {}
     for _, f in ipairs(files) do
         name_map[f:upper()] = f
     end
 
-    -- Look for .000/.001 pairs
-    for _, f in ipairs(files) do
-        local base = f:match("^(.+)%.000$")
-        if base then
-            local data_upper = base:upper() .. ".001"
-            local data_file = name_map[data_upper]
-            if data_file then
-                -- Verify it's a SCUMM data file: first 8 bytes must decode to "LECF" tag
-                local peek_f = file_open(game_path .. "/" .. data_file)
-                local is_scumm = false
-                if peek_f then
-                    local peek = file_read(peek_f, 0, 8)
-                    file_close(peek_f)
-                    if peek and #peek >= 4 then
-                        local dec = xor_decrypt(peek, 0x69)
-                        is_scumm = (dec:sub(1, 4) == "LECF")
-                    end
-                end
-                if is_scumm then
-                    games[#games + 1] = {
-                        base_name  = base,
-                        index_path = game_path .. "/" .. f,
-                        data_path  = game_path .. "/" .. data_file,
-                        xor_key    = 0x69  -- V5 default
-                    }
-                end
-            end
+    local room_dir = find_room_file_dir(game_path)
+
+    local function try_pair(base, idx_ext, data_ext)
+        local idx_file = name_map[(base .. idx_ext):upper()]
+        if not idx_file then return end
+
+        local index_path = game_path .. "/" .. idx_file
+        local index_raw = read_whole_file(index_path)
+        if not index_raw then return end
+
+        -- The key is validated by the index contents, not assumed per extension
+        local key = sniff_index_key(index_raw)
+        if not key then return end
+
+        -- Collect every numbered data part belonging to this base name.
+        -- DROO file number 0 is the index file itself (which on multi-part
+        -- releases such as Day of the Tentacle also holds some rooms).
+        local data_files = { [0] = index_path }
+        for num = 1, 15 do
+            local fname = (num == 1) and (base .. data_ext)
+                             or string.format("%s.%03d", base, num)
+            local part = name_map[fname:upper()]
+            if part then data_files[num] = game_path .. "/" .. part end
         end
+
+        local data_path, data_key = data_files[1], nil
+        if data_path then
+            data_key = sniff_data_file_key(data_path)
+            if not data_key then return end
+        end
+        -- A validated index identifies the game on its own. When its data
+        -- parts are absent the game still registers, so get_resources can name
+        -- the missing part instead of the game not being detected at all.
+
+        games[#games + 1] = {
+            dir        = game_path,
+            base_name  = base,
+            index_path = index_path,
+            data_path  = data_path,
+            data_files = data_files,
+            xor_key    = key,
+            data_key   = data_key or key,
+            room_dir   = data_path and nil or room_dir
+        }
     end
 
-    -- Look for .la0/.la1 pairs (V6+ games like Day of the Tentacle, Sam & Max)
+    -- .000/.001  V5/V6 floppy releases (Monkey Island 2, Atlantis, Monkey)
+    -- .la0/.la1  V7 HE releases (The Dig)
+    -- .sm0/.sm1  older V6 HE releases
     for _, f in ipairs(files) do
-        local base = f:match("^(.+)%.la0$") or f:match("^(.+)%.LA0$")
+        local base, ext = f:match("^(.+)%.([^.]+)$")
         if base then
-            local data_upper = base:upper() .. ".LA1"
-            local data_file = name_map[data_upper]
-            if data_file then
-                games[#games + 1] = {
-                    base_name  = base,
-                    index_path = game_path .. "/" .. f,
-                    data_path  = game_path .. "/" .. data_file,
-                    xor_key    = 0x69
-                }
-            end
-        end
-    end
-
-    -- Look for .sm0/.sm1 pairs (Loom, maybe others)
-    for _, f in ipairs(files) do
-        local base = f:match("^(.+)%.sm0$") or f:match("^(.+)%.SM0$")
-        if base then
-            local data_upper = base:upper() .. ".SM1"
-            local data_file = name_map[data_upper]
-            if data_file then
-                games[#games + 1] = {
-                    base_name  = base,
-                    index_path = game_path .. "/" .. f,
-                    data_path  = game_path .. "/" .. data_file,
-                    xor_key    = 0x69
-                }
+            local up = ext:upper()
+            if up == "000" then
+                try_pair(base, ".000", ".001")
+            elseif up == "LA0" then
+                try_pair(base, ".la0", ".la1")
+            elseif up == "SM0" then
+                try_pair(base, ".sm0", ".sm1")
             end
         end
     end
@@ -739,6 +991,223 @@ function engine.detect(game_path)
     return #games > 0
 end
 
+-- ── Per-game state (index + room table) ──────────────────────────
+-- Cached per index file so get_resources/load_resource share one parse.
+
+local game_states = {}
+
+-- Path of the standalone .LFL holding one room, if this release uses them.
+local function lfl_room_path(game, room_id)
+    local dir = game.dir
+    if game.room_dir and game.room_dir ~= "" then
+        dir = dir .. "/" .. game.room_dir
+    end
+    return dir .. "/" .. string.format("%02d.LFL", room_id)
+end
+
+local function get_game_state(game)
+    local cached = game_states[game.index_path]
+    if cached then return cached end
+
+    local state = { index = {}, rooms = {} }
+    game_states[game.index_path] = state
+
+    local index_raw = read_whole_file(game.index_path)
+    if index_raw then
+        state.index = parse_index(xor_decrypt(index_raw, game.xor_key))
+    end
+
+    if game.data_path then
+        -- Rooms are found via the offset-16 table of each numbered data part.
+        -- DROO only says which part a room belongs to (its offsets are 0 on
+        -- multi-part releases), so honour it whenever that part is present.
+        local by_id = {}
+        for file = 0, 15 do
+            local path = game.data_files[file]
+            if path then
+                for _, r in ipairs(part_room_table(path, game.data_key) or {}) do
+                    local entry = by_id[r.id]
+                    if not entry then
+                        entry = { id = r.id, offsets = {} }
+                        by_id[r.id] = entry
+                    end
+                    entry.offsets[file] = r.offset
+                end
+            end
+        end
+
+        for _, entry in pairs(by_id) do
+            local want  = state.index.room_files[entry.id]
+            local file, offset
+            if want and entry.offsets[want] then
+                file, offset = want, entry.offsets[want]
+            else
+                -- No DROO hint (or that part is missing): take the last part
+                -- that lists the room, matching ScummVM's own preference.
+                for f = 15, 0, -1 do
+                    if entry.offsets[f] then
+                        file, offset = f, entry.offsets[f]
+                        break
+                    end
+                end
+            end
+            if offset then
+                state.rooms[#state.rooms + 1] =
+                    { id = entry.id, file = file, offset = offset }
+            end
+        end
+    end
+
+    if #state.rooms == 0 and game.room_dir ~= nil then
+        -- Per-room-file release: DROO only carries the room count and the
+        -- rooms themselves live in ROOM/%02d.LFL. Only offer rooms that are
+        -- actually present, so a bundled sub-game's .LFL files (Maniac
+        -- Mansion ships inside Day of the Tentacle) are never mistaken for
+        -- this game's rooms.
+        for id = 0, (state.index.room_count or 0) - 1 do
+            if file_exists(lfl_room_path(game, id)) then
+                state.rooms[#state.rooms + 1] = { id = id }
+            end
+        end
+    end
+
+    -- DROO names the data part each room belongs to. When none of those parts
+    -- are installed, say so once and by name instead of failing per room.
+    if not game.data_path and state.index.room_count then
+        local wanted = {}
+        for id = 0, state.index.room_count - 1 do
+            local f = state.index.room_files[id]
+            if f and not game.data_files[f] then
+                wanted[f] = string.format("%s.%03d", game.base_name, f)
+            end
+        end
+        local names = {}
+        for _, v in pairs(wanted) do names[#names + 1] = v end
+        if #names > 0 then
+            table.sort(names)
+            state.missing_parts = names
+            log_warn(string.format(
+                "%s: index declares %d rooms but data part(s) %s are not installed",
+                game.base_name, state.index.room_count, table.concat(names, ", ")))
+        end
+    end
+
+    table.sort(state.rooms, function(a, b) return a.id < b.id end)
+    return state
+end
+
+local function find_room_entry(rooms, room_id)
+    for _, r in ipairs(rooms) do
+        if r.id == room_id then return r end
+    end
+    return nil
+end
+
+-- Read the block that starts at a file offset and return it decrypted.
+local function read_block_at(path, key, offset)
+    local f = file_open(path)
+    if not f then return nil end
+    local header = xor_decrypt(file_read(f, offset, 8) or "", key)
+    file_close(f)
+    if #header < 8 then return nil end
+
+    local tag = header:sub(1, 4)
+    if tag ~= "ROOM" and tag ~= "LFLF" then
+        log_warn("Unexpected tag '" .. tag .. "' at room offset " .. offset)
+        return nil
+    end
+
+    local f2 = file_open(path)
+    if not f2 then return nil end
+    local raw = file_read(f2, offset, u32be(header, 5))
+    file_close(f2)
+    return raw and xor_decrypt(raw, key) or nil
+end
+
+-- Locate a room inside a standalone .LFL file. Such a file begins with a
+-- fixed header followed by a room offset table: u8 count, then count
+-- entries of (u8 roomId, u32 absolute file offset).
+local function lfl_room_offset(raw, room_id)
+    local n = #raw
+    for _, base in ipairs({ 16, 12 }) do
+        local count = (base + 1 <= n) and u8(raw, base + 1) or 0
+        if count > 0 and count < 512 and base + 1 + count * 5 <= n then
+            local p = base + 2
+            for _ = 1, count do
+                local rid = u8(raw, p)
+                local off = u32le(raw, p + 1)
+                p = p + 5
+                if rid == room_id and off > 0 and off + 8 <= n then
+                    return off
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function read_lfl_room(path, room_id)
+    local raw = read_whole_file(path)
+    if not raw then return nil end
+    -- Each release used its own key; try them all and keep the one that
+    -- yields a plausible room block.
+    for _, key in ipairs(KEY_CANDIDATES) do
+        local dec = (key == 0) and raw or xor_decrypt(raw, key)
+        local off = lfl_room_offset(dec, room_id)
+        if off then
+            local tag = tag4(dec, off + 1)
+            if tag == "ROOM" or tag == "LFLF" then
+                return dec:sub(off + 1)
+            end
+        end
+    end
+    return nil
+end
+
+-- Read and decrypt the room block for a room id, however the game stores it.
+local function read_room(game, room_id)
+    local state = get_game_state(game)
+    local entry = find_room_entry(state.rooms, room_id)
+    if not entry then return nil end
+
+    if game.data_path then
+        if not entry.offset then return nil end
+        -- DROO records which data part each room lives in; multi-part
+        -- releases (TENTACLE.000/.001/.002) rely on it.
+        local part = game.data_files[entry.file or 0]
+        if not part then return nil end
+        return read_block_at(part, game.data_key, entry.offset)
+    end
+
+    local dir = game.dir
+    if game.room_dir and game.room_dir ~= "" then
+        dir = dir .. "/" .. game.room_dir
+    end
+    return read_lfl_room(lfl_room_path(game, room_id), room_id)
+end
+
+-- Build the tree node list for one room's object sprites.
+local function sprite_children(game, room)
+    local room_data = read_room(game, room.id)
+    if not room_data then return nil end
+    local room_info = parse_room(room_data, 0, #room_data)
+    if not room_info or not room_info.objects then return nil end
+
+    local sprites = {}
+    for _, obj in ipairs(room_info.objects) do
+        for _, img in ipairs(obj.images) do
+            sprites[#sprites + 1] = {
+                id = string.format("obj:%s:%d:%d:%d",
+                    game.base_name, room.id, obj.obj_id, img.state),
+                name = string.format("Object %d — state %d (%dx%d)",
+                    obj.obj_id, img.state, img.width, img.height),
+                type = "image"
+            }
+        end
+    end
+    return sprites
+end
+
 -- ── Resource tree ───────────────────────────────────────────────
 
 function engine.get_resources(game_path)
@@ -746,75 +1215,61 @@ function engine.get_resources(game_path)
     local games = find_scumm_games(game_path)
 
     for _, game in ipairs(games) do
-        -- Read and decrypt index file
-        local idx_f = file_open(game.index_path)
-        if idx_f then
-            local idx_size = file_size(idx_f)
-            local idx_raw = file_read(idx_f, 0, idx_size)
-            file_close(idx_f)
+        local state = get_game_state(game)
+        if #state.rooms > 0 then
+            local room_children = {}
 
-            if idx_raw then
-                local idx_data = xor_decrypt(idx_raw, game.xor_key)
-                local index = parse_index(idx_data)
+            for _, room in ipairs(state.rooms) do
+                local room_name = state.index.room_names
+                              and state.index.room_names[room.id]
+                local display = (room_name and #room_name > 0)
+                    and string.format("Room %d: %s", room.id, room_name)
+                    or  string.format("Room %d", room.id)
 
-                -- Read beginning of data file to get LOFF
-                local dat_f = file_open(game.data_path)
-                if dat_f then
-                    local dat_size = file_size(dat_f)
-                    -- Read enough for LECF header + LOFF (first ~2KB should suffice)
-                    local header_raw = file_read(dat_f, 0, math.min(4096, dat_size))
-                    file_close(dat_f)
+                local prefix = "room:" .. game.base_name .. ":" .. room.id
 
-                    if header_raw then
-                        local header_data = xor_decrypt(header_raw, game.xor_key)
-                        local rooms = parse_loff(header_data)
+                local children = {
+                    {
+                        id   = "bg:" .. game.base_name .. ":" .. room.id,
+                        name = display .. " — Background",
+                        type = "image"
+                    },
+                    {
+                        -- Palette node is consumed by the colour dropdown
+                        id   = "pal:" .. game.base_name .. ":" .. room.id,
+                        name = display .. " — Palette",
+                        type = "palette"
+                    }
+                }
 
-                        if #rooms > 0 then
-                            -- Sort rooms by ID
-                            table.sort(rooms, function(a, b) return a.id < b.id end)
-
-                            local room_children = {}
-                            for _, room in ipairs(rooms) do
-                                local room_name = index.room_names and index.room_names[room.id]
-                                local display
-                                if room_name and #room_name > 0 then
-                                    display = string.format("Room %d: %s", room.id, room_name)
-                                else
-                                    display = string.format("Room %d", room.id)
-                                end
-
-                                -- Background image node
-                                local children = {}
-                                children[#children + 1] = {
-                                    id = "bg:" .. game.base_name .. ":" .. room.id,
-                                    name = display .. " — Background",
-                                    type = "image"
-                                }
-                                -- Palette node (hidden from tree, used in dropdown)
-                                children[#children + 1] = {
-                                    id = "pal:" .. game.base_name .. ":" .. room.id,
-                                    name = display .. " — Palette",
-                                    type = "palette"
-                                }
-
-                                room_children[#room_children + 1] = {
-                                    id = "room:" .. game.base_name .. ":" .. room.id,
-                                    name = display,
-                                    type = "category",
-                                    children = children
-                                }
-                            end
-
-                            resources[#resources + 1] = {
-                                id = "game_" .. game.base_name,
-                                name = game.base_name .. " (" .. #rooms .. " rooms)",
-                                type = "category",
-                                children = room_children
-                            }
-                        end
-                    end
+                -- Per-room object sprites come from the OBIM/IMxx sub-blocks.
+                -- Only block headers are parsed here (no pixel decoding), so
+                -- this costs one room read per room.
+                local sprites = sprite_children(game, room)
+                if sprites and #sprites > 0 then
+                    children[#children + 1] = {
+                        id = "sprites:" .. game.base_name .. ":" .. room.id,
+                        name = string.format("Room %d — Object sprites (%d)",
+                            room.id, #sprites),
+                        type = "category",
+                        children = sprites
+                    }
                 end
+
+                room_children[#room_children + 1] = {
+                    id = prefix,
+                    name = display,
+                    type = "category",
+                    children = children
+                }
             end
+
+            resources[#resources + 1] = {
+                id = "game_" .. game.base_name,
+                name = string.format("%s (%d rooms)", game.base_name, #state.rooms),
+                type = "category",
+                children = room_children
+            }
         end
     end
 
@@ -823,206 +1278,190 @@ end
 
 -- ── Resource loading ────────────────────────────────────────────
 
--- LOFF cache: maps data_path → {rooms = [{id,offset},...]}
--- Avoids re-reading the full file; we only need the first ~4KB per game
-local loff_cache = {}
-
--- Get room LOFF table for a game (reads first 4KB only)
-local function get_loff(game)
-    if loff_cache[game.data_path] then
-        return loff_cache[game.data_path]
-    end
-    local f = file_open(game.data_path)
-    if not f then return {} end
-    local header_raw = file_read(f, 0, math.min(4096, file_size(f)))
-    file_close(f)
-    if not header_raw then return {} end
-    local header_data = xor_decrypt(header_raw, game.xor_key)
-    local rooms = parse_loff(header_data)
-    loff_cache[game.data_path] = rooms
-    return rooms
-end
-
--- Read and decrypt exactly one room block from the data file, on demand.
--- Returns a decrypted string containing just that room block.
-local function read_room_block(game, room_offset)
-    local f = file_open(game.data_path)
-    if not f then return nil end
-
-    -- Read 8-byte block header to get block size
-    local header_raw = file_read(f, room_offset, 8)
-    if not header_raw then file_close(f); return nil end
-    local header = xor_decrypt(header_raw, game.xor_key)
-
-    -- Determine actual block (handle LFLF wrapper or bare ROOM)
-    local tag = header:sub(1, 4)
-    local block_size
-
-    if tag == "LFLF" then
-        block_size = u32be(header, 5)
-    elseif tag == "ROOM" then
-        block_size = u32be(header, 5)
-    else
-        -- Unknown – try reading a reasonable chunk
-        log_warn("Unexpected tag '" .. tag .. "' at room offset " .. room_offset)
-        block_size = 65536
-    end
-
-    -- Read the full block (re-read including header for simplicity)
-    local raw = file_read(f, room_offset, block_size)
-    file_close(f)
-    if not raw then return nil end
-
-    return xor_decrypt(raw, game.xor_key)
-end
-
 local function find_game(game_path, base_name)
-    local games = find_scumm_games(game_path)
-    for _, g in ipairs(games) do
+    for _, g in ipairs(find_scumm_games(game_path)) do
         if g.base_name == base_name then return g end
     end
     return nil
 end
 
-local function find_room_in_loff(loff_rooms, room_id)
-    for _, r in ipairs(loff_rooms) do
-        if r.id == room_id then return r.offset end
+-- Greyscale ramp used when a room carries no palette of its own
+local function default_palette()
+    local p = {}
+    for i = 0, 255 do
+        p[i * 3 + 1] = i; p[i * 3 + 2] = i; p[i * 3 + 3] = i
     end
-    return nil
+    return p
+end
+
+-- Split "type:base:room[:obj:state]" into its fields. base_name never
+-- contains a colon, so the trailing numeric fields are unambiguous.
+local function parse_resource_id(resource_id)
+    local parts = {}
+    for part in resource_id:gmatch("[^:]+") do parts[#parts + 1] = part end
+    local id = {
+        res_type = parts[1],
+        base_name = parts[2],
+        room_id = tonumber(parts[3]),
+        obj_id = tonumber(parts[4]),
+        state = tonumber(parts[5])
+    }
+    if not id.res_type or not id.base_name or not id.room_id then
+        return nil
+    end
+    return id
+end
+
+-- Resolve the palette to colour an image with. A palette_id of the form
+-- "pal:<base>:<room>" overrides the room's own palette.
+local function resolve_palette(game, room_id, room_info, palette_id)
+    if palette_id and palette_id ~= "" then
+        local pal = parse_resource_id(palette_id)
+        if pal and pal.res_type == "pal" and pal.room_id ~= room_id then
+            local data = read_room(game, pal.room_id)
+            if data then
+                local other = parse_room(data, 0, #data)
+                if other and other.palette then return other.palette end
+            end
+        end
+    end
+    return room_info.palette or default_palette()
+end
+
+-- Where a room's bytes are expected to live, for diagnostics.
+local function room_location(game, room_id, room_entry)
+    if room_entry and room_entry.offset then
+        local file = room_entry.file or 0
+        local path = game.data_files[file]
+        if not path then
+            return string.format("%s.%03d (data part) is missing",
+                                 game.base_name, file)
+        end
+        return string.format("%s at offset %d of %s (room block not found there)",
+                             room_id, room_entry.offset,
+                             path:match("([^/]+)$") or path)
+    end
+
+    local dir = game.dir
+    if game.room_dir and game.room_dir ~= "" then
+        dir = dir .. "/" .. game.room_dir
+    end
+    return string.format("%02d.LFL", room_id) ..
+        ((game.room_dir and game.room_dir ~= "") and (" in " .. game.room_dir .. "/")
+         or "") .. " is missing"
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
-    -- Parse resource ID: type:base_name:room_id
-    local res_type, base_name, room_id_str = resource_id:match("^(%a+):(.+):(%d+)$")
-    if not res_type then
+    local id = parse_resource_id(resource_id)
+    if not id then
         log_warn("Unknown resource ID: " .. resource_id)
         return nil
     end
 
-    local room_id = tonumber(room_id_str)
-
-    -- Find game entry
-    local game = find_game(game_path, base_name)
+    local game = find_game(game_path, id.base_name)
     if not game then
-        log_error("Game not found: " .. base_name)
+        log_error("Game not found: " .. id.base_name)
         return nil
     end
 
-    -- Get LOFF to find this room's offset (reads only first 4KB)
-    local loff_rooms = get_loff(game)
-    local room_offset = find_room_in_loff(loff_rooms, room_id)
-    if not room_offset then
-        log_warn("Room " .. room_id .. " not found in LOFF")
+    local state = get_game_state(game)
+    local room_entry = find_room_entry(state.rooms, id.room_id)
+    if not room_entry then
+        log_warn(string.format("Room %d not present in %s", id.room_id, id.base_name))
         return nil
     end
 
-    -- Read only the room block (lazy, no full-file load)
-    local room_data = read_room_block(game, room_offset)
+    local room_data = read_room(game, id.room_id)
     if not room_data then
-        log_error("Failed to read room " .. room_id .. " block")
+        log_warn(string.format("Room %d data unavailable in %s: %s",
+            id.room_id, id.base_name, room_location(game, id.room_id, room_entry)))
         return nil
     end
 
-    -- Parse room from block (offset 0 within the block, 0-based → block starts at offset 0)
     local room_info = parse_room(room_data, 0, #room_data)
     if not room_info then
-        log_warn("Failed to parse room " .. room_id)
+        log_warn("Failed to parse room " .. id.room_id)
         return nil
     end
 
-    -- Handle palette resource
-    if res_type == "pal" then
+    local room_name = (state.index.room_names and state.index.room_names[id.room_id]) or ""
+
+    -- ── Palette swatch ───────────────────────────────────────────
+    if id.res_type == "pal" then
         if room_info.palette then
-            local img = build_palette_swatch(room_info.palette)
             return {
                 type = "image",
-                image = img,
-                description = string.format("Room %d palette — 256 colors", room_id)
+                image = build_palette_swatch(room_info.palette),
+                description = string.format(
+                    "Room %d palette — %d colour(s)", id.room_id,
+                    #(room_info.palettes or { room_info.palette }))
             }
         end
-        return { type = "text", text = "No CLUT palette found in room " .. room_id }
+        return { type = "text",
+                 text = "No CLUT/PALS palette found in room " .. id.room_id }
     end
 
-    -- Handle background resource
-    if res_type == "bg" then
-        local palette = room_info.palette
-
-        -- Apply external palette if requested (palette_id = "pal:<base>:<room>")
-        if palette_id and palette_id ~= "" then
-            local _, _, pal_room_str = palette_id:match("^(%a+):(.+):(%d+)$")
-            if pal_room_str then
-                local pal_room_id = tonumber(pal_room_str)
-                if pal_room_id ~= room_id then
-                    local pal_offset = find_room_in_loff(loff_rooms, pal_room_id)
-                    if pal_offset then
-                        local pal_data = read_room_block(game, pal_offset)
-                        if pal_data then
-                            local pal_room = parse_room(pal_data, 0, #pal_data)
-                            if pal_room and pal_room.palette then
-                                palette = pal_room.palette
-                            end
+    -- ── Object sprite ────────────────────────────────────────────
+    if id.res_type == "obj" then
+        local palette = resolve_palette(game, id.room_id, room_info, palette_id)
+        for _, obj in ipairs(room_info.objects or {}) do
+            if obj.obj_id == id.obj_id then
+                for _, img in ipairs(obj.images) do
+                    if img.state == id.state then
+                        local pixels, w, h = decode_smap(room_data, img.smap_offset,
+                            img.smap_size, img.width, img.height, nil,
+                            room_info.transparent_color or 0)
+                        if not pixels then
+                            return { type = "text", text = string.format(
+                                "Failed to decode object %d state %d", id.obj_id, id.state) }
                         end
+                        return {
+                            type = "image",
+                            image = image_create_indexed(w, h, pixels, palette),
+                            width = w,
+                            height = h,
+                            description = string.format(
+                                "Room %d object %d, state %d — %dx%d%s",
+                                id.room_id, id.obj_id, img.state, w, h,
+                                room_name ~= "" and (" (" .. room_name .. ")") or "")
+                        }
                     end
                 end
             end
         end
+        log_warn(string.format("Object %d state %d not found in room %d",
+            id.obj_id, id.state, id.room_id))
+        return nil
+    end
 
-        if not palette then
-            palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-        end
-
+    -- ── Room background ──────────────────────────────────────────
+    if id.res_type == "bg" then
         if not room_info.smap_offset then
-            return {
-                type = "text",
-                text = string.format(
-                    "Room %d: %dx%d\nNo SMAP background data found",
-                    room_id, room_info.width or 0, room_info.height or 0
-                )
-            }
+            return { type = "text", text = string.format(
+                "Room %d: %dx%d\nNo SMAP background data found",
+                id.room_id, room_info.width or 0, room_info.height or 0) }
         end
 
         local pixels, width, height = decode_room_background(room_data, room_info)
         if not pixels then
-            return {
-                type = "text",
-                text = string.format(
-                    "Room %d: %dx%d\nFailed to decode SMAP background",
-                    room_id, room_info.width or 0, room_info.height or 0
-                )
-            }
+            return { type = "text", text = string.format(
+                "Room %d: %dx%d\nFailed to decode SMAP background",
+                id.room_id, room_info.width or 0, room_info.height or 0) }
         end
 
-        local img = image_create_indexed(width, height, pixels, palette)
-
-        -- Get room name from index file (index is small, OK to read each time)
-        local room_name = ""
-        local idx_f = file_open(game.index_path)
-        if idx_f then
-            local idx_raw = file_read(idx_f, 0, file_size(idx_f))
-            file_close(idx_f)
-            if idx_raw then
-                local idx_data = xor_decrypt(idx_raw, game.xor_key)
-                local index = parse_index(idx_data)
-                if index.room_names and index.room_names[room_id] then
-                    room_name = " (" .. index.room_names[room_id] .. ")"
-                end
-            end
-        end
-
+        local palette = resolve_palette(game, id.room_id, room_info, palette_id)
         return {
             type = "image",
-            image = img,
+            image = image_create_indexed(width, height, pixels, palette),
             width = width,
             height = height,
             description = string.format(
-                "Room %d%s — %dx%d, 256 colors, SCUMM V5",
-                room_id, room_name, width, height
-            )
+                "Room %d%s — %dx%d, 256 colours%s", id.room_id,
+                room_name ~= "" and (" (" .. room_name .. ")") or "",
+                width, height,
+                room_info.version
+                    and (", SCUMM V" .. tostring(math.floor(room_info.version / 100)))
+                     or ", SCUMM")
         }
     end
 
