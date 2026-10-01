@@ -444,7 +444,7 @@ local function graphics_categories(game_path)
                 if pk == "palette" then
                     kids[#kids + 1] = {
                         id = "pal_" .. g.res .. "_" .. i,
-                        name = string.format("Palette %d", i),
+                        name = string.format("Palette %d (for image %d)", i + 1, i),
                         type = "palette",
                     }
                 end
@@ -502,9 +502,11 @@ local function load_image(game_path, arch, index, override_pal)
     local w, h, pixels = decode_indexed(data)
     local pal
     if override_pal then
+        local sibling = override_pal:match("^pal_") ~= nil
         local pi = tonumber(override_pal:match("^%a+_%a+_(%d+)$"))
-        local pdata = pi and burp_read(path, entries[pi]) or nil
-        pal = pdata and read_palette(pdata) or nil
+        if pi and sibling then pi = pi + 1 end
+        local pdata = pi and entries[pi] and burp_read(path, entries[pi]) or nil
+        pal = (pdata and #pdata >= 768) and read_palette(pdata) or nil
     end
     if not pal then
         local pdata = burp_read(path, entries[index + 1])
@@ -517,16 +519,19 @@ local function load_image(game_path, arch, index, override_pal)
     }
 end
 
-local function load_palette(game_path, arch, index)
+-- `index` is the IMAGE entry; the sibling palette always sits at index + 1.
+-- Allpal IDs use "allpal_" instead and point straight at the palette entry.
+local function load_palette(game_path, arch, index, sibling)
     local path = game_path .. "/" .. arch
     local entries = burp_dir(path)
-    if not entries or not entries[index] then return nil end
-    local data = burp_read(path, entries[index])
+    local entry_index = sibling and (index + 1) or index
+    if not entries or not entries[entry_index] then return nil end
+    local data = burp_read(path, entries[entry_index])
     if not data or #data < 768 then return nil end
     local pal = read_palette(data)
     return {
         type = "image", image = palette_swatch(pal), width = 256, height = 256,
-        description = string.format("%s entry %d - 256 colour palette", arch, index),
+        description = string.format("%s entry %d - 256 colour palette", arch, entry_index),
     }
 end
 
@@ -706,9 +711,12 @@ function engine.load_resource(game_path, resource_id, palette_id)
     if kind == "bg" then
         local arch = (res == "kvga") and "KVGA.KRO" or "KSVGA.KRO"
         return load_image(game_path, arch, index, palette_id)
-    elseif kind == "pal" or kind == "allpal" then
+    elseif kind == "pal" then
         local arch = (res == "kvga") and "KVGA.KRO" or "KSVGA.KRO"
-        return load_palette(game_path, arch, index)
+        return load_palette(game_path, arch, index, true)
+    elseif kind == "allpal" then
+        local arch = (res == "kvga") and "KVGA.KRO" or "KSVGA.KRO"
+        return load_palette(game_path, arch, index, false)
     elseif kind == "scn" then
         local arch = (res == "kvga") and "KVGA.KRO" or "KSVGA.KRO"
         return load_scene(game_path, arch, index)
