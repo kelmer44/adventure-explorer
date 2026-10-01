@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-32 game engines are currently supported via Lua scripts — no recompilation needed.
+35 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -37,6 +37,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
+| Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations, Music, Sound Effects, Speech | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
@@ -57,6 +58,10 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds | ✅ Working |
 | Sierra SCI (SCI0/SCI1/SCI1.1) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Palettes | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
+
+> \* Prisoner of Ice scene graphics (`scn_*` resources) are exposed as metadata only; the
+> scene picture/opcode stream is not decoded. `mus_ksound_*` entries are Miles
+> `HMIMIDIP0131` modules exposed as metadata only, so they cannot be played back.
 
 > \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file
 > in the game folder for encrypted games (format: `ID;Game Name;Key`, one entry per line).

@@ -237,41 +237,78 @@ private fun PalettePane(
         // Dropdown to select palette (only shown if there are options)
         if (paletteOptions.isNotEmpty()) {
             var expanded by remember { mutableStateOf(false) }
+            val count = paletteOptions.size
+            val current = selectedPaletteIndex.coerceIn(0, count - 1)
             val currentName = paletteOptions.getOrNull(selectedPaletteIndex)?.name
                 ?: paletteOptions.firstOrNull()?.name
                 ?: "Default"
 
-            Box(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 OutlinedButton(
-                    onClick = { expanded = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    onClick = { onPaletteSelected((current - 1 + count) % count) },
+                    modifier = Modifier.width(34.dp),
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colors.primary
                     )
                 ) {
-                    Text(currentName, fontSize = 11.sp, maxLines = 1)
+                    Text("<", fontSize = 11.sp, maxLines = 1)
                 }
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false }
-                ) {
-                    paletteOptions.forEachIndexed { idx, palNode ->
-                        DropdownMenuItem(onClick = {
-                            expanded = false
-                            onPaletteSelected(idx)
-                        }) {
-                            Text(
-                                text = palNode.name,
-                                fontSize = 12.sp,
-                                color = if (idx == selectedPaletteIndex)
-                                    MaterialTheme.colors.primary
-                                else MaterialTheme.colors.onSurface
-                            )
+
+                Box(modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colors.primary
+                        )
+                    ) {
+                        Text(currentName, fontSize = 11.sp, maxLines = 1)
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        paletteOptions.forEachIndexed { idx, palNode ->
+                            DropdownMenuItem(onClick = {
+                                expanded = false
+                                onPaletteSelected(idx)
+                            }) {
+                                Text(
+                                    text = palNode.name,
+                                    fontSize = 12.sp,
+                                    color = if (idx == selectedPaletteIndex)
+                                        MaterialTheme.colors.primary
+                                    else MaterialTheme.colors.onSurface
+                                )
+                            }
                         }
                     }
                 }
+
+                OutlinedButton(
+                    onClick = { onPaletteSelected((current + 1) % count) },
+                    modifier = Modifier.width(34.dp),
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colors.primary
+                    )
+                ) {
+                    Text(">", fontSize = 11.sp, maxLines = 1)
+                }
             }
+
+            Text(
+                "${current + 1} / $count",
+                fontSize = 10.sp,
+                color = Color(0xFF888888),
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
         }
 
         // Palette swatch

@@ -186,6 +186,26 @@ Key files: resource.cpp, graphics.cpp, sound.cpp, made.cpp
 game in ags/LGOP2
 
 
+### Prisoner of Ice (ICE)
+No public source. All four containers use the same `Burp` directory layout
+(`"Burp"`, u32le count, 20-byte entries, flag bit 2 = raw DEFLATE), so the formats
+below were derived from the data itself plus the file lists on the archived
+ScummVM wiki page:
+- https://wiki.scummvm.org/index.php/Prisoner_of_Ice
+- https://web.archive.org/web/20241111103625/https://wiki.scummvm.org/index.php/Prisoner_of_Ice
+
+Classified per entry by payload signature: `RIFF`/`EDITLS`+`RIFF` = 8-bit 22222 Hz mono
+WAVE, `HMIMIDIP0131` = Miles MIDI, `u16le width`/`u16le height` + `width*height` indices =
+image, 768 bytes = palette, 11-byte-stride records with a name, an absolute offset and
+padding = CP850 dialogue table (0xAD is a line break). Images and their sibling palettes
+sit next to each other, so a palette lives at image index + 1.
+
+Scene picture/opcode streams and Miles patch data are still opaque and are exposed as
+metadata only.
+
+game in ags/PRISONER
+
+
 ### Universe
 No public source or ScummVM engine. Everything was derived by disassembling the
 DOS loader in UNIVERSE.EXE and by decoding UNIVERSE.EPF directly:

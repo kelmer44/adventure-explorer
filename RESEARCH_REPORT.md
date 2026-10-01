@@ -2016,3 +2016,138 @@ rather than by room number, and are exposed as sheets.
   names recovered (`PUERTA`, `VENTANA`, `SALIDA`, `CEMENTERIO`, `CABAÑA`,
   `PIZARRA`, `BORRACHO`, …) are consistent with the Spanish original, which
   confirms the field alignment rather than just the token count.
+
+---
+
+# Part 10: Prisoner of Ice — Burp Archives, Dialogue Tables and Sound
+
+Source: derived from the data in `ags/PRISONER`, cross-checked against the file
+list on the (archived) ScummVM wiki page:
+https://wiki.scummvm.org/index.php/Prisoner_of_Ice
+
+## 10.1 File Set and the Burp Container
+
+All game data sits in four archives:
+
+| File | Entries | Content |
+|---|---|---|
+| `KVGA.KRO` | 1335 | 748 scene streams, 130 images, 126 palettes, plus 160 empty stubs and 171 misc |
+| `KSVGA.KRO` | 1338 | 748 scene streams, 122 images, 126 palettes, plus 175 empty stubs and 167 misc |
+| `S_KLANG.KRO` | 722 | 646 RIFF/WAVE sounds, 67 dialogue tables, 9 empty |
+| `KSOUND.KRO` | 353 | 307 RIFF/WAVE sounds, 46 Miles MIDI modules |
+
+Every `.KRO` file uses one directory format, named `Burp`:
+
+```
+0x00  ASCII "Burp"
+0x04  u32le  entryCount
+0x08  entryCount * 20 bytes:
+        +0x00 u32le decompressedSize
+        +0x04 u32le storedSize
+        +0x08 u32le reserved (always 0)
+        +0x0C u32le fileOffset
+        +0x10 u32le flags   (bit 2, value 4, = raw DEFLATE)
+```
+
+Entries carry no names, so the reader caches the directory per path and seeks only
+to the entry it needs; the payload is decompressed in memory.
+
+## 10.2 Entry Classification
+
+There is no per-entry type field, so the type is derived from the payload:
+
+| Signature | Type |
+|---|---|
+| `RIFF....WAVE` | sound |
+| `EDITLS` + 24 bytes + `RIFF....WAVE` | sound (43 such entries in `S_KLANG.KRO`) |
+| `HMIMIDIP0131` | Miles MIDI module (metadata only) |
+| `u16le w`, `u16le h`, then `w * h` bytes | indexed image |
+| exactly 768 bytes | 256-colour palette |
+| 11-byte-stride record table | dialogue table |
+
+The record-table test is: read records while `name[0] != 0` and all seven name
+bytes are in `0x20..0x7E` or NUL, then require at least two records and at least half
+of the `u16le` offsets to land inside the payload. Running this over all four
+archives yields exactly 67 dialogue tables, all in `S_KLANG.KRO`, with no false
+positives in `KVGA.KRO`, `KSVGA.KRO` or `KSOUND.KRO`.
+
+## 10.3 Images and Palettes
+
+```
++0x00  u16le width
++0x02  u16le height
++0x04  width * height palette indices, row-major
+```
+
+Palettes are 768 raw RGB bytes, no VGA 6-bit scaling. They are interleaved with the
+images they belong to: 126 of the 130 KVGA images and 118 of the 122 KSVGA images are
+followed immediately by their palette, so the palette for image index `i` sits at
+`i + 1` and the resource tree exposes both.
+
+## 10.4 Sound
+
+Standard RIFF/WAVE, mono 8-bit PCM at 22222 Hz. One subtlety is an off-by-one in the
+chunk bounds test: because Lua strings are 1-based and the `data` chunk id occupies
+`p`..`p+3` with the 4-byte size at `p+4`..`p+7`, the payload starts at `p+8`, so the
+bound must read `p + 7 + size > #data`. Testing `p + 8 + size` rejects the final sound
+in every archive; with the corrected test all 953 sounds load.
+
+## 10.5 Dialogue Tables
+
+Each record is 11 bytes:
+
+```
++0x00  name[7]      ASCII, NUL padded
++0x07  u16le         absolute offset into the decompressed payload
++0x09  u16le         padding
+```
+
+Text is stored in a string pool as `<control:u8><NUL terminated text>` blocks. The
+control byte is small (`1`..`10`); `0xAD` in the text is a line break, and the rest of
+the high range is CP850, decoded with the standard 128-entry table.
+
+The record offset does not point at the first control byte. It lands a few metadata
+bytes earlier, so the reader scans the 16 bytes from the offset for the first block
+that looks like `<control in 1..10><byte >= 0x20>`. A record can hold several blocks:
+long sentences are split, and a block with no control byte continues the previous
+block's control. The next record's offset bounds the scan, so a record can never
+swallow its neighbour.
+
+Reading only the first block truncates long lines, so the run loop keeps consuming
+blocks until it reaches the next record offset, hits a byte that is neither a valid
+control nor a printable byte, or finds no NUL terminator. Across all 67 tables this
+yields 2697 strings from 1862 records, and 61 records are trailing `S_*` entries
+whose offsets are `0` or point back into the record table itself — these are skipped
+rather than treated as text.
+
+Two structural details are worth noting for future work:
+
+- The offsets are not strictly ordered (names sort by number, offsets do not), so the
+  per-record bound must be the next *greater* offset, not the next record in name order.
+- Some tables are tiny, e.g. entry 713 holds two records and only three bytes of text;
+  a strict classification test rejects it, which is why the offset check accepts any
+  offset strictly inside the payload rather than requiring a plausible text size.
+
+## 10.6 Not Decoded
+
+Two containers remain opaque and are exposed as metadata only:
+
+- Scene streams (748 per graphics archive). The 748 entries in each archive are the
+  same scenes; their picture/opcode stream is not decoded, so no scene image is
+  produced.
+- Miles `HMIMIDIP0131` modules (46 in `KSOUND.KRO`). Only the format tag and size are
+  reported; the patch/instrument stream is not decoded, so no playable audio results.
+
+`S_VIDEO/*.MUX`, `S_KLANG.BIN` and `__ICE__.PAR` are also unidentified.
+
+## 10.7 Verification
+
+- Full sweep of all four archives under LuaJ 3.0.1: 3310 resources, 0 load failures.
+  748 images, 953 sounds, 1609 text resources (1496 scene metadata entries, 67
+  dialogue tables, 46 Miles MIDI entries).
+- Resource tree matches the archive inventory: KVGA graphics 256 / scenes 748 /
+  palettes 126, KSVGA 240 / 748 / 126, sound effects 953, dialogue 67, music 46.
+- Dialogue output was spot-checked against the Spanish original: record `1030` of
+  `S_KLANG.KRO` entry 642 resolves to "¡Diablos! ¡Subo al puente de mando!" and record
+  `107` of entry 645 resolves to the five-block hypnosis exchange, both including the
+  continuations that a single-block reader drops.
