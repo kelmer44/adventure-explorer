@@ -309,6 +309,93 @@ local function scan_backgrounds(game_path, prefix)
 end
 
 -- ============================================================================
+-- Scan for multiple backgrounds embedded in a single DAT file (Guilty).
+-- Each GBG_NNN.DAT / GBG_FNN.DAT holds several images back to back, each laid
+-- out as: u16 width (320) + u16 height + PCX-RLE pixels + 0x0C + 768 palette.
+-- They are interleaved with sprite data and offset tables, so the file is
+-- searched for the 320-wide header and validated by decoding the RLE stream
+-- and checking that it ends exactly on the 0x0C palette marker.
+-- ============================================================================
+
+local EMBEDDED_WIDTH = 320
+
+local function rle_pixel_count(data, pos, total)
+    local n, len = 0, #data
+    local byte = string.byte
+    while n < total and pos <= len do
+        local b = byte(data, pos)
+        if b >= 192 then
+            n = n + (b - 192)
+            pos = pos + 2
+        else
+            n = n + 1
+            pos = pos + 1
+        end
+    end
+    return n, pos
+end
+
+local function find_embedded_images(data)
+    local found = {}
+    local len = #data
+    local pos = 1
+    local needle = string.char(EMBEDDED_WIDTH % 256, math.floor(EMBEDDED_WIDTH / 256))
+    while true do
+        local s = data:find(needle, pos, true)
+        if not s or s + 4 > len then break end
+        local h = u16le(data, s + 2)
+        local next_pos = s + 1
+        if h >= 16 and h <= 480 then
+            local total = EMBEDDED_WIDTH * h
+            local count, p = rle_pixel_count(data, s + 4, total)
+            if count == total and p + 768 <= len and data:byte(p) == 0x0C then
+                found[#found + 1] = { offset = s - 1, width = EMBEDDED_WIDTH, height = h }
+                next_pos = p + 769
+            end
+        end
+        pos = next_pos
+    end
+    return found
+end
+
+local function scan_embedded_backgrounds(game_path, prefix)
+    local files = list_files(game_path)
+    if not files then return {} end
+
+    local prefix_upper = prefix:upper()
+    local names = {}
+    for _, f in ipairs(files) do
+        local suffix = f:upper():match("^" .. prefix_upper .. "(.-)%.DAT$")
+        if suffix and (suffix:match("^%d%d%d$") or suffix:match("^F%d%d$")) then
+            names[#names + 1] = { filename = f, suffix = suffix }
+        end
+    end
+    table.sort(names, function(a, b) return a.suffix < b.suffix end)
+
+    local backgrounds = {}
+    for _, entry in ipairs(names) do
+        local fh = file_open(game_path .. "/" .. entry.filename)
+        if fh then
+            local data = file_read(fh, 0, file_size(fh))
+            file_close(fh)
+            if data then
+                local images = find_embedded_images(data)
+                for i, img in ipairs(images) do
+                    backgrounds[#backgrounds + 1] = {
+                        filename = entry.filename,
+                        offset   = img.offset,
+                        label    = string.format("%s #%d (%dx%d)", entry.suffix, i, img.width, img.height),
+                        width    = img.width,
+                        height   = img.height
+                    }
+                end
+            end
+        end
+    end
+    return backgrounds
+end
+
+-- ============================================================================
 -- Scan for overlays in numbered DAT files using GRAF offsets (IUC only)
 -- ============================================================================
 
@@ -388,12 +475,17 @@ function engine.get_resources(game_path)
     local resources = {}
 
     -- Backgrounds
-    local backgrounds = scan_backgrounds(game_path, prefix)
+    local backgrounds
+    if prefix:upper() == "GBG_" then
+        backgrounds = scan_embedded_backgrounds(game_path, prefix)
+    else
+        backgrounds = scan_backgrounds(game_path, prefix)
+    end
     if #backgrounds > 0 then
         local bg_children = {}
         for _, bg in ipairs(backgrounds) do
             bg_children[#bg_children + 1] = {
-                id   = "bg_" .. bg.filename,
+                id   = "bg_" .. bg.filename .. (bg.offset and ("@" .. bg.offset) or ""),
                 name = bg.label,
                 type = "image"
             }
@@ -460,6 +552,13 @@ function engine.load_resource(game_path, resource_id, palette_id)
     -- Background image
     local bg_filename = resource_id:match("^bg_(.+)$")
     if bg_filename then
+        local bg_offset = 0
+        local name, off = bg_filename:match("^(.-)@(%d+)$")
+        if name then
+            bg_filename = name
+            bg_offset = tonumber(off)
+        end
+
         local path = game_path .. "/" .. bg_filename
         local fh = file_open(path)
         if not fh then return nil end
@@ -467,15 +566,21 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local data = file_read(fh, 0, sz)
         file_close(fh)
 
-        local bg = decode_background(data)
+        local bg
+        if bg_offset > 0 then
+            bg = decode_subimage(data, bg_offset, nil)
+        else
+            bg = decode_background(data)
+        end
         if not bg then return nil end
 
         local img = image_create_indexed(bg.width, bg.height, bg.pixels, bg.palette)
-        local scene = bg_filename:match("(%d%d%d)")  or bg_filename
+        local scene = bg_filename:match("(%d%d%d)")  or bg_filename:match("_(F%d%d)") or bg_filename
         return {
             type        = "image",
             image       = img,
-            description = string.format("Scene %s (%dx%d)", scene, bg.width, bg.height)
+            description = string.format("Scene %s%s (%dx%d)", scene,
+                bg_offset > 0 and (" @" .. bg_offset) or "", bg.width, bg.height)
         }
     end
 
