@@ -7,6 +7,8 @@
 --   SCI0:   RESOURCE.MAP with 6-byte entries; LZW (LSB) / Huffman compression
 --   SCI1:   directory + 6-byte entries; Huffman / LZW1 (MSB) / view+pic LZW
 --   SCI1.1: directory + 5-byte entries; DCL (implode) compression
+--   SCI2.1: RESMAP.000 + RESSCI.000, 32-bit sizes, LZS compression, 640x480
+--           cels with per-row RLE and "hunk" palettes (Larry 7, ...)
 --
 -- Graphics: SCI0/SCI1 EGA + VGA views (sprites), vector pictures (EGA dithered
 -- and VGA), SCI1.1 bitmap pictures and views, fonts, cursors, palettes, texts.
@@ -227,6 +229,70 @@ local function huffman_unpack(data, expected)
     end
 
     return from_bytes(out, n)
+end
+
+-- ============================================================================
+-- LZS (STACpack) decompressor (SCI2.1+), MSB-first
+-- Port of ScummVM DecompressorLZS.
+-- ============================================================================
+
+local function lzs_unpack(data, expected)
+    local spos, nd = 1, #data
+    local bbuf, bcount = 0, 0
+    local function bits(k)
+        while bcount < k do
+            if spos > nd then return nil end
+            bbuf = bbuf * 256 + data:byte(spos)
+            spos = spos + 1
+            bcount = bcount + 8
+        end
+        bcount = bcount - k
+        local v = floor(bbuf / POW2[bcount])
+        bbuf = bbuf - v * POW2[bcount]
+        return v
+    end
+    local function comp_len()
+        local v = bits(2)
+        if v == 0 then return 2 elseif v == 1 then return 3 elseif v == 2 then return 4 end
+        v = bits(2)
+        if v == 0 then return 5 elseif v == 1 then return 6 elseif v == 2 then return 7 end
+        local clen = 8
+        while true do
+            local nib = bits(4)
+            if not nib then return clen end
+            clen = clen + nib
+            if nib ~= 15 then break end
+        end
+        return clen
+    end
+
+    local out, n = {}, 0
+    while n < expected do
+        local b = bits(1)
+        if b == nil then break end
+        if b == 1 then
+            local offs
+            if bits(1) == 1 then
+                offs = bits(7)
+                if not offs or offs == 0 then break end
+            else
+                offs = bits(11)
+                if not offs then break end
+            end
+            local clen = comp_len()
+            local h = n - offs
+            for _ = 1, clen do
+                out[n] = out[h] or 0
+                n = n + 1; h = h + 1
+            end
+        else
+            local v = bits(8)
+            if not v then break end
+            out[n] = v
+            n = n + 1
+        end
+    end
+    return from_bytes(out, math.min(n, expected))
 end
 
 -- ============================================================================
@@ -565,8 +631,24 @@ local RES_NAMES = {
     [11] = "Palettes", [15] = "Messages", [17] = "Heaps",
 }
 
+-- SCI2.1 uses a different type table
+local RES_NAMES21 = {
+    [0] = "Views", [1] = "Pics", [2] = "Scripts", [3] = "Animations",
+    [4] = "Sounds", [5] = "Etc", [6] = "Vocab", [7] = "Fonts",
+    [8] = "Cursors", [9] = "Patches", [10] = "Bitmaps",
+    [11] = "Palettes", [12] = "Audio", [13] = "Audio", [14] = "Sync",
+    [15] = "Messages", [16] = "Maps", [17] = "Heaps", [18] = "Chunks",
+    [19] = "Audio36", [20] = "Sync36", [21] = "Translations",
+    [22] = "Robots", [23] = "VMDs", [24] = "Ducks", [25] = "Cluts",
+    [26] = "TGAs", [27] = "ZZZ",
+}
+
+local function res_names(info)
+    return info.ver == "sci2" and RES_NAMES21 or RES_NAMES
+end
+
 -- ============================================================================
--- Map parsers: SCI0, SCI1, SCI1.1
+-- Map parsers: SCI0, SCI1, SCI1.1, SCI2.1
 -- ============================================================================
 
 -- Detect SCI version from the map data
@@ -699,6 +781,33 @@ local function parse_map_sci11(data)
     return resources
 end
 
+-- SCI2.1 RESMAP.000: directory of (u8 type, u16 offset) ended by 0xFF, then
+-- per type u16 number + u32 plain offset into RESSCI.000.
+local function parse_map_sci2(data)
+    local dir = {}
+    local pos = 1
+    while pos + 2 <= #data do
+        local t = data:byte(pos)
+        local off = u16le(data, pos + 1)
+        if t == 0xFF then dir[#dir + 1] = { type = -1, offset = off }; break end
+        dir[#dir + 1] = { type = t % 32, offset = off }
+        pos = pos + 3
+    end
+    local resources = {}
+    for di = 1, #dir - 1 do
+        local p = dir[di].offset + 1
+        local stop = dir[di + 1].offset
+        while p + 5 <= #data and p <= stop - 5 do
+            table.insert(resources, {
+                type = dir[di].type, number = u16le(data, p),
+                volume = 0, offset = u32le(data, p + 2),
+            })
+            p = p + 6
+        end
+    end
+    return resources
+end
+
 -- ============================================================================
 -- Resource volume readers
 -- ============================================================================
@@ -713,6 +822,14 @@ local function read_resource_header(fh, ver, offset)
         if not hdr or #hdr < 8 then return nil end
         return { packed = u16le(hdr, 3) - 4, unpacked = u16le(hdr, 5),
                  method = u16le(hdr, 7), skip = 8 }
+    end
+    if ver == "sci2" then
+        local hdr = file_read(fh, offset, 13)
+        if not hdr or #hdr < 13 then return nil end
+        local packed, unpacked = u32le(hdr, 4), u32le(hdr, 8)
+        -- the stored compression field is unreliable: LZS whenever sizes differ
+        return { packed = packed, unpacked = unpacked,
+                 method = packed ~= unpacked and 32 or 0, skip = 13 }
     end
     local hdr = file_read(fh, offset, 9)
     if not hdr or #hdr < 9 then return nil end
@@ -732,6 +849,9 @@ local function decompress_resource(raw, method, unpack_sz, numbering)
     end
     if method == 18 or method == 19 or method == 20 then
         return dcl_decompress(raw, unpack_sz)
+    end
+    if method == 32 then
+        return lzs_unpack(raw, unpack_sz)
     end
     if numbering == "old" then
         if method == 1 then return lzw_unpack(raw, unpack_sz, false) end
@@ -753,7 +873,8 @@ local function decompress_resource(raw, method, unpack_sz, numbering)
 end
 
 local function read_resource(game_path, info, res)
-    local vol_name = string.format("RESOURCE.%03d", res.volume)
+    local vol_name = info.ver == "sci2" and "RESSCI.000"
+        or string.format("RESOURCE.%03d", res.volume)
     local fh = file_open(game_path .. "/" .. vol_name)
     if not fh then return nil end
     local h = read_resource_header(fh, info.ver, res.offset)
@@ -766,20 +887,26 @@ end
 
 -- Parsed map + per-game facts, cached per game folder
 local info_cache = {}
+-- SCI2.1 games store palettes in the "hunk palette" layout
+local use_hunk = false
 
 local function get_info(game_path)
     local cached = info_cache[game_path]
-    if cached then return cached end
+    if cached then use_hunk = (cached.ver == "sci2"); return cached end
 
-    local fh = file_open(game_path .. "/RESOURCE.MAP")
+    local is_sci2 = not file_exists(game_path .. "/RESOURCE.MAP")
+        and file_exists(game_path .. "/RESMAP.000")
+    local fh = file_open(game_path .. (is_sci2 and "/RESMAP.000" or "/RESOURCE.MAP"))
     if not fh then return nil end
     local data = file_read(fh, 0, file_size(fh))
     file_close(fh)
     if not data or #data < 6 then return nil end
 
-    local ver = detect_sci_version(data)
+    local ver = is_sci2 and "sci2" or detect_sci_version(data)
     local resources
-    if ver == "sci11" then
+    if ver == "sci2" then
+        resources = parse_map_sci2(data)
+    elseif ver == "sci11" then
         resources = parse_map_sci11(data)
     elseif ver == "sci1" then
         resources = parse_map_sci1(data)
@@ -841,6 +968,7 @@ local function get_info(game_path)
     end
 
     info_cache[game_path] = info
+    use_hunk = (info.ver == "sci2")
     return info
 end
 
@@ -852,7 +980,34 @@ end
 -- VGA Palette Parser (type 11 resources, embedded palettes)
 -- ============================================================================
 
+-- SCI2.1 palette: 13 byte header (palette count at 10), u16 offsets, then an
+-- entry with a 22 byte header followed by [used,]r,g,b per color
+local function parse_hunk_palette(data)
+    if not data or #data < 14 or u8(data, 11) == 0 then return nil end
+    local pal = {}
+    for i = 0, 255 do pal[i*3+1]=0; pal[i*3+2]=0; pal[i*3+3]=0 end
+    local entry = 13 + 2 * u8(data, 11) -- entries follow the header and offset table
+    local e = entry + 1
+    if e + 22 > #data then return nil end
+    local start = u8(data, e + 10)
+    local count = u16le(data, e + 14)
+    local shared = u8(data, e + 17) ~= 0
+    local pos = e + 22
+    for i = 0, count - 1 do
+        local ci = start + i
+        if ci > 255 then break end
+        if not shared then pos = pos + 1 end
+        if pos + 2 > #data then break end
+        pal[ci*3+1] = u8(data, pos)
+        pal[ci*3+2] = u8(data, pos + 1)
+        pal[ci*3+3] = u8(data, pos + 2)
+        pos = pos + 3
+    end
+    return pal
+end
+
 local function parse_vga_palette(data)
+    if use_hunk then return parse_hunk_palette(data) end
     if not data or #data < 37 then return nil end
 
     local pal = {}
@@ -1005,9 +1160,56 @@ local function decode_cel_ega(data, w, h, ck, off)
     return pix
 end
 
+-- SCI2.1 cels: uncompressed pixels at `data`, or per-row RLE (ctrl table of
+-- row offsets into `data`, then row offsets into the literal block `lit`)
+local function decode_cel_sci32(data, cel)
+    local w, h, ck = cel.width, cel.height, cel.clear_key
+    local s = cel.sci32
+    local pix = {}
+    for i = 1, w * h do pix[i] = ck end
+    if s.comp == 0 then
+        local p = s.data + 1
+        for i = 1, w * h do pix[i] = data:byte(p + i - 1) or ck end
+        return pix
+    end
+    if s.comp ~= 138 then return nil end
+    if s.ctrl + h * 8 > #data then return nil end
+    for y = 0, h - 1 do
+        local rp = s.data + u32le(data, s.ctrl + 1 + y * 4) + 1
+        local lp = s.lit + u32le(data, s.ctrl + 1 + h * 4 + y * 4) + 1
+        local i, base = 0, y * w + 1
+        while i < w do
+            local c = data:byte(rp)
+            if not c then break end
+            rp = rp + 1
+            local len = c
+            if c >= 128 then
+                len = c % 64
+                if floor(c / 64) % 2 == 1 then
+                    -- skip color: already filled
+                else
+                    local v = data:byte(lp) or ck
+                    lp = lp + 1
+                    for k = 0, math.min(len, w - i) - 1 do pix[base + i + k] = v end
+                end
+            else
+                for k = 0, math.min(len, w - i) - 1 do
+                    pix[base + i + k] = data:byte(lp + k) or ck
+                end
+                lp = lp + len
+            end
+            if len == 0 then break end
+            i = i + len
+        end
+    end
+    return pix
+end
+
 local function decode_cel(data, cel)
     local pix
-    if cel.ega then
+    if cel.sci32 then
+        pix = decode_cel_sci32(data, cel)
+    elseif cel.ega then
         pix = decode_cel_ega(data, cel.width, cel.height, cel.clear_key, cel.ega)
     else
         pix = decode_cel_vga(data, cel.width, cel.height, cel.clear_key, cel.rle, cel.lit)
@@ -1092,7 +1294,7 @@ end
 --         (byte 12 = loop header size, byte 13 = cel header size)
 -- Loop:   seekEntry:u8 (255 = own cels) mirror:u8 celCount:u8 ... celOffset:u32@12
 -- Cel:    w:u16 h:u16 dx:i16 dy:i16 clearKey:u8 ... rle:u32@24 literal:u32@28
-local function parse_view_sci11(data)
+local function parse_view_sci11(data, sci32)
     if #data < 14 then return nil end
 
     local header_size = u16le(data, 1) + 2
@@ -1131,11 +1333,22 @@ local function parse_view_sci11(data)
                 local h = u16le(data, cp + 2)
                 local dx = i16le(data, cp + 4)
                 local dy = i16le(data, cp + 6)
-                if dy < 0 then dy = dy + 255 end
+                if dy < 0 and not sci32 then dy = dy + 255 end
                 local ck = u8(data, cp + 8)
                 local rle = u32le(data, cp + 24)
                 local lit = u32le(data, cp + 28)
-                if w < 1 or w > 1024 or h < 1 or h > 1024 then break end
+                if w < 1 or w > 2048 or h < 1 or h > 2048 then break end
+
+                if sci32 then
+                    cels[#cels + 1] = {
+                        width = w, height = h, clear_key = ck,
+                        displace_x = mirror and -dx or dx, displace_y = dy,
+                        mirror = mirror,
+                        sci32 = { comp = u8(data, cp + 9), data = rle, lit = lit,
+                                  ctrl = u32le(data, cp + 32) },
+                    }
+                    goto next_cel
+                end
 
                 -- only an RLE offset means plain uncompressed pixels
                 if rle > 0 and lit == 0 then rle, lit = 0, rle end
@@ -1147,6 +1360,7 @@ local function parse_view_sci11(data)
                     rle = rle > 0 and rle or nil,
                     lit = lit > 0 and lit or nil,
                 }
+                ::next_cel::
             end
         end
         loops[#loops + 1] = cels
@@ -1783,6 +1997,70 @@ local function render_pic_sci11(data, game_pal, force_pal)
     return image_create_indexed(width, height, pix, pic_pal), nil
 end
 
+-- SCI2.1 picture: header (size u16, cel count u8, cel header size u16 @4,
+-- palette u32 @6, resolution flags @10/@12) + cels placed at relative positions
+local function render_pic_sci32(data, game_pal, force_pal)
+    if #data < 16 then return nil, "data too short" end
+    local hdr = u16le(data, 1)
+    local count = u8(data, 3)
+    local csize = u16le(data, 5)
+    local pal_off = u32le(data, 7)
+    local f1, f2 = u16le(data, 11), u16le(data, 13)
+    local xres, yres = 320, 200
+    if f2 ~= 0 then xres, yres = f1, f2
+    elseif f1 == 1 then xres, yres = 640, 480
+    elseif f1 == 2 then xres, yres = 640, 400 end
+
+    local pal = game_pal
+    if pal_off > 0 and pal_off < #data then
+        pal = parse_hunk_palette(data:sub(pal_off + 1)) or pal
+    end
+    if force_pal then pal = force_pal end
+
+    local cels = {}
+    local cw, ch = xres, yres
+    for k = 0, count - 1 do
+        local cp = hdr + k * csize + 1
+        if cp + 42 > #data then break end
+        local cel = {
+            width = u16le(data, cp), height = u16le(data, cp + 2),
+            clear_key = u8(data, cp + 8),
+            sci32 = { comp = u8(data, cp + 9), data = u32le(data, cp + 24),
+                      lit = u32le(data, cp + 28), ctrl = u32le(data, cp + 32) },
+        }
+        local rx, ry = i16le(data, cp + 38), i16le(data, cp + 40)
+        if cel.width >= 1 and cel.height >= 1 and cel.width <= 4096 and cel.height <= 4096 then
+            cels[#cels + 1] = { cel = cel, x = rx, y = ry }
+            cw = math.max(cw, rx + cel.width)
+            ch = math.max(ch, ry + cel.height)
+        end
+    end
+    if #cels == 0 then return nil, "no cels" end
+
+    local canvas = {}
+    local first_ck = cels[1].cel.clear_key
+    for i = 1, cw * ch do canvas[i] = first_ck end
+    for _, c in ipairs(cels) do
+        local pix = decode_cel(data, c.cel)
+        if pix then
+            local w, h, ck = c.cel.width, c.cel.height, c.cel.clear_key
+            for y = 0, h - 1 do
+                local dy = y + c.y
+                if dy >= 0 and dy < ch then
+                    for x = 0, w - 1 do
+                        local dx = x + c.x
+                        local v = pix[y * w + x + 1]
+                        if dx >= 0 and dx < cw and v ~= ck then
+                            canvas[dy * cw + dx + 1] = v
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return image_create_indexed(cw, ch, canvas, pal), nil, cw, ch, #cels
+end
+
 -- ============================================================================
 -- Fonts, cursors, texts
 -- ============================================================================
@@ -1889,6 +2167,10 @@ end
 -- ============================================================================
 
 function engine.detect(game_path)
+    if file_exists(game_path .. "/RESMAP.000") and file_exists(game_path .. "/RESSCI.000")
+       and not file_exists(game_path .. "/RESOURCE.MAP") then
+        return true
+    end
     if not file_exists(game_path .. "/RESOURCE.MAP") then return false end
     for i = 0, 9 do
         if file_exists(game_path .. string.format("/RESOURCE.%03d", i)) then
@@ -1913,12 +2195,15 @@ function engine.get_resources(game_path)
     local tree = {}
     -- Sorted type order: views first, then pics, then others
     local type_order = {0, 1, 11, 7, 8, 2, 3, 4, 6, 9, 10, 15, 17}
+    if info.ver == "sci2" then
+        type_order = {0, 1, 11, 7, 8, 2, 3, 4, 5, 6, 9, 10, 15, 17, 16, 18, 19, 20, 21, 22}
+    end
     local default_pal = default_palette_res(info)
     local pic_palettes
     for _, t in ipairs(type_order) do
         local items = by_type[t]
         if items then
-            local type_name = RES_NAMES[t] or ("Type " .. t)
+            local type_name = res_names(info)[t] or ("Type " .. t)
             local kids = {}
             table.sort(items, function(a, b)
                 -- the game's default palette goes first: the app preselects
@@ -1993,7 +2278,14 @@ local function palette_swatches(pal, rnum, size, label)
 end
 
 -- Palette of a vector / SCI1.1 picture
-local function pic_palette(data, game_pal)
+local function pic_palette(data, game_pal, info)
+    if info and info.ver == "sci2" then
+        local off = u32le(data, 7)
+        if off > 0 and off < #data then
+            return parse_hunk_palette(data:sub(off + 1)) or game_pal
+        end
+        return game_pal
+    end
     if #data >= 38 and u16le(data, 1) == 0x26 then
         local off = u32le(data, 29)
         if off > 0 and off < #data then
@@ -2025,14 +2317,16 @@ local function resolve_palette_override(game_path, info, palette_id, game_pal)
     if qt then
         local r = find_resource(info, tonumber(qt), tonumber(qn))
         local data = r and read_resource(game_path, info, r)
-        return data and pic_palette(data, game_pal()) or nil
+        return data and pic_palette(data, game_pal(), info) or nil
     end
     return nil
 end
 
 local function load_view(data, rnum, info, game_pal, override)
     local loops, pal_ptr, vga
-    if info.ver == "sci11" and #data >= 14 and u16le(data, 5) == 1 then
+    if info.ver == "sci2" then
+        loops, pal_ptr, vga = parse_view_sci11(data, true)
+    elseif info.ver == "sci11" and #data >= 14 and u16le(data, 5) == 1 then
         loops, pal_ptr, vga = parse_view_sci11(data)
     else
         loops, pal_ptr, vga = parse_view_old(data, info.vga)
@@ -2078,6 +2372,16 @@ local function load_view(data, rnum, info, game_pal, override)
 end
 
 local function load_pic(data, rnum, info, game_pal, override)
+    if info.ver == "sci2" then
+        local img, err, w, h, n = render_pic_sci32(data, game_pal(), override)
+        if img then
+            return {
+                type = "image", image = img,
+                description = string.format("Pic %d (SCI2.1, %dx%d, %d cels)", rnum, w, h, n),
+            }
+        end
+        return { type = "text", text = string.format("Pic %d: %d bytes (%s)", rnum, #data, err or "render failed") }
+    end
     -- SCI1.1 bitmap picture
     if #data >= 38 and u16le(data, 1) == 0x26 then
         local img, err = render_pic_sci11(data, game_pal(), override)
@@ -2133,7 +2437,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local pn = tonumber(pnum_s)
         local r = find_resource(info, tonumber(ptype_s), pn)
         local data = r and read_resource(game_path, info, r)
-        local pal = data and pic_palette(data, game_pal())
+        local pal = data and pic_palette(data, game_pal(), info)
         if pal then return palette_swatches(pal, pn, #data, "Palette of Pic") end
         return { type = "text", text = string.format("Pic %d has no palette", pn) }
     end
@@ -2154,7 +2458,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local data = read_resource(game_path, info, res)
     if not data then
         return { type = "text", text = string.format("Failed to load %s %d (vol=%d)",
-            RES_NAMES[rtype] or "resource", rnum, res.volume) }
+            res_names(info)[rtype] or "resource", rnum, res.volume) }
     end
 
     -- PALETTE resource (type 11)
@@ -2191,12 +2495,12 @@ function engine.load_resource(game_path, resource_id, palette_id)
     end
 
     -- TEXT resource (type 3)
-    if rtype == 3 then
+    if rtype == 3 and info.ver ~= "sci2" then
         return render_text(data, rnum)
     end
 
     -- Other resource types: show metadata
-    local type_name = RES_NAMES[rtype] or ("Type " .. rtype)
+    local type_name = res_names(info)[rtype] or ("Type " .. rtype)
     return {
         type = "text",
         text = string.format("%s %d: %d bytes", type_name, rnum, #data),

@@ -56,7 +56,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds | ✅ Working |
-| Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1 — tested: Larry 1 VGA, Larry 3, Larry 6, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
+| Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 
 > \* Prisoner of Ice scene graphics (`scn_*` resources) are exposed as metadata only; the
