@@ -622,7 +622,86 @@ local FLOPPY_FULLSCREEN = {
 
 -- Floppy: no verified UI or sprite offsets available for the 11.2 MB version
 local FLOPPY_UI = {}
-local FLOPPY_IGOR_SPRITES = {}
+-- Floppy: rooms located by matching the CD catalog's resources byte-for-byte
+-- inside the floppy IGOR.DAT (same 11-field layout as CD_ROOMS; offsets into IGOR.DAT)
+local FLOPPY_ROOMS = {
+    {"Philip's Room", 0x1b9d13, 46080, 0x1c5113, 768, 0, 0, 0x16ddf0, 1280, 0, 0},
+    {"Maze 66", 0x2aa952, 46080, 0x2b5d52, 576, 0x2b5fc2, 2364, 0x2b68fe, 1280, 0, 0},
+    {"Maze 65", 0x2bba81, 46080, 0x2b5d52, 576, 0x2c70f1, 3366, 0x2c7e17, 1280, 0, 0},
+    {"Maze 64", 0x2ccda5, 46080, 0x2b5d52, 576, 0x2d8415, 3273, 0x2d90de, 1280, 0, 0},
+    {"Maze 63", 0x2de9c3, 46080, 0x2b5d52, 576, 0x2ea033, 2034, 0x2ea825, 1280, 0, 0},
+    {"Maze 62", 0x2f01a3, 46080, 0x2fb5a3, 576, 0x2fb813, 2139, 0x2fc06e, 1280, 0, 0},
+    {"Maze 61", 0x301941, 46080, 0x2fb5a3, 576, 0x30cfb1, 2256, 0x30d881, 1280, 0, 0},
+    {"Maze 60", 0x312faf, 46080, 0x2fb5a3, 576, 0x31e61f, 1404, 0x31eb9b, 1280, 0, 0},
+    {"Maze 59", 0x3241ce, 46080, 0x2fb5a3, 576, 0x32f83e, 1992, 0x330006, 1280, 0, 0},
+    {"Maze 58", 0x335742, 46080, 0x2b5d52, 576, 0x340db2, 1254, 0x341298, 1280, 0, 0},
+    {"Maze 57", 0x34666b, 46080, 0x2fb5a3, 576, 0x351cdb, 2058, 0x3524e5, 1280, 0, 0},
+    {"Maze 56", 0x357c33, 46080, 0x2b5d52, 576, 0x3632a3, 1017, 0x36369c, 1280, 0, 0},
+    {"Maze Entrance", 0x3689d8, 46080, 0x2b5d52, 576, 0x374048, 1884, 0x3747a4, 1280, 0, 0},
+    {"Maze 54", 0x37996e, 46080, 0x2fb5a3, 576, 0x384fde, 1278, 0x3854dc, 1280, 0, 0},
+    {"Maze 53", 0x38a823, 46080, 0x2b5d52, 576, 0x395e93, 267, 0x395f9e, 1280, 0, 0},
+    {"Maze 52", 0x39b1d1, 46080, 0x2b5d52, 576, 0x3a6841, 1128, 0x3a6ca9, 1280, 0, 0},
+    {"Maze 51", 0x3ad700, 46080, 0x2b5d52, 576, 0x3b8d70, 873, 0x3b90d9, 1280, 0, 0},
+    {"Physics Classroom", 0x59c8b8, 46080, 0x5a7cb8, 624, 0x5a7f28, 1557, 0x5a853d, 1280, 0, 0},
+    {"Chemistry Classroom", 0x5af5d5, 46080, 0x5a7cb8, 624, 0x5bac45, 1980, 0x5bb401, 1280, 0, 0},
+    {"Park Right", 0x5d3684, 46080, 0x5dea84, 624, 0x5decf4, 3972, 0x5dfc78, 1280, 0, 0},
+    {"Park", 0x5ea2c0, 46080, 0x5f56c0, 624, 0x5f5930, 4728, 0x5f6ba8, 1280, 0, 0},
+    {"Women's Toilets", 0x6e0e1c, 46080, 0x6ec21c, 624, 0x6ec48c, 2022, 0x6ecc72, 1280, 0, 0},
+    {"Men's Toilets", 0x6f8847, 46080, 0x703c47, 624, 0x703eb7, 1980, 0x704673, 1280, 0, 0},
+    {"Outside College", 0x718d16, 46080, 0x724116, 624, 0x724386, 4974, 0x7256f4, 1280, 0, 0},
+    {"Laboratory", 0x740dee, 46080, 0x74c1ee, 624, 0x74c45e, 2130, 0x74ccb0, 1280, 0, 0},
+    {"Map", 0x76cc74, 46080, 0x778074, 624, 0x7782e4, 1809, 0x7789f5, 1280, 0, 0},
+    {"Bell Church", 0x79c4c5, 46080, 0x7a78c5, 624, 0x7a7b35, 861, 0x7a7e92, 1280, 0, 0},
+    {"Church Mosaic", 0x7e8a59, 46080, 0x7f3e59, 720, 0x7f4129, 2445, 0, 0, 0, 0},
+    {"Church Puzzle", 0x80ee98, 46080, 0x81a298, 624, 0x81a508, 1992, 0x81acd0, 1280, 0, 0},
+    {"Inside Church", 0x820fcf, 46080, 0x82c3cf, 624, 0x82c63f, 2352, 0x82cf6f, 1280, 0, 0},
+    {"Outside Church", 0x846dbc, 46080, 0x8521bc, 624, 0x85242c, 3264, 0x8530ec, 1280, 0, 0},
+    {"Outside Administration Building B", 0x862535, 46080, 0x86d935, 624, 0x86dba5, 3858, 0x86eab7, 1280, 0, 0},
+    {"Outside Administration Building A", 0x86fc49, 46080, 0x86d935, 624, 0x87b2b9, 5766, 0x87c93f, 1280, 0, 0},
+    {"Spring Bridge", 0x89d588, 46080, 0x8a8988, 624, 0x8a8c58, 3936, 0x8a9bb8, 1280, 0, 0},
+    {"Library", 0x8bc89c, 46080, 0x8c7c9c, 624, 0x8c7f0c, 2217, 0x8c87b5, 1280, 0, 0},
+    {"Admin (Secretary Room)", 0x8e7bb9, 46080, 0x8f2fb9, 624, 0x8f3229, 2400, 0x8f3b89, 1280, 0, 0},
+    {"Dean Pepper's Office", 0x90eb40, 46080, 0x919f40, 624, 0x91a1b0, 2745, 0x91ac69, 1280, 0, 0},
+    {"Administration Corridor", 0x924700, 46080, 0x92fb00, 624, 0x92fd70, 2388, 0x9306c4, 1280, 0, 0},
+    {"Outside Student Dormitory", 0x948bcc, 46080, 0x953fcc, 624, 0x95423c, 1524, 0x954830, 1280, 0, 0},
+    {"Student Dormitory", 0x9a0792, 46080, 0x9abb92, 624, 0x9abe92, 6699, 0x9ad8bd, 1280, 0, 0},
+    {"Spring Bridge (Intro)", 0x89d588, 46080, 0x8a8988, 720, 0, 0, 0, 0, 0, 0},
+    {"Spring Rock", 0x9c63e4, 46080, 0x8a8988, 720, 0x9d1ab4, 3117, 0x9d26e1, 1280, 0, 0},
+    {"Student Dormitory Attic", 0x9776ff, 46080, 0x982aff, 624, 0x982d6f, 4545, 0x983f30, 1280, 0, 0},
+    {"Roman Numbers Paper", 0xa70a39, 46080, 0xa7be39, 624, 0, 0, 0, 0, 0, 0},
+    {"Photo Harrison Margaret", 0xa948d8, 46080, 0xa9fcd8, 624, 0, 0, 0, 0, 0, 0},
+}
+
+-- Floppy: Igor sprites (same data as the CD versions)
+local FLOPPY_IGOR_SPRITES = {
+    {"Igor Dir Back (set 1)", 10886790, 10500},
+    {"Igor Dir Right (set 1)", 10897290, 13500},
+    {"Igor Dir Front (set 1)", 10910790, 10500},
+    {"Igor Dir Left (set 1)", 10921290, 13500},
+    {"Igor Head (set 1)", 10934790, 3696},
+    {"Igor Dir Back (set 2)", 10834604, 10500},
+    {"Igor Dir Right (set 2)", 10845104, 13500},
+    {"Igor Dir Front (set 2)", 10858604, 10500},
+    {"Igor Dir Left (set 2)", 10869104, 13500},
+    {"Igor Head (set 2)", 10882604, 3696},
+}
+
+-- Floppy: sprite / animation groups (same layout as CD_ANIM_GROUPS)
+local FLOPPY_ANIM_GROUPS = {
+    {"Philip Vodka (ANM)", 0x1c5113, 768, {{0x1b32e8, 24175}}},
+    {"Park (FRM)", 0x5f56c0, 624, {{0x5e028e, 30376}, {0x5e7936, 62}, {0x5d1bda, 3969}, {0x5e88f5, 3150}}},
+    {"Laboratory (FRM)", 0x74c1ee, 624, {{0x73919e, 2254}, {0x739a6c, 26218}, {0x7400d6, 128}}},
+    {"Spring Rock (FRM)", 0x8a8988, 720, {{0x895b50, 84}, {0x895ba4, 759}, {0x895e9b, 5145}, {0x8972b4, 4508}, {0x898450, 13364}, {0x89b884, 54}}},
+    {"Park Laura (FRM)", 0x5f56c0, 624, {{0x5c7c3c, 40622}, {0x5d1aea, 114}, {0x5d1b5c, 48}}},
+    {"Dean Pepper Office (FRM)", 0x919f40, 624, {{0x8ff943, 2448}, {0x9002d3, 2254}, {0x900ba1, 2744}, {0x901659, 2652}, {0x9020b5, 2842}, {0x902bcf, 2842}, {0x9036e9, 4293}, {0x9047ae, 3850}, {0x9056b8, 4704}, {0x906918, 1800}, {0x907020, 3480}, {0x907db8, 20}, {0x907dcc, 5075}, {0x90919f, 620}, {0x90940b, 18298}, {0x90db85, 38}}},
+    {"Philip Laura Intro (ANM)", 0x1c5113, 768, {{0x9aed55, 29824}}},
+    {"Laura Intro (ANM)", 0x1c5113, 768, {{0x9b621f, 12793}}},
+    {"Library (FRM)", 0x8c7c9c, 624, {{0x8b254e, 2254}, {0x8b2e1c, 18823}, {0x8b77a3, 50}, {0x8b77d5, 1440}, {0x8b7d75, 14616}}},
+    {"Numbers Paper (FRM)", 0x1c5113, 768, {{0xa7c2b5, 51163}, {0xa88a90, 40}}},
+}
+
+-- Floppy: palette used as the base for sprites/UI (Philip's Room)
+local FLOPPY_UI_PAL = {0x1c5113, 768}
 local FLOPPY_TEXTS = {}
 
 -- Floppy: CMF music files (found by scanning for "CTMF" magic)
@@ -766,6 +845,11 @@ local _floppy_rooms_cache_path = nil
 local function get_floppy_rooms(game_path, dat_path)
     if _floppy_rooms_cache and _floppy_rooms_cache_path == game_path then
         return _floppy_rooms_cache
+    end
+    if #FLOPPY_ROOMS > 0 then
+        _floppy_rooms_cache = FLOPPY_ROOMS
+        _floppy_rooms_cache_path = game_path
+        return FLOPPY_ROOMS
     end
     local rooms = {}
     local exe_path = find_exe_file(game_path)
@@ -1065,8 +1149,9 @@ end
 
 -- Palette used for UI elements and sprites: Philip's Room as the base for
 -- colours 0..191, plus the fixed ranges above.
-local function read_ui_palette(fh)
-    local palette = read_palette(fh, 0x1b031c, 768)
+local function read_ui_palette(fh, base)
+    base = base or {0x1b031c, 768}
+    local palette = read_palette(fh, base[1], base[2])
     if not palette then return nil end
     return apply_fixed_palette(palette)
 end
@@ -1794,8 +1879,8 @@ function engine.get_resources(game_path)
 
     -- Sprite / animation groups (CD only: FRM_* / ANM_* sparse frame streams)
     local anim_children = {}
-    if version == VER_CD then
-        for i, g in ipairs(CD_ANIM_GROUPS) do
+    do
+        for i, g in ipairs(version == VER_CD and CD_ANIM_GROUPS or FLOPPY_ANIM_GROUPS) do
             anim_children[#anim_children + 1] = {
                 id = "anim_" .. i,
                 name = g[1],
@@ -1947,7 +2032,8 @@ function engine.load_resource(game_path, resource_id)
         if not fh then return {type = "text", text = "Cannot open data file"} end
 
         if room_type == "bg" then
-            if version == VER_CD then
+            -- Direct (offset, size) rooms: CD, and the floppy rooms matched against the CD catalog
+            if version == VER_CD or #FLOPPY_ROOMS > 0 then
                 local palette, bad_colors = read_palette(fh, pal_off, pal_size)
                 if not palette then
                     file_close(fh)
@@ -2150,7 +2236,7 @@ function engine.load_resource(game_path, resource_id)
 
         -- UI elements use the engine's fixed colour ranges (208..255) on top
         -- of a room palette for the low colours
-        local palette = read_ui_palette(fh)
+        local palette = read_ui_palette(fh, version == VER_FLOPPY and FLOPPY_UI_PAL or nil)
         file_close(fh)
 
         if not img_raw or not palette then
@@ -2193,8 +2279,8 @@ function engine.load_resource(game_path, resource_id)
     -- ====== Sprite / animation groups (FRM_* / ANM_*) ======
     local anim_idx = resource_id:match("^anim_(%d+)$")
     if anim_idx then
-        local g = CD_ANIM_GROUPS[tonumber(anim_idx)]
-        if version ~= VER_CD or not g then
+        local g = (version == VER_CD and CD_ANIM_GROUPS or FLOPPY_ANIM_GROUPS)[tonumber(anim_idx)]
+        if not g then
             return {type = "text", text = "Animation group not available"}
         end
         local fh = file_open(data_path)
@@ -2273,7 +2359,7 @@ function engine.load_resource(game_path, resource_id)
 
         local sprite_raw = file_read(fh, s[2], s[3])
         -- Igor's own colours live at 192..207 (PAL_IGOR_1)
-        local palette = read_ui_palette(fh)
+        local palette = read_ui_palette(fh, version == VER_FLOPPY and FLOPPY_UI_PAL or nil)
         file_close(fh)
 
         if not sprite_raw or not palette then
