@@ -10,6 +10,12 @@ Key references used:
 - `engines/scumm/resource.cpp` - block search (`findResource`), tag aliasing, `readRoomsOffsets` (room table at offset 16 of each data part)
 - `engines/scumm/detection_tables.h` - per-game data file conventions (e.g. DOTT `tentacle.%03d` with `kGenDiskNum`)
 - `engines/scumm/metaengine.cpp` - generated per-room filenames (`%02d.LFL` / `%03d.LFL`)
+- `engines/scumm/resource.cpp` - `readIndexBlock` / `readResTypeList` (V8: 32-bit counts, DRSC), `openRoom`/`readRoomsOffsets` (per-disc `.LA1`/`.LA2` room tables)
+- `engines/scumm/costume.cpp`, `base-costume.cpp` - V5/V6 `COST` limbs/cels, byleRLE; `akos.cpp`, `bomp.cpp` - V7/V8 `AKOS` (codecs 1, 5, 16) and sequence (`AKSQ`) commands
+- `engines/scumm/sound.cpp` (`readSoundResource`) - `SOUN`/`SOU ` chunks (SBL, ROL, GMD, ADL, SPK); iMUSE MIDI is a standard `MThd` after an `MDhd` header
+- `engines/scumm/imuse_digi/dimuse_bndmgr.cpp`, `dimuse_codecs.cpp` - `.BUN` bundles (LB83/LB23 directory, COMP block table, codecs 0-13/15), ported to `ImuseBundleCodecs.kt`
+- `engines/scumm/nut_renderer.cpp` - `.NUT` bitmap fonts (codecs 1/21/44)
+- MI3 (`COMI.LA0/1/2`) game located in ags/SCUMM/Monkey3 (music/speech in `RESOURCE/*.BUN`)
 
 ### SCI
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -217,3 +223,17 @@ DOS loader in UNIVERSE.EXE and by decoding UNIVERSE.EPF directly:
 - `UNIVERSE.EXE` 0xba09  code-width and mask setup (9 bits, widening to 14)
 
 game in ags/universe/
+
+
+### THE RIDDLE OF MASTER LU (M4 engine)
+Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
+Game in ags/RIDDLE
+
+Key references used (`engines/m4`):
+- `fileio/sys_file.cpp` - RIPLEY.HAS hash index (u32 count, 47-byte records, 34-byte hagfile table), `*.HAG` addressing
+- `adv_r/adv_file.cpp`, `platform/tile/tile_read.cpp` - `.TT` tiled backgrounds (+ 6-bit palette), `.COD` attribute buffers
+- `wscript/ws_load.cpp` (`ProcessCELS`, `CreateSprite`), `graphics/graphics.h` - `M4SS` sprite series layout
+- `platform/draw.cpp` (`RLE8Decode`) - sprite RLE8
+- `graphics/gr_font.cpp` (`gr_font_load`) - `.FNT`
+- `platform/sound/digi.cpp` - `.RAW` is 11025 Hz unsigned 8-bit
+- `audio/midiparser_hmp.cpp` - `.HMP` header, converted to SMF in the script

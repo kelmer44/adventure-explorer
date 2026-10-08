@@ -5,6 +5,7 @@ import adventureexplorer.model.MidiData
 import adventureexplorer.audio.GobAdlDecoder
 import adventureexplorer.audio.CmfToMidiConverter
 import adventureexplorer.audio.XmiToMidiConverter
+import adventureexplorer.audio.ImuseBundleCodecs
 import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
@@ -34,6 +35,8 @@ import javax.imageio.ImageIO
  *   midi_create_from_cmf(data) -> midi_handle     (Creative Music Format)
  *   midi_create_from_xmi(data) -> midi_handle     (XMIDI, IFF-wrapped or bare EVNT)
  *   midi_create_auto(data) -> midi_handle          (sniffs the magic bytes to pick a decoder)
+ *   imuse_bundle_sound(path, offset, size [, channels]) -> pcm, rate, bits, channels  (SCUMM .BUN sound)
+ *   imuse_stream_sound(data) -> pcm, rate, bits, channels   (resident SCUMM `iMUS` stream)
  *   log_info(msg), log_warn(msg), log_error(msg)
  */
 class LuaEngine {
@@ -56,6 +59,8 @@ class LuaEngine {
         registerSoundApi()
         registerMidiApi()
         registerBinaryApi()
+        registerImuseApi()
+        registerImuseStream()
         registerLogApi()
     }
 
@@ -379,6 +384,172 @@ class LuaEngine {
         }
     }
 
+    // ── iMUSE bundle API ─────────────────────────────────────────────
+
+    private fun registerImuseApi() {
+        // imuse_bundle_sound(path, offset, size [, default_channels]) -> pcm, rate, bits, channels
+        // Decodes one sound stored in a SCUMM V7/V8 .BUN bundle into little-endian PCM
+        // (16-bit signed or 8-bit unsigned). Returns nil on failure.
+        globals["imuse_bundle_sound"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val file = findFileInsensitive(args.checkjstring(1)) ?: return NIL
+                val offset = args.checklong(2)
+                val size = args.checkint(3)
+                val defChannels = args.optint(4, 0)
+                return try {
+                    decodeBundleSound(file, offset, size, defChannels)
+                } catch (e: Exception) {
+                    println("[LUA WARN] imuse_bundle_sound failed: ${e.message}")
+                    NIL
+                }
+            }
+        }
+    }
+
+    private fun be32(b: ByteArray, i: Int): Int =
+        ((b[i].toInt() and 0xFF) shl 24) or ((b[i + 1].toInt() and 0xFF) shl 16) or
+            ((b[i + 2].toInt() and 0xFF) shl 8) or (b[i + 3].toInt() and 0xFF)
+
+    private fun registerImuseStream() {
+        // imuse_stream_sound(data) -> pcm, rate, bits, channels
+        // Decodes a resident `iMUS` stream (V7/V8 SOUN resources) into little-endian PCM.
+        globals["imuse_stream_sound"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                return try {
+                    val ls = args.checkstring(1)
+                    val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                    finishImuse(bytes, 22050, 16, 1, true)
+                } catch (e: Exception) { LuaValue.NIL }
+            }
+        }
+    }
+
+    private fun decodeBundleSound(file: File, offset: Long, size: Int, defChannels: Int): Varargs {
+        RandomAccessFile(file, "r").use { raf ->
+            raf.seek(offset)
+            val head = ByteArray(16)
+            raf.readFully(head)
+            val tag = String(head, 0, 4, Charsets.US_ASCII)
+            val pcm = java.io.ByteArrayOutputStream()
+            var channels = defChannels
+            var swapBE = false
+            if (tag == "iMUS") {
+                // Uncompressed iMUSE stream
+                val body = ByteArray(size)
+                raf.seek(offset)
+                raf.readFully(body)
+                pcm.write(body)
+                swapBE = true
+            } else if (tag == "COMP") {
+                val numItems = be32(head, 4)
+                val lastSize = be32(head, 12)
+                if (numItems <= 0 || numItems > 1_000_000) return LuaValue.NIL
+                val table = ByteArray(numItems * 16)
+                raf.readFully(table)
+                var firstCodec = -1
+                for (i in 0 until numItems) {
+                    val bOff = be32(table, i * 16)
+                    val bSize = be32(table, i * 16 + 4)
+                    val codec = be32(table, i * 16 + 8)
+                    if (firstCodec < 0) firstCodec = codec
+                    val comp = ByteArray(bSize + 1)
+                    raf.seek(offset + bOff)
+                    raf.readFully(comp, 0, bSize)
+                    val ch = if (codec == 15) 2 else 1
+                    var out = ImuseBundleCodecs.decompress(codec, comp.copyOf(bSize + 1), ch) ?: return LuaValue.NIL
+                    if (codec == 13 || codec == 15) {
+                        if (i == numItems - 1 && lastSize in 1 until out.size) out = out.copyOf(lastSize)
+                    } else if (i == numItems - 1 && lastSize in 1 until out.size) {
+                        out = out.copyOf(lastSize)
+                    }
+                    pcm.write(out)
+                }
+                swapBE = firstCodec in 0..12
+                if (channels == 0 && (firstCodec == 13 || firstCodec == 15)) channels = if (firstCodec == 15) 2 else 1
+                if (firstCodec == 13 || firstCodec == 15) swapBE = false
+            } else {
+                return LuaValue.NIL
+            }
+
+            return finishImuse(pcm.toByteArray(), 22050, 16, if (channels > 0) channels else 1, swapBE)
+        }
+    }
+
+    /**
+     * Turn a decoded iMUSE stream into plain PCM. If the data starts with an `iMUS` header the
+     * FRMT chunk supplies bits/rate/channels (payload: start, ?, bits, rate, channels) and DATA
+     * the samples. 12-bit packed samples (3 bytes -> 2 offset-binary values) become 16-bit LE.
+     */
+    private fun finishImuse(input: ByteArray, defRate: Int, defBits: Int, defCh: Int, bigEndian: Boolean): Varargs {
+        var data = input
+        var rate = defRate
+        var bits = defBits
+        var ch = defCh
+        if (data.size > 16 && String(data, 0, 4, Charsets.US_ASCII) == "iMUS") {
+            var p = 8
+            var dataStart = -1
+            var dataEnd = data.size
+            while (p + 8 <= data.size) {
+                val t = String(data, p, 4, Charsets.US_ASCII)
+                val sz = be32(data, p + 4)
+                if (t == "MAP ") {
+                    var q = p + 8
+                    val end = minOf(p + 8 + sz, data.size)
+                    while (q + 8 <= end) {
+                        val ct = String(data, q, 4, Charsets.US_ASCII)
+                        val cs = be32(data, q + 4)
+                        if (ct == "FRMT" && cs >= 20 && q + 8 + 20 <= data.size) {
+                            bits = be32(data, q + 8 + 8)
+                            rate = be32(data, q + 8 + 12)
+                            ch = be32(data, q + 8 + 16)
+                        }
+                        if (cs < 0) break
+                        q += 8 + cs
+                    }
+                    p += 8 + sz
+                } else if (t == "DATA") {
+                    dataStart = p + 8
+                    if (sz in 1..(data.size - dataStart)) dataEnd = dataStart + sz
+                    break
+                } else {
+                    if (sz < 0) break
+                    p += 8 + sz
+                }
+            }
+            if (dataStart < 0) return LuaValue.NIL
+            data = data.copyOfRange(dataStart, dataEnd)
+        }
+        if (ch < 1) ch = 1
+        if (bits == 12) {
+            val n = data.size / 3 * 2
+            val out = ByteArray(n * 2)
+            var si = 0
+            var di = 0
+            while (si + 2 < data.size + 0 && di + 3 < out.size) {
+                val b0 = data[si].toInt() and 0xFF
+                val b1 = data[si + 1].toInt() and 0xFF
+                val b2 = data[si + 2].toInt() and 0xFF
+                val s0 = ((b0 or ((b1 and 0x0F) shl 8)) - 2048) shl 4
+                val s1 = ((b2 or ((b1 and 0xF0) shl 4)) - 2048) shl 4
+                out[di] = s0.toByte(); out[di + 1] = (s0 shr 8).toByte()
+                out[di + 2] = s1.toByte(); out[di + 3] = (s1 shr 8).toByte()
+                si += 3; di += 4
+            }
+            data = out
+            bits = 16
+        } else if (bits == 16 && bigEndian) {
+            var i = 0
+            while (i + 1 < data.size) {
+                val t = data[i]; data[i] = data[i + 1]; data[i + 1] = t
+                i += 2
+            }
+        }
+        return LuaValue.varargsOf(arrayOf(
+            LuaString.valueOf(data, 0, data.size),
+            LuaValue.valueOf(rate), LuaValue.valueOf(bits), LuaValue.valueOf(ch)
+        ))
+    }
+
     // ── Log API ─────────────────────────────────────────────────────
 
     private fun registerLogApi() {
@@ -405,6 +576,14 @@ class LuaEngine {
     // ── Public interface ────────────────────────────────────────────
 
     fun loadScript(scriptPath: String): LuaValue {
+        // Let engine scripts split themselves into sibling modules (require "name").
+        val dir = File(scriptPath).absoluteFile.parentFile
+        if (dir != null) {
+            val pkg = globals.get("package")
+            val cur = pkg.get("path").optjstring("")
+            val entry = dir.path.replace('\\', '/') + "/?.lua"
+            if (!cur.contains(entry)) pkg.set("path", LuaValue.valueOf("$entry;$cur"))
+        }
         val chunk = globals.loadfile(scriptPath)
         return chunk.call()
     }

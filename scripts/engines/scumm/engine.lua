@@ -1,9 +1,9 @@
 -- ============================================================================
--- Adventure Explorer - Engine Script: SCUMM V5-V7 (1991-1995, DOS VGA)
+-- Adventure Explorer - Engine Script: SCUMM V5-V8 (1991-1997, DOS VGA)
 -- ============================================================================
--- Reads SCUMM V5-V7 data files:
+-- Reads SCUMM V5-V8 data files:
 --   .000 index + .001 data        (Monkey Island 2, Atlantis, Indy 4, The Dig)
---   .LA0 index + .LA1 data        (later HE/V7 releases)
+--   .LA0 index + .LA1[.LA2..] data (The Dig V7, The Curse of Monkey Island V8)
 --   .SM0 index + .SM1 data        (Space Quest V5/V6)
 --   <BASE>.000..<BASE>.015         (Day of the Tentacle, multiple data parts)
 --   <BASE>.000 + ROOM/%02d.LFL      (standalone per-room-file releases)
@@ -13,15 +13,23 @@
 -- Room backgrounds: strip-based compression (SMAP), 8px wide vertical strips
 -- Palettes: CLUT block (V5/V6) or PALS/WRAP/APAL (V7), 256 * 3 bytes RGB
 -- Object sprites: OBIM/IMHD/IMxx/SMAP, V5/V6 widths from the old IMHD
--- layout, V7 from the v7 IMHD layout
+-- layout, V7 from the v7 IMHD layout, V8 from IMAG/WRAP/SMAP
+-- Actor sprites: COST (V5/V6) and AKOS (V7/V8) costumes, rendered per
+--   animation (scumm_cost.lua)
+-- Audio: SOUN resources (SBL digital samples, ROL/GMD MIDI), iMUSE streams and
+--   the .BUN music/speech bundles (scumm_snd.lua)
 -- ============================================================================
 
 local engine = {}
 
+local Cost  = require("scumm_cost")
+local Sound = require("scumm_snd")
+local Nut   = require("scumm_nut")
+
 engine.name        = "SCUMM"
 engine.id          = "scumm"
-engine.description = "SCUMM V5-V7 (LucasArts, 1991-1995)"
-engine.version     = "2.0"
+engine.description = "SCUMM V5-V8 (LucasArts, 1991-1997)"
+engine.version     = "3.0"
 
 local band   = bit32.band
 local bor    = bit32.bor
@@ -61,11 +69,7 @@ end
 
 local function xor_decrypt(data, key)
     if key == 0 then return data end
-    local bytes = {}
-    for i = 1, #data do
-        bytes[i] = string.char(bxor(data:byte(i), key))
-    end
-    return table.concat(bytes)
+    return xor_bytes(data, string.char(key))
 end
 
 -- Read and decrypt a chunk from a file handle
@@ -146,9 +150,29 @@ end
 -- ── Index file parsing ──────────────────────────────────────────
 -- V5 index: blocks RNAM, MAXS, DROO, DSCR, DSOU, DCOS, DCHR, DOBJ
 
+-- Directory block: count (u16, u32 in V8), `count` room bytes, `count` u32 offsets.
+local function parse_directory(data, blk, wide)
+    local pos = blk.data_start
+    local count = wide and u32le(data, pos) or u16le(data, pos)
+    pos = pos + (wide and 4 or 2)
+    local list = {}
+    if count > 65535 or pos + count * 5 > blk.offset + blk.size then return list, 0 end
+    for i = 0, count - 1 do
+        list[i] = { room = u8(data, pos + i), offs = u32le(data, pos + count + i * 4) }
+    end
+    return list, count
+end
+
 local function parse_index(data)
     local result = { room_names = {} }
     local blocks = scan_blocks(data, 1, #data)
+
+    -- V8 (COMI) is recognised by its extra DRSC (room scripts) directory and
+    -- by 32-bit directory counts.
+    local wide = find_block(blocks, "DRSC") ~= nil
+    local maxs = find_block(blocks, "MAXS")
+    result.version = wide and 8 or ((maxs and maxs.size - 8 >= 30) and 6 or 5)
+    if find_block(blocks, "ANAM") then result.version = 7 end
 
     -- RNAM: room names (u8 id, 9 bytes name XOR 0xFF, ... until id==0)
     local rnam = find_block(blocks, "RNAM")
@@ -169,21 +193,24 @@ local function parse_index(data)
         end
     end
 
-    -- DROO: room directory (u16le count, count bytes file_numbers, count u32le offsets)
+    -- DROO: room directory. `room` is the data part / disk number holding the room.
     local droo = find_block(blocks, "DROO")
     if droo then
-        local pos = droo.data_start
-        local count = u16le(data, pos)
+        local list, count = parse_directory(data, droo, wide)
         result.room_count = count
         result.room_files = {}
         result.room_offsets = {}
         for i = 0, count - 1 do
-            result.room_files[i] = u8(data, pos + 2 + i)
-        end
-        for i = 0, count - 1 do
-            result.room_offsets[i] = u32le(data, pos + 2 + count + i * 4)
+            result.room_files[i] = list[i].room
+            result.room_offsets[i] = list[i].offs
         end
     end
+
+    -- Resource directories: room number + offset inside that room's data
+    local dcos = find_block(blocks, "DCOS")
+    if dcos then result.costumes = parse_directory(data, dcos, wide) end
+    local dsou = find_block(blocks, "DSOU")
+    if dsou then result.sounds = parse_directory(data, dsou, wide) end
 
     return result
 end
@@ -318,7 +345,13 @@ local function parse_room(data, room_offset, data_size)
     local rmhd = find_block(room_blocks, "RMHD")
     if rmhd then
         local version = u32le(data, rmhd.data_start)
-        if version >= 700 and version < 1000 then
+        if version >= 800 and version < 1000 then
+            -- V8: version, width, height, numObjects are all 32-bit
+            result.version     = version
+            result.width       = u32le(data, rmhd.data_start + 4)
+            result.height      = u32le(data, rmhd.data_start + 8)
+            result.num_objects = u32le(data, rmhd.data_start + 12)
+        elseif version >= 700 and version < 1000 then
             result.version     = version
             result.width       = u16le(data, rmhd.data_start + 4)
             result.height      = u16le(data, rmhd.data_start + 6)
@@ -374,6 +407,23 @@ local function parse_room(data, room_offset, data_size)
         end
     end
 
+    -- V8 background: IMAG -> WRAP -> (OFFS, SMAP) where the SMAP wraps its strip
+    -- data in BSTR -> WRAP -> OFFS. Strip offsets are relative to that inner
+    -- OFFS block, 24 bytes into the SMAP.
+    if not result.smap_offset then
+        local imag = find_block(room_blocks, "IMAG")
+        if imag then
+            local wrap = find_block(scan_blocks(data, imag.data_start, imag.offset + imag.size - 1), "WRAP")
+            if wrap then
+                local smap = find_block(scan_blocks(data, wrap.data_start, wrap.offset + wrap.size - 1), "SMAP")
+                if smap then
+                    result.smap_offset = smap.offset + 24
+                    result.smap_size   = smap.size - 24
+                end
+            end
+        end
+    end
+
     -- PALS (V6/V7): payload is a single WRAP block holding a padded OFFS
     -- directory followed by one APAL block per palette (768 bytes of RGB).
     -- The OFFS table cannot be used to count palettes -- its declared size is
@@ -413,7 +463,41 @@ local function parse_room(data, room_offset, data_size)
             local obj
             if imhd then
                 local version = u32le(data, imhd.data_start)
-                if version >= 700 and version < 1000 then
+                local v8_version = u32le(data, imhd.data_start + 40)
+                if v8_version >= 800 and v8_version < 1000 and imhd.size >= 88 then
+                    -- V8: name[32], 2 x u32, version, imageCount, x, y, width, height ...
+                    local name = data:sub(imhd.data_start, imhd.data_start + 31):gsub("%z.*", "")
+                    obj = {
+                        obj_id = #result.objects + 1,
+                        name   = name,
+                        states = u32le(data, imhd.data_start + 44),
+                        x      = u32le(data, imhd.data_start + 48),
+                        y      = u32le(data, imhd.data_start + 52),
+                        width  = u32le(data, imhd.data_start + 56),
+                        height = u32le(data, imhd.data_start + 60),
+                        images = {}
+                    }
+                    local imag = find_block(obim_blocks, "IMAG")
+                    local wrap = imag and find_block(
+                        scan_blocks(data, imag.data_start, imag.offset + imag.size - 1), "WRAP")
+                    if wrap then
+                        local state = 0
+                        for _, sm in ipairs(scan_blocks(data, wrap.data_start, wrap.offset + wrap.size - 1)) do
+                            if sm.tag == "SMAP" then
+                                state = state + 1
+                                if obj.width > 0 and obj.height > 0 then
+                                    obj.images[#obj.images + 1] = {
+                                        state       = state,
+                                        smap_offset = sm.offset + 24,
+                                        smap_size   = sm.size - 24,
+                                        width       = obj.width,
+                                        height      = obj.height
+                                    }
+                                end
+                            end
+                        end
+                    end
+                elseif version >= 700 and version < 1000 then
                     obj = {
                         obj_id = u16le(data, imhd.data_start + 4),
                         states = u16le(data, imhd.data_start + 6),
@@ -439,7 +523,7 @@ local function parse_room(data, room_offset, data_size)
                 end
             end
 
-            if obj then
+            if obj and #obj.images == 0 then
                 for _, im in ipairs(obim_blocks) do
                     local state = tonumber(im.tag:match("^IM(%d%d)$"))
                     if state then
@@ -936,9 +1020,18 @@ local function find_scumm_games(game_path)
         -- DROO file number 0 is the index file itself (which on multi-part
         -- releases such as Day of the Tentacle also holds some rooms).
         local data_files = { [0] = index_path }
+        -- Numbered parts follow the index extension: .000 -> .001 .002 ...,
+        -- .la0 -> .la1 .la2 ... (COMI's two discs), .sm0 -> .sm1 ...
+        local ext_stem = idx_ext:sub(2, -2)  -- "la", "sm" or "00"
         for num = 1, 15 do
-            local fname = (num == 1) and (base .. data_ext)
-                             or string.format("%s.%03d", base, num)
+            local fname
+            if num == 1 then
+                fname = base .. data_ext
+            elseif idx_ext == ".000" then
+                fname = string.format("%s.%03d", base, num)
+            else
+                fname = string.format("%s.%s%d", base, ext_stem, num)
+            end
             local part = name_map[fname:upper()]
             if part then data_files[num] = game_path .. "/" .. part end
         end
@@ -1103,24 +1196,28 @@ local function find_room_entry(rooms, room_id)
     return nil
 end
 
--- Read the block that starts at a file offset and return it decrypted.
+-- Read the block that starts at a file offset and return it decrypted. An LFLF
+-- wrapper is skipped so only its ROOM child is read (V7/V8 LFLFs also hold the
+-- costumes, sounds and scripts, which can be megabytes).
 local function read_block_at(path, key, offset)
     local f = file_open(path)
     if not f then return nil end
-    local header = xor_decrypt(file_read(f, offset, 8) or "", key)
-    file_close(f)
-    if #header < 8 then return nil end
+    local header = xor_decrypt(file_read(f, offset, 16) or "", key)
+    if #header < 8 then file_close(f); return nil end
 
     local tag = header:sub(1, 4)
     if tag ~= "ROOM" and tag ~= "LFLF" then
+        file_close(f)
         log_warn("Unexpected tag '" .. tag .. "' at room offset " .. offset)
         return nil
     end
 
-    local f2 = file_open(path)
-    if not f2 then return nil end
-    local raw = file_read(f2, offset, u32be(header, 5))
-    file_close(f2)
+    local start, size = offset, u32be(header, 5)
+    if tag == "LFLF" and #header >= 16 and header:sub(9, 12) == "ROOM" then
+        start, size = offset + 8, u32be(header, 13)
+    end
+    local raw = file_read(f, start, size)
+    file_close(f)
     return raw and xor_decrypt(raw, key) or nil
 end
 
@@ -1208,6 +1305,337 @@ local function sprite_children(game, room)
     return sprites
 end
 
+-- ── Resource location (costumes, sounds) ────────────────────────
+-- Directory entries (DCOS/DSOU) give a room number plus an offset relative to
+-- that room's start; the room itself is found through the part's room table.
+
+-- Standalone .LFL file of a room: key + 0-based offset of its ROOM block.
+local function lfl_locate(game, room_id)
+    local path = lfl_room_path(game, room_id)
+    local raw = read_whole_file(path)
+    if not raw then return nil end
+    for _, key in ipairs(KEY_CANDIDATES) do
+        local dec = (key == 0) and raw or xor_decrypt(raw, key)
+        local off = lfl_room_offset(dec, room_id)
+        if off then
+            local tag = tag4(dec, off + 1)
+            if tag == "ROOM" or tag == "LFLF" then return path, key, off end
+        end
+    end
+    return nil
+end
+
+local function res_origin(game, state, room_id)
+    state.origins = state.origins or {}
+    local cached = state.origins[room_id]
+    if cached ~= nil then return cached or nil end
+
+    local origin = false
+    local entry = find_room_entry(state.rooms, room_id)
+    if entry then
+        if game.data_path then
+            local part = game.data_files[entry.file or 0]
+            if part and entry.offset then
+                origin = { path = part, key = game.data_key, base = entry.offset }
+            end
+        else
+            local path, key, off = lfl_locate(game, room_id)
+            if path then origin = { path = path, key = key, base = off } end
+        end
+    end
+    state.origins[room_id] = origin
+    return origin or nil
+end
+
+-- `res` = { room =, offs = } from a directory block; rel is relative to the resource.
+local function read_res_range(game, state, res, rel, len)
+    local origin = res_origin(game, state, res.room)
+    if not origin then return nil end
+    local f = file_open(origin.path)
+    if not f then return nil end
+    local raw = file_read(f, origin.base + res.offs + rel, len)
+    file_close(f)
+    if not raw then return nil end
+    return xor_decrypt(raw, origin.key)
+end
+
+local function read_res_block(game, state, res, expect_tag)
+    local head = read_res_range(game, state, res, 0, 8)
+    if not head or #head < 8 then return nil end
+    if expect_tag and head:sub(1, #expect_tag) ~= expect_tag then return nil end
+    local size = u32be(head, 5)
+    if size < 8 or size > 64 * 1024 * 1024 then return nil end
+    return read_res_range(game, state, res, 0, size)
+end
+
+local function valid_resource(state, dir, id)
+    local res = dir and dir[id]
+    if not res or res.room == 0 then return nil end
+    if not find_room_entry(state.rooms, res.room) then return nil end
+    return res
+end
+
+-- ── Costume tree ────────────────────────────────────────────────
+
+-- Cheap summary of an AKOS costume: only block headers, AKHD and AKCH are read.
+local function akos_summary(game, state, res)
+    local head = read_res_range(game, state, res, 0, 8)
+    if not head or head:sub(1, 4) ~= "AKOS" then return nil end
+    local total = u32be(head, 5)
+    local pos, chores, cels = 8, nil, 0
+    local chore_count = 0
+    while pos + 8 <= total do
+        local h = read_res_range(game, state, res, pos, 8)
+        if not h or #h < 8 then break end
+        local tag, size = h:sub(1, 4), u32be(h, 5)
+        if size < 8 then break end
+        if tag == "AKHD" then
+            local p = read_res_range(game, state, res, pos + 8, 12)
+            if p then chore_count, cels = u16le(p, 5), u16le(p, 7) end
+        elseif tag == "AKCH" then
+            local p = read_res_range(game, state, res, pos + 8, size - 8)
+            chores = {}
+            for c = 0, chore_count - 1 do
+                if p and u16le(p, c * 2 + 1) ~= 0 then chores[#chores + 1] = c end
+            end
+            break
+        end
+        pos = pos + size
+    end
+    return { chores = chores or {}, cels = cels }
+end
+
+local function costume_children(game, state)
+    local dir = state.index.costumes
+    if not dir then return nil, 0 end
+    local nodes = {}
+    for id = 1, #dir do
+        local res = valid_resource(state, dir, id)
+        if res then
+            local children = {}
+            local label
+            local info = akos_summary(game, state, res)
+            if info then
+                -- V7/V8
+                if info.cels > 0 then
+                    children[#children + 1] = {
+                        id = string.format("cossheet:%s:%d", game.base_name, id),
+                        name = string.format("All cels (%d)", info.cels), type = "image" }
+                end
+                for _, c in ipairs(info.chores) do
+                    children[#children + 1] = {
+                        id = string.format("cosanim:%s:%d:%d", game.base_name, id, c),
+                        name = string.format("Chore %d", c), type = "animation" }
+                end
+                label = string.format("%d chore(s), %d cel(s)", #info.chores, info.cels)
+            else
+                local block = read_res_block(game, state, res, "COST")
+                local cost = block and Cost.parse(block, state.index.version)
+                if cost then
+                    children[#children + 1] = {
+                        id = string.format("cossheet:%s:%d", game.base_name, id),
+                        name = "All cels", type = "image" }
+                    local anims = cost:animations()
+                    for _, a in ipairs(anims) do
+                        children[#children + 1] = {
+                            id = string.format("cosanim:%s:%d:%d", game.base_name, id, a.id),
+                            name = a.name, type = "animation" }
+                    end
+                    label = string.format("%d animation(s)", #anims)
+                end
+            end
+            if #children > 0 then
+                nodes[#nodes + 1] = {
+                    id = string.format("cos:%s:%d", game.base_name, id),
+                    name = string.format("Costume %d (room %d) — %s", id, res.room, label or ""),
+                    type = "category", children = children }
+            end
+        end
+    end
+    return nodes, #nodes
+end
+
+-- ── Sound tree ──────────────────────────────────────────────────
+
+-- Tags of the chunks inside a SOUN resource (headers only).
+local function sound_tags(game, state, res)
+    local head = read_res_range(game, state, res, 0, 16)
+    if not head or #head < 16 or head:sub(1, 4) ~= "SOUN" then return nil end
+    local base = head:sub(9, 12)
+    if base ~= "SOU " then return { base } end
+    local total = u32be(head, 13)
+    local tags, pos = {}, 16
+    while pos < 16 + total and #tags < 16 do
+        local h = read_res_range(game, state, res, pos, 8)
+        if not h or #h < 8 then break end
+        tags[#tags + 1] = h:sub(1, 4)
+        pos = pos + 8 + u32be(h, 5)
+    end
+    return tags
+end
+
+local function tag_id(tag) return (tag:gsub(" ", "_")) end
+local function tag_from_id(id) return (id:gsub("_", " ")) end
+
+local function sound_children(game, state)
+    local dir = state.index.sounds
+    if not dir then return nil, 0 end
+    local nodes, listed, unplayable = {}, 0, 0
+    for id = 1, #dir do
+        local res = valid_resource(state, dir, id)
+        if res then
+            local tags = sound_tags(game, state, res)
+            local leaves = {}
+            for _, tag in ipairs(tags or {}) do
+                local kind = Sound.chunk_kind(tag)
+                if kind then
+                    leaves[#leaves + 1] = {
+                        id = string.format("snd:%s:%d:%s", game.base_name, id, tag_id(tag)),
+                        name = string.format("Sound %d — %s", id, Sound.device_name(tag)),
+                        type = kind }
+                end
+            end
+            if #leaves == 1 then
+                nodes[#nodes + 1] = leaves[1]
+                listed = listed + 1
+            elseif #leaves > 1 then
+                nodes[#nodes + 1] = {
+                    id = string.format("sound:%s:%d", game.base_name, id),
+                    name = string.format("Sound %d (%d versions)", id, #leaves),
+                    type = "category", children = leaves }
+                listed = listed + 1
+            elseif tags then
+                unplayable = unplayable + 1
+            end
+        end
+    end
+    return nodes, listed, unplayable
+end
+
+-- ── Audio bundles (.BUN) ────────────────────────────────────────
+
+local bundle_cache = {}
+
+local function find_files_with_ext(game_path, ext)
+    local paths = {}
+    local function scan(dir)
+        for _, name in ipairs(list_files(dir)) do
+            if name:upper():match("%." .. ext .. "$") then paths[#paths + 1] = dir .. "/" .. name end
+        end
+    end
+    scan(game_path)
+    for _, sub in ipairs(list_files(game_path)) do
+        local up = sub:upper()
+        if not up:match("%.") then scan(game_path .. "/" .. sub) end
+    end
+    return paths
+end
+
+local function find_bundle_paths(game_path)
+    return find_files_with_ext(game_path, "BUN")
+end
+
+local function get_bundle(path)
+    local b = bundle_cache[path]
+    if b == nil then
+        b = Sound.read_bundle(path) or false
+        bundle_cache[path] = b
+    end
+    return b or nil
+end
+
+local sou_cache = {}
+
+local function find_sou_paths(game_path)
+    local paths = {}
+    for _, name in ipairs(list_files(game_path)) do
+        if name:upper():match("%.SOU$") then paths[#paths + 1] = game_path .. "/" .. name end
+    end
+    return paths
+end
+
+local function get_sou(path)
+    local v = sou_cache[path]
+    if v == nil then
+        v = Sound.read_sou(path) or false
+        sou_cache[path] = v
+    end
+    return v or nil
+end
+
+local function font_resources(game_path)
+    local leaves = {}
+    for _, path in ipairs(find_files_with_ext(game_path, "NUT")) do
+        local name = path:match("([^/\\]+)$")
+        leaves[#leaves + 1] = { id = "nut:" .. name, name = name, type = "image" }
+    end
+    if #leaves == 0 then return nil end
+    return { id = "fonts_nut", name = string.format("Fonts (NUT, %d)", #leaves),
+             type = "category", children = leaves }
+end
+
+local function bundle_resources(game_path)
+    local nodes = {}
+    for _, path in ipairs(find_sou_paths(game_path)) do
+        local sou = get_sou(path)
+        if sou then
+            local groups, children = {}, {}
+            for i = 1, #sou.clips do
+                local g = math.floor((i - 1) / 200)
+                groups[g] = groups[g] or {}
+                table.insert(groups[g], { id = string.format("sou:%s:%d", sou.name, i),
+                    name = string.format("Clip %d", i), type = "sound" })
+            end
+            for g = 0, math.floor(#sou.clips / 200) do
+                if groups[g] then
+                    children[#children + 1] = {
+                        id = string.format("sougrp:%s:%d", sou.name, g),
+                        name = string.format("Clips %d-%d", g * 200 + 1, g * 200 + #groups[g]),
+                        type = "category", children = groups[g] }
+                end
+            end
+            nodes[#nodes + 1] = { id = "souarc:" .. sou.name,
+                name = string.format("%s — speech (%d clips)", sou.name, #sou.clips),
+                type = "category", children = children }
+        end
+    end
+    for _, path in ipairs(find_bundle_paths(game_path)) do
+        local bundle = get_bundle(path)
+        if bundle then
+            local leaves = {}
+            for i, e in ipairs(bundle.entries) do
+                leaves[#leaves + 1] = {
+                    id = string.format("bun:%s:%d", bundle.name, i),
+                    name = e.name, type = "sound" }
+            end
+            -- Large bundles (thousands of voice lines) are grouped by name prefix
+            local children = leaves
+            if #leaves > 300 then
+                local groups, order = {}, {}
+                for _, leaf in ipairs(leaves) do
+                    local key = leaf.name:sub(1, 3):upper()
+                    if not groups[key] then groups[key] = {}; order[#order + 1] = key end
+                    table.insert(groups[key], leaf)
+                end
+                table.sort(order)
+                children = {}
+                for _, key in ipairs(order) do
+                    children[#children + 1] = {
+                        id = string.format("bungrp:%s:%s", bundle.name, key),
+                        name = string.format("%s* (%d)", key, #groups[key]),
+                        type = "category", children = groups[key] }
+                end
+            end
+            nodes[#nodes + 1] = {
+                id = "bundle:" .. bundle.name,
+                name = string.format("%s — %s bundle (%d sounds)", bundle.name,
+                    Sound.bundle_kind(bundle.name), #bundle.entries),
+                type = "category", children = children }
+        end
+    end
+    return nodes
+end
+
 -- ── Resource tree ───────────────────────────────────────────────
 
 function engine.get_resources(game_path)
@@ -1264,14 +1692,45 @@ function engine.get_resources(game_path)
                 }
             end
 
+            local game_children = {
+                { id = "rooms_" .. game.base_name,
+                  name = string.format("Rooms (%d)", #room_children),
+                  type = "category", children = room_children }
+            }
+
+            local costumes, ncos = costume_children(game, state)
+            if costumes and ncos > 0 then
+                game_children[#game_children + 1] = {
+                    id = "costumes_" .. game.base_name,
+                    name = string.format("Costumes / actor sprites (%d)", ncos),
+                    type = "category", children = costumes }
+            end
+
+            local sounds, nsnd, skipped = sound_children(game, state)
+            if sounds and nsnd > 0 then
+                local label = string.format("Sounds / music (%d)", nsnd)
+                if skipped and skipped > 0 then
+                    label = label .. string.format(" — %d AdLib/PC-speaker only not shown", skipped)
+                end
+                game_children[#game_children + 1] = {
+                    id = "sounds_" .. game.base_name, name = label,
+                    type = "category", children = sounds }
+            end
+
             resources[#resources + 1] = {
                 id = "game_" .. game.base_name,
                 name = string.format("%s (%d rooms)", game.base_name, #state.rooms),
                 type = "category",
-                children = room_children
+                children = game_children
             }
         end
     end
+
+    for _, node in ipairs(bundle_resources(game_path)) do
+        resources[#resources + 1] = node
+    end
+    local fonts = font_resources(game_path)
+    if fonts then resources[#resources + 1] = fonts end
 
     return resources
 end
@@ -1357,7 +1816,111 @@ local function room_location(game, room_id, room_entry)
          or "") .. " is missing"
 end
 
+-- ── Costume / sound loading ─────────────────────────────────────
+
+local function load_costume_resource(game_path, resource_id, palette_id)
+    local kind, base, cid, extra = resource_id:match("^(%a+):([^:]+):(%d+):?(%d*)$")
+    local game = find_game(game_path, base)
+    if not game then return nil end
+    local state = get_game_state(game)
+    cid = tonumber(cid)
+    local res = valid_resource(state, state.index.costumes, cid)
+    if not res then return nil end
+
+    local block = read_res_block(game, state, res)
+    local cost = block and Cost.parse(block, state.index.version)
+    if not cost then
+        return { type = "text", text = "Costume " .. cid .. " could not be parsed" }
+    end
+
+    -- Sprites use the palette of the room that stores them unless the user picked one
+    local palette = default_palette()
+    local room_data = read_room(game, res.room)
+    local room_info = room_data and parse_room(room_data, 0, #room_data)
+    if room_info then palette = resolve_palette(game, res.room, room_info, palette_id) end
+
+    if kind == "cossheet" then
+        local img, w, h, shown, total = cost:render_sheet(palette)
+        if not img then return { type = "text", text = "Costume " .. cid .. " has no decodable cels" } end
+        local more = (shown and total and shown < total)
+            and string.format(" (first %d of %d)", shown, total) or ""
+        return { type = "image", image = img, width = w, height = h,
+                 description = string.format("Costume %d (room %d) — all cels%s, %dx%d",
+                     cid, res.room, more, w, h) }
+    end
+
+    local anim = tonumber(extra)
+    local handle, nframes, w, h, animated = cost:render_animation(anim, palette)
+    if not handle then
+        return { type = "text", text = string.format("Costume %d animation %d has nothing to draw", cid, anim) }
+    end
+    local desc = string.format("Costume %d, %s %d — %d frame(s), %dx%d (room %d palette)",
+        cid, cost.kind == "akos" and "chore" or "animation", anim, nframes, w, h, res.room)
+    if animated then
+        return { type = "animation", animation = handle, delay_ms = 110, description = desc }
+    end
+    return { type = "image", image = handle, width = w, height = h, description = desc }
+end
+
+local function load_sound_resource(game_path, resource_id)
+    local base, sid, tag = resource_id:match("^snd:([^:]+):(%d+):(.+)$")
+    local game = find_game(game_path, base)
+    if not game then return nil end
+    local state = get_game_state(game)
+    sid = tonumber(sid)
+    local res = valid_resource(state, state.index.sounds, sid)
+    if not res then return nil end
+    local block = read_res_block(game, state, res, "SOUN")
+    local info = block and Sound.parse_soun(block)
+    if not info then return { type = "text", text = "Sound " .. sid .. " could not be read" } end
+    local out = Sound.load_chunk(info, tag_from_id(tag), string.format("Sound %d (room %d)", sid, res.room))
+    return out or { type = "text", text = "Sound " .. sid .. " has no " .. tag_from_id(tag) .. " data" }
+end
+
+local function load_bundle_resource(game_path, resource_id)
+    local name, index = resource_id:match("^bun:(.+):(%d+)$")
+    for _, path in ipairs(find_bundle_paths(game_path)) do
+        if path:match("([^/\\]+)$") == name then
+            local bundle = get_bundle(path)
+            if bundle then return Sound.load_bundle_entry(bundle, tonumber(index)) end
+        end
+    end
+    return nil
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
+    local prefix = resource_id:match("^(%a+):")
+    if prefix == "cossheet" or prefix == "cosanim" then
+        return load_costume_resource(game_path, resource_id, palette_id)
+    elseif prefix == "snd" then
+        return load_sound_resource(game_path, resource_id)
+    elseif prefix == "bun" then
+        return load_bundle_resource(game_path, resource_id)
+    elseif prefix == "nut" then
+        local name = resource_id:match("^nut:(.+)$")
+        for _, path in ipairs(find_files_with_ext(game_path, "NUT")) do
+            if path:match("([^/\\\\]+)$") == name then
+                local data = read_whole_file(path)
+                local font = data and Nut.parse(data)
+                if not font then return { type = "text", text = name .. ": not a NUT font" } end
+                local img, w, h = Nut.render(font)
+                if not img then return { type = "text", text = name .. ": no glyphs" } end
+                return { type = "image", image = img, width = w, height = h,
+                         description = string.format("%s — %d glyphs", name, #font.glyphs) }
+            end
+        end
+        return nil
+    elseif prefix == "sou" then
+        local name, index = resource_id:match("^sou:(.+):(%d+)$")
+        for _, path in ipairs(find_sou_paths(game_path)) do
+            if path:match("([^/\\\\]+)$") == name then
+                local sou = get_sou(path)
+                if sou then return Sound.load_sou_clip(sou, tonumber(index)) end
+            end
+        end
+        return nil
+    end
+
     local id = parse_resource_id(resource_id)
     if not id then
         log_warn("Unknown resource ID: " .. resource_id)

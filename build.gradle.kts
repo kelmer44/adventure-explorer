@@ -34,3 +34,11 @@ compose.desktop {
         }
     }
 }
+
+// Developer helper: ./gradlew devcli --args="tree /path/to/game"
+tasks.register<JavaExec>("devcli") {
+    group = "application"
+    description = "Headless resource dump tool for engine scripts"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("adventureexplorer.DevCliKt")
+}
