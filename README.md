@@ -46,7 +46,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object Sprites, Actor Costumes (animated), Fonts (NUT), Music (MIDI + iMUSE), Sound Effects, Speech | ✅ Working |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
-| The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes | ✅ Working |
+| The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes, Object Sprites, Animations, Sound Effects, Speech | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |

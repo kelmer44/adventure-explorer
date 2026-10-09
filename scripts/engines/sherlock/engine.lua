@@ -7,6 +7,8 @@
 -- Resource layout:
 --   Scalpel: RRM files are standalone (resNN.rrm) or inside vgs.lib (CD).
 --            Background (320x138) and palette (768 bytes) at END of RRM.
+--            Object sprites and cAnimations are embedded in each RRM;
+--            global sprites live in vgs.lib / portrait.lib.
 --   Tattoo:  RRM files are standalone (resNN.rrm).
 --            BgFileHeader (17 bytes) → palette (768) → background (LZSS).
 --
@@ -17,7 +19,7 @@ local engine = {}
 engine.name        = "The Lost Files of Sherlock Holmes"
 engine.id          = "sherlock"
 engine.description = "The Lost Files of Sherlock Holmes (1992/1996, Electronic Arts)"
-engine.version     = "2.0"
+engine.version     = "2.1"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -29,6 +31,15 @@ local function u32le(data, pos)
          + data:byte(pos + 1) * 256
          + data:byte(pos + 2) * 65536
          + data:byte(pos + 3) * 16777216
+end
+local function u16be(data, pos)
+    return data:byte(pos) * 256 + data:byte(pos + 1)
+end
+local function u32be(data, pos)
+    return data:byte(pos) * 16777216
+         + data:byte(pos + 1) * 65536
+         + data:byte(pos + 2) * 256
+         + data:byte(pos + 3)
 end
 
 -- ============================================================================
@@ -237,6 +248,512 @@ local function read_rrm(game_path, rrm_name)
 end
 
 -- ============================================================================
+-- ImageFile decoding (PC Sherlock image/sprite blobs)
+-- Header per frame: u16le (w-1), u16le (h-1), u8 paletteBase,
+--                   u8 rleFlag, u8 offsetX, u8 offsetY
+--   paletteBase != 0 : nibble-packed, size = w*h/2
+--   rleFlag != 0     : u16le (frameSize) + u8 rleMarker, data = frameSize - 11
+--   otherwise        : raw, size = w*h
+-- An optional palette block (390x2 frames + "VGA " signature + 768 bytes)
+-- may precede the first frame.
+-- Returns: palette (768 entries, 1-based) or nil, list of
+--          { w, h, x, y, pixels = { indices (0-based) } }
+-- ============================================================================
+
+local function decode_image(data)
+    local pal, frames = nil, {}
+    if not data or #data < 8 then return nil, frames end
+
+    local pos = 1
+    local w = u16le(data, pos) + 1
+    local h = u16le(data, pos + 2) + 1
+
+    -- Optional embedded VGA palette
+    if w == 390 and h == 2 and u8(data, pos + 4) == 0 and u8(data, pos + 5) == 0
+       and u8(data, pos + 6) == 0 and u8(data, pos + 7) == 0
+       and data:sub(9, 12) == "VGA " then
+        pal = {}
+        local p = 21
+        for i = 0, 255 do
+            local r = (u8(data, p + i * 3 + 0) or 0) * 255
+            local g = (u8(data, p + i * 3 + 1) or 0) * 255
+            local b = (u8(data, p + i * 3 + 2) or 0) * 255
+            pal[i * 3 + 1] = math.floor(r / 63 + 0.5)
+            pal[i * 3 + 2] = math.floor(g / 63 + 0.5)
+            pal[i * 3 + 3] = math.floor(b / 63 + 0.5)
+        end
+        pos = 789
+    end
+
+    while pos + 7 <= #data do
+        local fw = u16le(data, pos) + 1
+        local fh = u16le(data, pos + 2) + 1
+        local pb = u8(data, pos + 4)
+        local rle = u8(data, pos + 5)
+        local ox = u8(data, pos + 6)
+        local oy = u8(data, pos + 7)
+        pos = pos + 8
+
+        -- Sentinel frames (title screens) use inverted (-320)x(-200) sizes
+        if fw > 32768 or fh > 32768 then break end
+
+        local count = fw * fh
+        local pixels = {}
+        local ok = true
+
+        if pb ~= 0 then
+            -- Nibble-packed (4bpp)
+            local size = math.floor(count / 2)
+            if pos + size - 1 > #data then
+                ok = false
+            else
+                local k = 0
+                for i = 0, size - 1 do
+                    local b = u8(data, pos + i)
+                    k = k + 1; pixels[k] = b % 16
+                    k = k + 1; pixels[k] = math.floor(b / 16)
+                end
+                pos = pos + size
+            end
+        elseif rle ~= 0 then
+            -- RLE with marker byte
+            local raw = u16le(data, pos)
+            local marker = u8(data, pos + 2)
+            pos = pos + 3
+            local size = raw - 11
+            if size < 0 or pos + size - 1 > #data then
+                ok = false
+            else
+                local i = 0
+                local rem = count
+                while rem > 0 and i < size do
+                    local b = u8(data, pos + i)
+                    if b == marker and i + 2 < size then
+                        local c = u8(data, pos + i + 1)
+                        local run = math.min(u8(data, pos + i + 2), rem)
+                        i = i + 3
+                        for _ = 1, run do pixels[#pixels + 1] = c end
+                        rem = rem - run
+                    else
+                        pixels[#pixels + 1] = b
+                        i = i + 1
+                        rem = rem - 1
+                    end
+                end
+                pos = pos + size
+            end
+        else
+            -- Raw
+            if pos + count - 1 > #data then
+                ok = false
+            else
+                for i = 0, count - 1 do pixels[i + 1] = u8(data, pos + i) end
+                pos = pos + count
+            end
+        end
+
+        if not ok then break end
+        frames[#frames + 1] = { w = fw, h = fh, x = ox, y = oy, pixels = pixels }
+    end
+
+    return pal, frames
+end
+
+-- ============================================================================
+-- Scalpel RRM object sprites (uncompressed, version != 10)
+-- ============================================================================
+
+local function scalpel_room_image_names(data)
+    if not data or #data < 44 or u8(data, 40) == 10 then return nil end
+    local bg_off = u32le(data, 41)
+    if bg_off + 12 > #data then return nil end
+    local bh = bg_off + 1
+    local num_structs = u16le(data, bh)
+    local num_images = u16le(data, bh + 2)
+    if num_structs < 1 or num_images < 1 then return nil end
+    if bh + 12 + num_structs * 14 > #data then return nil end
+
+    local list = {}
+    for i = 0, num_images - 1 do
+        local p = bh + 12 + i * 14 + 5
+        local name = ""
+        for c = 0, 8 do
+            local b = u8(data, p + c)
+            if not b or b == 0 then break end
+            name = name .. string.char(b)
+        end
+        list[#list + 1] = { name = name, index = i }
+    end
+    return list
+end
+
+local function scalpel_room_image_blob(data, index)
+    if not data or #data < 44 or u8(data, 40) == 10 then return nil end
+    local bg_off = u32le(data, 41)
+    if bg_off + 12 > #data then return nil end
+    local bh = bg_off + 1
+    local num_structs = u16le(data, bh)
+    local num_images = u16le(data, bh + 2)
+    local desc_size = u16le(data, bh + 6)
+    local seq_size = u16le(data, bh + 8)
+    if index < 0 or index >= num_images then return nil end
+    if bh + 12 + num_structs * 14 > #data then return nil end
+
+    local info = bh + 12
+    local start = info + num_structs * 14 + num_structs * 569 + desc_size + seq_size
+    for i = 0, index - 1 do
+        start = start + u32le(data, info + i * 14)
+    end
+    local size = u32le(data, info + index * 14)
+    if size < 1 or start + size - 1 > #data then return nil end
+    return data:sub(start, start + size - 1)
+end
+
+-- ============================================================================
+-- Room palette (Scalpel uncompressed: 768 bytes before the 320x138 background)
+-- ============================================================================
+
+local function scalpel_palette(data)
+    if not data or #data < 768 then return nil end
+    local pal_start = #data - (320 * 138) - 768 + 1
+    if pal_start < 1 then return nil end
+    local palette = {}
+    for i = 0, 255 do
+        local r = u8(data, pal_start + i * 3 + 0) or 0
+        local g = u8(data, pal_start + i * 3 + 1) or 0
+        local b = u8(data, pal_start + i * 3 + 2) or 0
+        palette[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
+    end
+    return palette
+end
+
+local function first_room_base(game_path)
+    local best, best_num = nil, nil
+    local function consider(nm)
+        local base = nm:lower():match("^(res%d+)%.rrm$")
+        if base then
+            local n = tonumber(base:match("(%d+)")) or 0
+            if not best_num or n < best_num then best, best_num = base, n end
+        end
+    end
+    local files = list_files(game_path)
+    if files then for _, fn in ipairs(files) do consider(fn) end end
+    local f = open_file(game_path, "vgs.lib")
+    if f then
+        local entries = parse_lib(f)
+        file_close(f)
+        if entries then for _, e in ipairs(entries) do consider(e.name) end end
+    end
+    return best
+end
+
+local function first_palette_id(game_path)
+    local base = first_room_base(game_path)
+    if base then return "pal_" .. base end
+    return nil
+end
+
+local function resolve_palette(game_path, palette_id)
+    if palette_id then
+        local prefix, base = palette_id:match("^(%a+)_(.+)$")
+        if prefix == "pal" and base then
+            local palette = scalpel_palette(read_rrm(game_path, base .. ".rrm"))
+            if palette then return palette end
+        end
+    end
+    local base = first_room_base(game_path)
+    if base then return scalpel_palette(read_rrm(game_path, base .. ".rrm")) end
+    return nil
+end
+
+local function build_sprite_resource(game_path, palette_id, embedded, frames, label)
+    if not frames or #frames == 0 then return nil end
+
+    local palette = embedded or resolve_palette(game_path, palette_id)
+    if not palette then
+        palette = {}
+        for i = 1, 768 do palette[i] = 0 end
+    end
+
+    local handles = {}
+    for i, fr in ipairs(frames) do
+        handles[i] = image_create_indexed(fr.w, fr.h, fr.pixels, palette)
+    end
+    if #handles == 0 then return nil end
+
+    local first = frames[1]
+    local desc = string.format("%s - %dx%d, %d frame%s",
+        label or "sprite", first.w, first.h, #handles,
+        #handles == 1 and "" or "s")
+
+    if #handles == 1 then
+        return { type = "image", image = handles[1], description = desc }
+    end
+    local anim = animation_create(handles, 150)
+    if not anim then
+        return { type = "image", image = handles[1], description = desc }
+    end
+    return { type = "animation", animation = anim, delay_ms = 150, description = desc }
+end
+
+-- Global interface sprites, in display order
+local UI_SPRITES = {
+    { key = "controls", file = "CONTROLS.VGS", name = "Controls Bar" },
+    { key = "darts",    file = "DARTS.VGS",    name = "Darts Board" },
+    { key = "bigmap",   file = "BIGMAP.VGS",   name = "Big Map" },
+    { key = "mapicon",  file = "MAPICON.VGS",  name = "Map Icon" },
+    { key = "overicon", file = "OVERICON.VGS", name = "Overview Icon" },
+    { key = "omouse",   file = "OMOUSE.VGS",   name = "Mouse (Alt)" },
+    { key = "rmouse",   file = "RMOUSE.VGS",   name = "Mouse" },
+    { key = "menu",     file = "MENU.ALL",     name = "Menu" },
+    { key = "install",  file = "INSTALL.LBV",  name = "Install Screen" },
+}
+
+local function load_vgs_sprite(game_path, lib_name, entry_name, palette_id, label)
+    local f = open_file(game_path, lib_name)
+    if not f then return nil end
+    local entries = parse_lib(f)
+    if not entries then file_close(f); return nil end
+    for _, e in ipairs(entries) do
+        if e.name:upper() == entry_name:upper() then
+            local raw = file_read(f, e.offset, e.size)
+            file_close(f)
+            local pal, frames = decode_image(decompress_lzv(raw))
+            return build_sprite_resource(game_path, palette_id, pal, frames, label)
+        end
+    end
+    file_close(f)
+    return nil
+end
+
+local function load_sprite(game_path, basename, palette_id)
+    -- Per-room object sprite: <room>_<index>
+    local room, index = basename:match("^(res%d+)_(%d+)$")
+    if room and index then
+        local data = read_rrm(game_path, room .. ".rrm")
+        local blob = scalpel_room_image_blob(data, tonumber(index))
+        if not blob then return nil end
+        local pal, frames = decode_image(blob)
+        return build_sprite_resource(game_path, palette_id or ("pal_" .. room), pal, frames, room .. " sprite")
+    end
+
+    if basename == "walk" then
+        return load_vgs_sprite(game_path, "vgs.lib", "WALK.VGS", palette_id, "Walk cycle")
+    end
+
+    local portrait = basename:match("^portrait_(.+)$")
+    if portrait then
+        return load_vgs_sprite(game_path, "portrait.lib", portrait .. ".VGS", palette_id, portrait)
+    end
+
+    local item = basename:match("^item(%d+)$")
+    if item then
+        return load_vgs_sprite(game_path, "vgs.lib", "ITEM" .. item .. ".VGS", palette_id, "Item " .. item)
+    end
+
+    local ui = basename:match("^ui_(.+)$")
+    if ui then
+        for _, def in ipairs(UI_SPRITES) do
+            if def.key == ui then
+                return load_vgs_sprite(game_path, "vgs.lib", def.file, palette_id, def.name)
+            end
+        end
+    end
+
+    return nil
+end
+
+-- ============================================================================
+-- Scalpel speech / sound effects (.SND): Creative ADPCM 4-bit
+-- ============================================================================
+
+local ADPCM_SCALE = {
+    0,  1,  2,  3,  4,  5,  6,  7,  0,  -1,  -2,  -3,  -4,  -5,  -6,  -7,
+    1,  3,  5,  7,  9, 11, 13, 15, -1,  -3,  -5,  -7,  -9, -11, -13, -15,
+    2,  6, 10, 14, 18, 22, 26, 30, -2,  -6, -10, -14, -18, -22, -26, -30,
+    4, 12, 20, 28, 36, 44, 52, 60, -4, -12, -20, -28, -36, -44, -52, -60
+}
+
+local ADPCM_ADJUST = {
+    0, 0, 0, 0, 0, 16, 16, 16,
+    0, 0, 0, 0, 0, 16, 16, 16,
+    240, 0, 0, 0, 0, 16, 16, 16,
+    240, 0, 0, 0, 0, 16, 16, 16,
+    240, 0, 0, 0, 0, 16, 16, 16,
+    240, 0, 0, 0, 0, 16, 16, 16,
+    240, 0, 0, 0, 0,  0,  0,  0,
+    240, 0, 0, 0, 0,  0,  0,  0
+}
+
+local SOUND_LIBS = {
+    { key = "snd",   file = "snd.snd",      label = "Sound Effects (SND.SND)" },
+    { key = "title", file = "title.snd",    label = "Title (TITLE.SND)" },
+    { key = "epi",   file = "epilogue.snd", label = "Epilogue (EPILOGUE.SND)" },
+}
+
+local function decode_adpcm_sample(sample, reference, scale)
+    local samp = sample + scale
+    if samp < 0 then samp = 0 elseif samp > 63 then samp = 63 end
+
+    local ref = reference + ADPCM_SCALE[samp + 1]
+    if ref < 0 then ref = 0 elseif ref > 255 then ref = 255 end
+
+    scale = (scale + ADPCM_ADJUST[samp + 1]) % 256
+    return ref, scale
+end
+
+local function decode_snd(data, name)
+    if not data or #data < 9 then return nil end
+    local size = u32be(data, 3)
+    local rate = u16be(data, 7)
+    local available = #data - 8
+    if size > available then size = available end
+    if size < 2 then return nil end
+
+    -- The doorbell and fog horn at Lord Brumwell's are stored at 1100 Hz
+    if (name == "JFCHIME.SND" or name == "JFFOG.SND") and rate == 1100 then
+        rate = 11000
+    end
+
+    local reference = u8(data, 9)
+    local scale = 0
+    local out = {}
+    local n = 0
+    for i = 10, 9 + size - 1 do
+        local b = u8(data, i)
+        reference, scale = decode_adpcm_sample(math.floor(b / 16), reference, scale)
+        n = n + 1; out[n] = string.char(reference)
+        reference, scale = decode_adpcm_sample(b % 16, reference, scale)
+        n = n + 1; out[n] = string.char(reference)
+    end
+    if n == 0 then return nil end
+
+    local pcm = table.concat(out)
+    local handle = sound_create_pcm(rate, 8, 1, false, pcm)
+    if not handle then return nil end
+    return {
+        type = "sound", sound = handle,
+        description = string.format("%s - %d Hz, %.2f s", name or "sound", rate, n / rate)
+    }
+end
+
+local function load_sound(game_path, basename)
+    local key, idx = basename:match("^(%a+)_(%d+)$")
+    if not key then return nil end
+    local lib = nil
+    for _, l in ipairs(SOUND_LIBS) do
+        if l.key == key then lib = l end
+    end
+    if not lib then return nil end
+
+    local f = open_file(game_path, lib.file)
+    if not f then return nil end
+    local entries = parse_lib(f)
+    if not entries then file_close(f); return nil end
+    local entry = entries[tonumber(idx) + 1]
+    if not entry then file_close(f); return nil end
+    local data = file_read(f, entry.offset, entry.size)
+    file_close(f)
+    return decode_snd(data, entry.name)
+end
+
+-- Global sprite + sound resource tree helpers
+local function build_global_sprites(game_path)
+    local cat = { id = "sprites", name = "Sprites", type = "category", children = {} }
+
+    local vgs, port = {}, {}
+    local function load_names(lib_name, dest)
+        local f = open_file(game_path, lib_name)
+        if not f then return end
+        local entries = parse_lib(f)
+        file_close(f)
+        if entries then
+            for _, e in ipairs(entries) do dest[e.name:upper()] = e.size end
+        end
+    end
+    load_names("vgs.lib", vgs)
+    load_names("portrait.lib", port)
+
+    if vgs["WALK.VGS"] then
+        cat.children[#cat.children + 1] = {
+            id = "sprchar", name = "Characters", type = "category",
+            children = { { id = "spr_walk", name = "Walk Cycles", type = "image" } }
+        }
+    end
+
+    local portraits = {}
+    for name, size in pairs(port) do
+        if size and size > 32 then portraits[#portraits + 1] = name end
+    end
+    if #portraits > 0 then
+        table.sort(portraits)
+        local sub = { id = "sprport", name = string.format("Portraits (%d)", #portraits), type = "category", children = {} }
+        for _, name in ipairs(portraits) do
+            local key = name:match("^(.+)%.VGS$") or name
+            sub.children[#sub.children + 1] = { id = "spr_portrait_" .. key, name = key, type = "image" }
+        end
+        cat.children[#cat.children + 1] = sub
+    end
+
+    local items = {}
+    for i = 1, 99 do
+        if vgs[string.format("ITEM%02d.VGS", i)] then items[#items + 1] = i end
+    end
+    if #items > 0 then
+        local sub = { id = "spritem", name = string.format("Inventory Items (%d)", #items), type = "category", children = {} }
+        for _, i in ipairs(items) do
+            sub.children[#sub.children + 1] = {
+                id = string.format("spr_item%02d", i),
+                name = string.format("Item %02d", i), type = "image"
+            }
+        end
+        cat.children[#cat.children + 1] = sub
+    end
+
+    local sub = nil
+    for _, def in ipairs(UI_SPRITES) do
+        if vgs[def.file] then
+            if not sub then
+                sub = { id = "sprui", name = "Interface", type = "category", children = {} }
+                cat.children[#cat.children + 1] = sub
+            end
+            sub.children[#sub.children + 1] = { id = "spr_ui_" .. def.key, name = def.name, type = "image" }
+        end
+    end
+
+    return cat
+end
+
+local function build_sound_category(game_path)
+    local cat = { id = "sounds", name = "Sounds", type = "category", children = {} }
+    for _, lib in ipairs(SOUND_LIBS) do
+        local f = open_file(game_path, lib.file)
+        if f then
+            local entries = parse_lib(f)
+            file_close(f)
+            if entries and #entries > 0 then
+                local sub = {
+                    id = "sndcat_" .. lib.key,
+                    name = string.format("%s (%d)", lib.label, #entries),
+                    type = "category", children = {}
+                }
+                for i, e in ipairs(entries) do
+                    sub.children[#sub.children + 1] = {
+                        id = string.format("snd_%s_%d", lib.key, i - 1),
+                        name = (e.name:gsub("%.SND$", "")), type = "sound"
+                    }
+                end
+                cat.children[#cat.children + 1] = sub
+            end
+        end
+    end
+    if #cat.children == 0 then return nil end
+    return cat
+end
+
+-- ============================================================================
 -- Resource tree: enumerate resNN.rrm files
 -- Scan game directory for standalone RRMs, also check VGS.LIB
 -- ============================================================================
@@ -312,11 +829,46 @@ function engine.get_resources(game_path)
             name = "Palette",
             type = "palette"
         }
+
+        -- Per-room object sprites (Scalpel uncompressed RRMs only)
+        if not tattoo then
+            local images = scalpel_room_image_names(read_rrm(game_path, rrm_name))
+            if images and #images > 0 then
+                local sprites = {
+                    id       = "sprcat_" .. basename:lower(),
+                    name     = string.format("Sprites (%d)", #images),
+                    type     = "category",
+                    children = {}
+                }
+                for _, img in ipairs(images) do
+                    sprites.children[#sprites.children + 1] = {
+                        id   = string.format("sp_%s_%d", basename:lower(), img.index),
+                        name = img.name ~= "" and img.name or string.format("Sprite %d", img.index + 1),
+                        type = "image"
+                    }
+                end
+                room_node.children[#room_node.children + 1] = sprites
+            end
+        end
+
         rooms_cat.children[#rooms_cat.children + 1] = room_node
     end
 
     if #rooms_cat.children > 0 then
         resources[#resources + 1] = rooms_cat
+    end
+
+    -- Global sprites and sounds (Serrated Scalpel only)
+    if not tattoo then
+        local sprites = build_global_sprites(game_path)
+        if sprites and #sprites.children > 0 then
+            resources[#resources + 1] = sprites
+        end
+
+        local sounds = build_sound_category(game_path)
+        if sounds then
+            resources[#resources + 1] = sounds
+        end
     end
 
     return resources
@@ -326,11 +878,25 @@ end
 -- Resource loading dispatch
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id)
+function engine.load_resource(game_path, resource_id, palette_id)
     local prefix, basename = resource_id:match("^(%a+)_(.+)$")
     if not prefix or not basename then return nil end
     if prefix == "bg"  then return load_background(game_path, basename) end
     if prefix == "pal" then return load_palette_swatch(game_path, basename) end
+    if prefix == "sp"  then return load_sprite(game_path, basename, palette_id) end
+    if prefix == "spr" then return load_sprite(game_path, basename, palette_id) end
+    if prefix == "snd" then return load_sound(game_path, basename) end
+    return nil
+end
+
+-- ============================================================================
+-- Default palette pairing for sprites
+-- ============================================================================
+
+function engine.default_palette(game_path, resource_id)
+    local room = resource_id:match("^sp_(res%d+)_%d+$")
+    if room then return "pal_" .. room end
+    if resource_id:match("^spr_") then return first_palette_id(game_path) end
     return nil
 end
 

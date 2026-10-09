@@ -27,6 +27,21 @@ Source code for some tools in ags/tools/holmes
 
 games are located in ags/holmes and ags/holmes2
 
+Sprite/audio format notes (Serrated Scalpel):
+- Per-room object sprites and cAnimations are embedded in each uncompressed
+  (version != 10) RRM after the shapes/desc/seq sections; each blob's size comes
+  from the BgFileHeaderInfo entry. See scummvm scene.cpp (Scene::load) and
+  image_file.cpp (ImageFile::load / ImageFrame::decompressFrame).
+- Frame header: u16le(w-1), u16le(h-1), u8 paletteBase, u8 rleFlag, u8 offX, u8 offY.
+  paletteBase -> nibble-packed (w*h/2); rleFlag -> u16le(size)+u8 marker, data=size-11;
+  else raw w*h. Optional embedded "VGA " palette block before the first frame.
+- Global sprites: vgs.lib (WALK/CONTROLS/ITEMS/cursors/DARTS/BIGMAP/MENU) and
+  portrait.lib (81x67 x7 portraits). Most carry no palette; DARTS/BIGMAP/INSTALL.LBV
+  embed one. FONT1-3.VGS are fonts.
+- Speech/SFX: SND.SND / TITLE.SND / EPILOGUE.SND are LIB containers of .SND files.
+  Each .SND: skip 2, u32be size, u16be rate, then `size` bytes Creative ADPCM 4-bit
+  (1 reference byte + nibble pairs). See scummvm sound.cpp (playSoundResource).
+
 ### BROKEN SWORD SERIES
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/SWORD/
