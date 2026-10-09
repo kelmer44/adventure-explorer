@@ -319,8 +319,28 @@ end
 local function load_col_palette(data)
     if not data or #data < 4 then return nil end
 
-    -- Try CPS format first (Kyra2 .COL files are CPS-compressed, often < 768 bytes)
+    -- Kyra2 .COL files are CPS images whose decoded 768 pixels ARE the palette
+    -- (256 entries x 3 bytes, 6-bit VGA). See ScummVM KyraEngine_HoF::loadScenePal,
+    -- which loadBitmap()s the .COL and then reads the palette from the decoded page.
     if #data > 10 then
+        local comp = u8(data, 3)
+        local img_size = u32le(data, 5)
+        if (comp == 0 or comp == 3 or comp == 4) and img_size == 768 then
+            local pixels = decode_cps(data)
+            if pixels then
+                local palette = {}
+                for i = 0, 255 do
+                    local r = (pixels[i * 3 + 1] or 0) % 64
+                    local g = (pixels[i * 3 + 2] or 0) % 64
+                    local b = (pixels[i * 3 + 3] or 0) % 64
+                    palette[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+                    palette[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+                    palette[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
+                end
+                return palette
+            end
+        end
+        -- Embedded palette block variant (uncompressed at offset 10)
         local _, pal = decode_cps(data)
         if pal then return pal end
     end
@@ -500,6 +520,17 @@ end
 -- Resource loading
 -- ============================================================================
 
+-- Parse "<archive>.<ext>_<base>" (ext .pak/.cmp). Non-greedy on the archive so
+-- that archive or base names containing underscores (e.g. phone_a.pak, _BOOKA)
+-- are handled correctly.
+local function split_pak_id(rest)
+    local ark, base = rest:match("^(.-%.[Pp][Aa][Kk])_(.+)$")
+    if not ark then
+        ark, base = rest:match("^(.-%.[Cc][Mm][Pp])_(.+)$")
+    end
+    return ark, base
+end
+
 local function extract_from_pak(game_path, ark_name, file_name)
     local f = file_open(game_path .. "/" .. ark_name)
     if not f then return nil end
@@ -596,7 +627,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         file_close(f)
 
     elseif prefix == "pak" then
-        local ark, base = rest:match("^(.+%..+)_([^_]+)$")
+        local ark, base = split_pak_id(rest)
         if not ark or not base then return nil end
         base_name = base
         cps_data = extract_from_pak(game_path, ark, base .. ".CPS")
@@ -638,7 +669,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         }
 
     elseif prefix == "wpak" then
-        local ark, base = rest:match("^(.+%..+)_([^_]+)$")
+        local ark, base = split_pak_id(rest)
         if not ark or not base then return nil end
         local wsa_data = extract_from_pak(game_path, ark, base .. ".WSA")
         if not wsa_data or #wsa_data < 10 then return nil end
