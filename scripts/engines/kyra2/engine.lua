@@ -566,10 +566,18 @@ local function find_palette(game_path)
     return nil
 end
 
+-- Some full-screen CPS images reuse a palette whose name differs from the image.
+-- Matches the explicit palette files ScummVM loads (gui_hof.cpp / script_hof.cpp).
+local SPECIAL_COL = {
+    _BOOKA = "_BOOK", _BOOKB = "_BOOK", _BOOKC = "_BOOK", _BOOKD = "_BOOK",
+    _NOTE = "_NTEPAL1", _PLAYALL = "PALETTE", _PLAYFLD = "PALETTE",
+}
+
 -- Try to find a matching COL file for a CPS scene
 local function find_scene_palette(game_path, base_name, archives)
-    local col_name = base_name .. ".COL"
-    local col_name_lower = base_name:lower() .. ".col"
+    local col_base = SPECIAL_COL[base_name] or base_name
+    local col_name = col_base .. ".COL"
+    local col_name_lower = col_base:lower() .. ".col"
 
     -- Check loose (both casings)
     local f = file_open(game_path .. "/" .. col_name)
