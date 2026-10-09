@@ -69,7 +69,8 @@ fun main(args: Array<String>) {
             det.resources.forEach { walk(it) }
         }
         "load" -> {
-            val r = mgr.loadResource(args[1], args[2], args.getOrNull(4))
+            println("default palette: ${mgr.defaultPaletteFor(args[1], args[2])}")
+            val r = mgr.loadResource(args[1], args[2], args.getOrNull(4) ?: mgr.defaultPaletteFor(args[1], args[2]))
             if (r == null) { println("load failed"); return }
             println("type=${r.type} desc=${r.description}")
             val out = File(args[3])

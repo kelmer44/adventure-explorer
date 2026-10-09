@@ -153,6 +153,23 @@ class ScriptManager {
         }
     }
 
+    /**
+     * Ask the active engine script which palette node a resource should be shown with by
+     * default (optional `default_palette(game_path, resource_id)` hook). Returns null when the
+     * script has no opinion.
+     */
+    fun defaultPaletteFor(gamePath: String, resourceId: String): String? {
+        val script = currentScript ?: return null
+        return try {
+            val fn = script.get("default_palette")
+            if (fn.isnil()) return null
+            val r = fn.call(LuaValue.valueOf(gamePath), LuaValue.valueOf(resourceId))
+            if (r.isnil()) null else r.tojstring()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // ── Internal helpers ────────────────────────────────────────────
 
     private fun parseLuaResourceTable(table: LuaTable): List<ResourceNode> {

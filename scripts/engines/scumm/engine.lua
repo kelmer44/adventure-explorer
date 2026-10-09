@@ -1888,6 +1888,24 @@ local function load_bundle_resource(game_path, resource_id)
     return nil
 end
 
+-- Sprites (costumes, object images) are shown with the palette of the room that
+-- stores them. The app asks for this when a node has no palette sibling.
+function engine.default_palette(game_path, resource_id)
+    local prefix, base, num = resource_id:match("^(%a+):([^:]+):(%d+)")
+    if not base then return nil end
+    local game = find_game(game_path, base)
+    if not game then return nil end
+    local state = get_game_state(game)
+    num = tonumber(num)
+    if prefix == "cossheet" or prefix == "cosanim" then
+        local res = valid_resource(state, state.index.costumes, num)
+        if res then return string.format("pal:%s:%d", base, res.room) end
+    elseif prefix == "obj" then
+        return string.format("pal:%s:%d", base, num)   -- object ids start with the room number
+    end
+    return nil
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
     local prefix = resource_id:match("^(%a+):")
     if prefix == "cossheet" or prefix == "cosanim" then

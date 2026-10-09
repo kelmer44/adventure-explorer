@@ -152,7 +152,9 @@ class AppState {
 
                 // Determine default palette companion on IO thread
                 val allPalsCopy = withContext(Dispatchers.Main) { allPalettes.toList() }
-                val companionId = paletteCompanionOf[node.id] ?: derivePaletteId(node.id)
+                val companionId = paletteCompanionOf[node.id]
+                    ?: scriptManager.defaultPaletteFor(path, node.id)
+                    ?: derivePaletteId(node.id)
                 val defaultIdx = if (companionId != null)
                     allPalsCopy.indexOfFirst { it.id == companionId } else -1
                 val useIdx = if (defaultIdx >= 0) defaultIdx else if (allPalsCopy.isNotEmpty()) 0 else -1
