@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Coktel Vision / Sierra. Resources are in .EXT files inside .STK archives.
 -- Sprite data may be inline (EXT-type) or in COMMUN.EX1 (EX-type).
--- Gob1/2/3: 320x200, EGA indexed colour.
+-- Gob1/2/3: 320x200, 8-bit indexed colour (EGA 16-colour in early scenes).
 -- ============================================================================
 
 local engine = {}
@@ -334,50 +334,189 @@ local function read_game_file(game_path, file_name)
     return nil
 end
 
--- Try to load VGA palette from a .TOT file within an STK archive
--- TOT files have palette data at known offsets
-local function try_load_tot_palette(game_path, scene_id)
-    -- Look for a matching .TOT file in STK archives
-    local tot_names = { scene_id .. ".TOT", "INTRO.TOT" }
-    for _, stk_file in ipairs(STK_FILES) do
-        local raw = read_file_all(game_path .. "/" .. stk_file)
-              or   read_file_all(game_path .. "/" .. stk_file:lower())
-        if raw then
-            for _, tot_name in ipairs(tot_names) do
-                local tot_data = stk_extract(raw, tot_name)
-                if tot_data and #tot_data > 0x34 then
-                    -- TOT header: palette offset hint at byte 0x30 (u16le)
-                    -- Try to find 768-byte palette block (values 0-63)
-                    -- Common positions: near the start, after script code
+-- ============================================================================
+-- Scene palettes
+--
+-- Scripts install the active palette with the palLoad function opcode (0xF3)
+-- found in the TOT script section:
+--   sub 52: 16 inline EGA colours (48 bytes, 6-bit DAC) - 16-colour modes
+--   sub 53: s16 resource id of a 768-byte 256-colour palette (6-bit DAC)
+-- The referenced palette is a resource of the scene's own TOT (id < 30000) or
+-- of its EXT (id >= 30000). The TOT header is NOT palette data: offset 0x30
+-- holds textsOffset and 0x34 holds resourcesOffset, so reading colours from a
+-- fixed header offset yields version/offset bytes instead of real colours.
+-- ============================================================================
 
-                    -- Method 1: Check if data at offset 0x34 looks like a VGA palette
-                    -- (all bytes should be <= 63 for 6-bit VGA)
-                    local try_offsets = { 0x34, 0x38, 0x50, 0x100 }
-                    for _, off in ipairs(try_offsets) do
-                        local base = off + 1  -- 1-based
-                        if base + 767 <= #tot_data then
-                            local is_vga = true
-                            local nonzero = 0
-                            for test = 0, 47 do  -- check first 16 colors
-                                local v = tot_data:byte(base + test)
-                                if v > 63 then is_vga = false; break end
-                                if v > 0 then nonzero = nonzero + 1 end
-                            end
-                            if is_vga and nonzero >= 6 then
-                                -- Found a valid VGA palette
-                                local pal = {}
-                                for i = 0, 255 do
-                                    local r = (tot_data:byte(base + i * 3) or 0) % 64
-                                    local g = (tot_data:byte(base + i * 3 + 1) or 0) % 64
-                                    local b = (tot_data:byte(base + i * 3 + 2) or 0) % 64
-                                    pal[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
-                                    pal[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
-                                    pal[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
-                                end
-                                return pal
-                            end
-                        end
-                    end
+local PALLOAD_OPCODE = 0xF3
+local PALETTE_SIZE    = 768
+
+-- Convert a 768-byte DAC block (6-bit 0-63, or 8-bit in some releases) into
+-- a 256-colour palette table of 768 entries holding 0-255 values.
+local function scale_palette(blob)
+    local raw8 = false
+    for i = 1, PALETTE_SIZE do
+        if blob:byte(i) > 63 then raw8 = true; break end
+    end
+    local pal = {}
+    for i = 0, 255 do
+        for c = 1, 3 do
+            local v = blob:byte(i * 3 + c) or 0
+            if raw8 then
+                pal[i * 3 + c] = v
+            else
+                pal[i * 3 + c] = math.min(math.floor(v * 255 / 63 + 0.5), 255)
+            end
+        end
+    end
+    return pal
+end
+
+-- Header + resource table of a TOT file. Returns nil when this is not a TOT.
+local function parse_tot(tot)
+    if not tot or #tot < 128 then return nil end
+    if tot:byte(41) ~= 46 then return nil end   -- '.' of the "M.m" version
+
+    local texts_offset = u32le(tot, 49)   -- 0x30
+    local res_offset    = u32le(tot, 53)   -- 0x34
+    if texts_offset == 0xFFFFFFFF then texts_offset = 0 end
+    if res_offset    == 0xFFFFFFFF then res_offset    = 0 end
+
+    -- Script section runs from the header to the texts/resources tables.
+    local script_end = #tot
+    if texts_offset > 0 then script_end = math.min(script_end, texts_offset) end
+    if res_offset    > 0 then script_end = math.min(script_end, res_offset)    end
+
+    local parsed = { script_end = script_end, resources = {}, data_offset = 0 }
+    if res_offset <= 0 or res_offset + 3 > #tot then return parsed end
+
+    local count = i16le(tot, res_offset + 1)
+    if count <= 0 or count > 2000 then return parsed end
+    local data_offset = res_offset + 3 + count * 10
+    if data_offset > #tot then return parsed end
+
+    parsed.data_offset = data_offset
+    for i = 0, count - 1 do
+        local base = res_offset + 4 + i * 10   -- 1-based
+        if base + 9 > #tot then return nil end
+        parsed.resources[i] = {
+            offset = i32le(tot, base),
+            size   = u16le(tot, base + 4),
+        }
+    end
+    return parsed
+end
+
+-- Read a palette resource out of the TOT's own resource table.
+local function tot_palette_blob(tot, parsed, id)
+    local res = parsed.resources[id]
+    if not res or res.size < PALETTE_SIZE then return nil end
+    if res.offset < 0 then return nil end   -- negative = IM sprite, not a palette
+    local start = parsed.data_offset + res.offset + 1
+    if start < 1 or start + PALETTE_SIZE - 1 > #tot then return nil end
+    return tot:sub(start, start + PALETTE_SIZE - 1)
+end
+
+-- Read a palette resource out of the scene's EXT resource table (id >= 30000).
+local function ext_palette_blob(ext_data, commun_raw, id)
+    if not ext_data then return nil end
+    local items = parse_ext_table(ext_data)
+    local item = items and items[id + 1]
+    if not item or item.ex_type or item.packed then return nil end
+    if item.size < PALETTE_SIZE then return nil end
+    local start = item.data_off + 1
+    if start + PALETTE_SIZE - 1 > #ext_data then return nil end
+    return ext_data:sub(start, start + PALETTE_SIZE - 1)
+end
+
+-- Collect every palLoad reference in the script section, in file order:
+-- resource ids used by sub 53 (VGA) and inline sub 52 blocks (EGA).
+local function scan_palette_refs(tot, parsed)
+    local vga_ids, ega_blocks = {}, {}
+    for pos = 129, parsed.script_end - 1 do
+        if tot:byte(pos) == PALLOAD_OPCODE then
+            local sub = band(tot:byte(pos + 1) or 0, 0x7F)
+            if sub == 53 and pos + 3 <= parsed.script_end then
+                vga_ids[#vga_ids + 1] = i16le(tot, pos + 2)
+            elseif sub == 52 and pos + 49 <= parsed.script_end then
+                ega_blocks[#ega_blocks + 1] = tot:sub(pos + 2, pos + 49)
+            end
+        end
+    end
+    return vga_ids, ega_blocks
+end
+
+-- Turn a 48-byte inline EGA block into a full palette. Blocks that are not
+-- 16 valid 6-bit colours are skipped (they are operand bytes, not palettes).
+local function ega_block_palette(block)
+    local nonzero = 0
+    for i = 1, 48 do
+        local v = block:byte(i)
+        if v > 63 then return nil end
+        if v > 0 then nonzero = nonzero + 1 end
+    end
+    if nonzero < 6 then return nil end
+    local pal = build_ega_palette()
+    for i = 0, 15 do
+        for c = 1, 3 do
+            local v = block:byte(i * 3 + c)
+            pal[i * 3 + c] = math.min(math.floor(v * 255 / 63 + 0.5), 255)
+        end
+    end
+    return pal
+end
+
+-- Palette a single TOT installs: VGA resources first (256-colour art needs
+-- all 256 entries), then any standalone palette resource, then inline EGA.
+local function tot_palette(tot, ext_data, commun_raw)
+    local parsed = parse_tot(tot)
+    if not parsed then return nil end
+
+    local vga_ids, ega_blocks = scan_palette_refs(tot, parsed)
+    for _, id in ipairs(vga_ids) do
+        local blob
+        if id >= 30000 then
+            blob = ext_palette_blob(ext_data, commun_raw, id - 30000)
+        elseif id >= 0 then
+            blob = tot_palette_blob(tot, parsed, id)
+        end
+        if blob then return scale_palette(blob) end
+    end
+
+    local bare = {}
+    for id, res in pairs(parsed.resources) do
+        if res.size >= PALETTE_SIZE and res.offset >= 0 then
+            bare[#bare + 1] = id
+        end
+    end
+    table.sort(bare)
+    for _, id in ipairs(bare) do
+        local blob = tot_palette_blob(tot, parsed, id)
+        if blob then return scale_palette(blob) end
+    end
+
+    for _, block in ipairs(ega_blocks) do
+        local pal = ega_block_palette(block)
+        if pal then return pal end
+    end
+    return nil
+end
+
+-- Some scenes (GOB3's INTER* interfaces, GOB2's menu) install no palette at
+-- all and inherit one at runtime. Fall back to the first palette any of the
+-- game's TOT files provides so 256-colour art is never drawn with the
+-- generic EGA ramp.
+local function first_game_palette(game_path)
+    local seen = {}
+    for _, stk_file in ipairs(STK_FILES) do
+        local raw = read_stk(game_path, stk_file)
+        local entries = raw and parse_stk(raw) or nil
+        if entries then
+            for _, name in ipairs(sorted_entry_names(entries)) do
+                if name:match("%.TOT$") and not seen[name] then
+                    seen[name] = true
+                    local tot = stk_extract(raw, name)
+                    local pal = tot and tot_palette(tot, nil, nil) or nil
+                    if pal then return pal end
                 end
             end
         end
@@ -385,13 +524,34 @@ local function try_load_tot_palette(game_path, scene_id)
     return nil
 end
 
-local function build_palette_table(game_path, scene_id)
-    -- Try to load VGA palette from TOT files first
-    if game_path and scene_id then
-        local vga_pal = try_load_tot_palette(game_path, scene_id)
-        if vga_pal then return vga_pal end
+local _palette_cache  = {}
+local _game_pal_cache = {}
+
+local function build_palette_table(game_path, scene_id, ext_data, commun_raw)
+    if not game_path or not scene_id then return build_ega_palette() end
+
+    local key = game_path .. "|" .. scene_id
+    local hit = _palette_cache[key]
+    if hit ~= nil then
+        return hit or build_ega_palette()
     end
-    return build_ega_palette()
+
+    local pal = nil
+    local tot = read_game_file(game_path, scene_id .. ".TOT")
+    if tot then pal = tot_palette(tot, ext_data, commun_raw) end
+    if not pal then
+        local intro = read_game_file(game_path, "INTRO.TOT")
+        if intro then pal = tot_palette(intro, nil, nil) end
+    end
+    if not pal then
+        if _game_pal_cache[game_path] == nil then
+            _game_pal_cache[game_path] = first_game_palette(game_path) or false
+        end
+        pal = _game_pal_cache[game_path] or nil
+    end
+
+    _palette_cache[key] = pal or false
+    return pal or build_ega_palette()
 end
 
 -- ============================================================================
@@ -834,8 +994,8 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local pixels = load_entry_pixels(best, ext_data, commun_raw)
     if not pixels then return nil end
 
-    -- Build palette (try VGA from TOT file, fall back to EGA)
-    local pal = build_palette_table(game_path, scene_id)
+    -- Build palette (script palette from TOT/EXT resources, then fallbacks)
+    local pal = build_palette_table(game_path, scene_id, ext_data, commun_raw)
 
     -- Render image
     local img = render_sprite(pixels, best.w, best.h, pal)
