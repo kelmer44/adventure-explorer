@@ -588,12 +588,55 @@ local function extract_from_pak(game_path, ark_name, file_name)
     return nil
 end
 
+-- Split a "pak_<archive>_<base>" id, tolerating underscores in the base name
+-- (e.g. F_L.PAK + GEN_CAV).
+local function split_pak_id(rest)
+    local ark, base = rest:match("^(.-%.[Pp][Aa][Kk])_(.+)$")
+    if not ark then ark, base = rest:match("^(.-%.[Vv][Rr][Mm])_(.+)$") end
+    if not ark then ark, base = rest:match("^(.-%.[Aa][Pp][Kk])_(.+)$") end
+    return ark, base
+end
+
+-- Per-scene palette band.
+-- Each scene's <NAME>.DAT (packed in DAT.PAK) stores 20 VGA colors at
+-- offset 0x17. The engine copies these into palette1[228..247]
+-- (see ScummVM sprites.cpp: loadDat), which the scene screen then blits
+-- into palette0[228..247]. Without this the band stays flat green.
+local function scene_palette_band(game_path, scene_base)
+    if not scene_base or #scene_base == 0 then return nil end
+
+    local dat_data
+    local f = file_open(game_path .. "/" .. scene_base .. ".DAT")
+    if not f then f = file_open(game_path .. "/" .. scene_base .. ".dat") end
+    if f then
+        local sz = file_size(f)
+        dat_data = file_read(f, 0, sz)
+        file_close(f)
+    end
+    if not dat_data then
+        dat_data = extract_from_pak(game_path, "DAT.PAK", scene_base .. ".DAT")
+    end
+    if not dat_data or #dat_data < 0x17 + 60 then return nil end
+
+    local band = {}
+    for i = 0, 19 do
+        local r = dat_data:byte(0x17 + i * 3 + 1) % 64
+        local g = dat_data:byte(0x17 + i * 3 + 2) % 64
+        local b = dat_data:byte(0x17 + i * 3 + 3) % 64
+        band[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+        band[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+        band[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
+    end
+    return band
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
     -- Parse resource ID
     local prefix, rest = resource_id:match("^(%a+)_(.+)$")
     if not prefix then return nil end
 
     local cps_data
+    local scene_base
 
     if prefix == "loose" then
         -- Loose CPS file
@@ -606,12 +649,14 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local sz = file_size(f)
         cps_data = file_read(f, 0, sz)
         file_close(f)
+        scene_base = rest
 
     elseif prefix == "pak" then
         -- Format: pak_ARCHIVE_BASENAME
-        local ark, base = rest:match("^(.+%..+)_([^_]+)$")
+        local ark, base = split_pak_id(rest)
         if not ark or not base then return nil end
         cps_data = extract_from_pak(game_path, ark, base .. ".CPS")
+        scene_base = base
 
     elseif prefix == "wsa" then
         -- Loose WSA animation: decode and return as animation
@@ -652,7 +697,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
 
     elseif prefix == "wpak" then
         -- PAK-contained WSA: decode and return as animation
-        local ark, base = rest:match("^(.+%..+)_([^_]+)$")
+        local ark, base = split_pak_id(rest)
         if not ark or not base then return nil end
         local wsa_data = extract_from_pak(game_path, ark, base .. ".WSA")
         if not wsa_data or #wsa_data < 10 then return nil end
@@ -748,6 +793,17 @@ function engine.load_resource(game_path, resource_id, palette_id)
             palette[i * 3 + 1] = i
             palette[i * 3 + 2] = i
             palette[i * 3 + 3] = i
+        end
+    end
+
+    -- Merge the per-scene 228..247 palette band (from <scene>.DAT)
+    local band = scene_palette_band(game_path, scene_base)
+    if band then
+        for i = 0, 19 do
+            local idx = 228 + i
+            palette[idx * 3 + 1] = band[i * 3 + 1]
+            palette[idx * 3 + 2] = band[i * 3 + 2]
+            palette[idx * 3 + 3] = band[i * 3 + 3]
         end
     end
 

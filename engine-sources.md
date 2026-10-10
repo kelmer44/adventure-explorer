@@ -163,6 +163,12 @@ game in ags/lastexpress
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 extra tooling source code in AGS/TOOLS/KYRA
 
+Kyrandia 1 (LoK) per-scene palettes: each scene has a `<NAME>.DAT` (packed in
+`DAT.PAK`, or loose) that stores 20 VGA colors at offset 0x17. ScummVM copies
+them into palette1[228..247] (`sprites.cpp` loadDat), which `initSceneScreen`
+then copies into palette0[228..247] (`scene_lok.cpp`). The room `.EMC` scripts
+do not set this band (only a few call `o1_setCustomPaletteRange`).
+
 games in ags/KYRA/
 
 ### HOLLYWOOD MONSTERS
