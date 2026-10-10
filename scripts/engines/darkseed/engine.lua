@@ -1,17 +1,25 @@
 -- ============================================================================
 -- Adventure Explorer - Engine Script: Dark Seed (Cyberdreams, 1992)
 -- ============================================================================
--- Floppy: roomN.pic/roomN.pal/roomN.rom in root directory
--- CD: named .PIC/.PAL files in PICTURE/ subdirectory, .NSP/.OBT in ROOM/
+-- Floppy: ROOMn.ROM room definitions in root referencing named .PIC/.PAL/.NSP
+--         (all files in the root directory)
+-- CD:     named .PIC/.PAL files in PICTURE/ subdirectory, ROOMn.ROM/.NSP/.OBT
+--         in ROOM/ subdirectory
 -- Image format: u16be width, u16be height, then 4-bit nibble RLE, 16 colors
 -- Palette: 16 × 3 bytes (6-bit VGA, scaled by <<2)
+--
+-- ROOMn.ROM layout (see ScummVM darkseed/room.cpp):
+--   0x00  8 bytes  NSP filename base (space padded, e.g. "EDIT    ")
+--   0x0d  8 bytes  PIC filename base (space padded, e.g. "BED1A   ")
+--   0x1a  8 bytes  PAL filename base (space padded, e.g. "CYBER   ")
+--   0x27  ...      room exits, walk map, object table
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Dark Seed"
 engine.id          = "darkseed"
-engine.description = "Dark Seed (1992, Cyberdreams)"
-engine.version     = "2.0"
+engine.description = "Dark Seed (1992, Cyberdreams) - floppy & CD"
+engine.version     = "2.1"
 
 -- Binary helpers
 local function u16be(data, pos)
@@ -127,6 +135,56 @@ local function has_picture_dir(game_path)
     return false
 end
 
+-- Directory that holds the background/palette files.
+-- CD keeps them in PICTURE/, the floppy version keeps everything in the root.
+local function picture_dir(game_path, is_cd)
+    if is_cd then
+        local d = game_path .. "/PICTURE"
+        if file_exists(d) then return d end
+        return game_path .. "/picture"
+    end
+    return game_path
+end
+
+-- Read the 8-byte, space-padded, NUL-terminated name field at a given byte offset.
+local function rom_name_field(data, off)
+    local chars = {}
+    for i = 0, 7 do
+        local b = data:byte(off + i + 1)
+        if not b or b == 0 then break end
+        chars[#chars + 1] = string.char(b)
+    end
+    return (table.concat(chars):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Parse a ROOMn.ROM room definition and return the NSP/PIC/PAL filename bases.
+local function parse_rom(game_path, room_base)
+    local rom_path = find_file(game_path, room_base .. ".rom")
+    if not rom_path then return nil end
+    local f = file_open(rom_path)
+    if not f then return nil end
+    local data = file_read(f, 0, 0x27)
+    file_close(f)
+    if not data or #data < 0x27 then return nil end
+    return rom_name_field(data, 0x00), rom_name_field(data, 0x0d), rom_name_field(data, 0x1a)
+end
+
+-- Sort key so ROOM2 < ROOM10 and ROOM61 < ROOM61A.
+local function room_sort_key(room_base)
+    local suffix = room_base:upper():gsub("^ROOM", "")
+    local num, rest = suffix:match("^(%d+)(%a*)$")
+    if num then return string.format("%04d%s", tonumber(num), rest) end
+    return "9999" .. suffix
+end
+
+-- Rooms 20 and 22 share room 19's room definition in every release
+-- (see ScummVM darkseed/room.cpp getRoomFilenameBase).
+local function room_rom_base(room_base)
+    local suffix = room_base:upper():gsub("^ROOM", "")
+    if suffix == "20" or suffix == "22" then return "room19" end
+    return room_base:lower()
+end
+
 -- Detection
 function engine.detect(game_path)
     -- Check for executable
@@ -139,14 +197,16 @@ function engine.detect(game_path)
 
     if not has_exe then return false end
 
-    -- Check for room files in root (floppy version)
-    for room = 0, 5 do
-        local base = "room" .. room
-        if find_file(game_path, base .. ".pic") then return true end
-    end
-
-    -- Check for PICTURE/ subdirectory (CD version)
+    -- CD version: named backgrounds in PICTURE/
     if has_picture_dir(game_path) then return true end
+
+    -- Floppy version: ROOMn.ROM room definitions in the root (DSEED35)
+    if find_file(game_path, "room0.rom") then return true end
+
+    -- Older/other floppy releases: numbered backgrounds in the root
+    for room = 0, 5 do
+        if find_file(game_path, "room" .. room .. ".pic") then return true end
+    end
 
     return false
 end
@@ -222,50 +282,61 @@ function engine.get_resources(game_path)
         end
     end
 
-    -- Floppy version: scan root for roomN.pic files
-    local rooms_cat = {
-        id = "floppy_rooms",
-        name = "Rooms (Floppy)",
-        type = "category",
-        children = {}
-    }
-    local floppy_pals = {
-        id = "floppy_palettes",
-        name = "Palettes (Floppy)",
-        type = "category",
-        children = {}
-    }
+    -- Floppy version: rooms are defined by ROOMn.ROM files in the root, each
+    -- naming its background and palette. Lists rooms plus every palette/sprite.
+    if not is_cd then
+        local root_files = list_files(game_path) or {}
 
-    for room = 0, 80 do
-        local base
-        if room == 20 or room == 22 then base = "room19"
-        else base = "room" .. room end
+        local roms = {}
+        for _, fname in ipairs(root_files) do
+            local base = fname:match("^([Rr][Oo][Oo][Mm][%w]+)%.([Rr][Oo][Mm])$")
+            if base then roms[#roms + 1] = base end
+        end
+        table.sort(roms, function(a, b) return room_sort_key(a) < room_sort_key(b) end)
 
-        local pic_path = find_file(game_path, base .. ".pic")
-        if pic_path then
+        local rooms_cat = {
+            id = "floppy_rooms",
+            name = "Rooms (Floppy)",
+            type = "category",
+            children = {},
+        }
+        for _, base in ipairs(roms) do
+            local _, pic, _ = parse_rom(game_path, room_rom_base(base))
+            local label = base:upper():gsub("^ROOM", "")
+            local name = "Room " .. label
+            if pic and #pic > 0 then name = name .. " - " .. pic end
             rooms_cat.children[#rooms_cat.children + 1] = {
-                id   = "bg_" .. room,
-                name = string.format("Room %d", room),
-                type = "image"
+                id   = "bg_" .. base:lower(),
+                name = name,
+                type = "image",
             }
-            local pal_path = find_file(game_path, base .. ".pal")
-            if pal_path then
-                floppy_pals.children[#floppy_pals.children + 1] = {
-                    id   = "pal_" .. room,
-                    name = string.format("Room %d palette", room),
-                    type = "palette"
+        end
+        if #rooms_cat.children > 0 then
+            rooms_cat.name = string.format("Rooms (%d)", #rooms_cat.children)
+            resources[#resources + 1] = rooms_cat
+        end
+
+        local pal_cat = {
+            id = "floppy_palettes",
+            name = "Palettes (Floppy)",
+            type = "category",
+            children = {},
+        }
+        for _, fname in ipairs(root_files) do
+            local base = fname:match("^(.+)%.[Pp][Aa][Ll]$")
+            if base then
+                pal_cat.children[#pal_cat.children + 1] = {
+                    id   = "pal_" .. base,
+                    name = base .. " palette",
+                    type = "palette",
                 }
             end
         end
-    end
-
-    if #rooms_cat.children > 0 then
-        rooms_cat.name = string.format("Rooms (%d)", #rooms_cat.children)
-        resources[#resources + 1] = rooms_cat
-    end
-    if #floppy_pals.children > 0 then
-        floppy_pals.name = string.format("Palettes (%d)", #floppy_pals.children)
-        resources[#resources + 1] = floppy_pals
+        table.sort(pal_cat.children, function(a, b) return a.name < b.name end)
+        if #pal_cat.children > 0 then
+            pal_cat.name = string.format("Palettes (%d)", #pal_cat.children)
+            resources[#resources + 1] = pal_cat
+        end
     end
 
     -- Scan for .NSP sprite files (in root for floppy, ROOM/ for CD)
@@ -461,94 +532,57 @@ end
 function engine.load_resource(game_path, resource_id, palette_id)
     local is_cd = has_picture_dir(game_path)
 
-    -- Resolve palette override path
-    local function get_override_pal_path()
-        if not palette_id or palette_id == "" then return nil end
-        local pal_base = palette_id:match("^pal_(.+)$")
-        if not pal_base then return nil end
-
-        if is_cd then
-            -- CD: pal_base is the .PAL basename (e.g. "BEDROOM")
-            local pic_dir = game_path .. "/PICTURE"
-            if not file_exists(pic_dir) then pic_dir = game_path .. "/picture" end
-            local try_pal = pic_dir .. "/" .. pal_base .. ".PAL"
-            if file_exists(try_pal) then return try_pal end
-            try_pal = pic_dir .. "/" .. pal_base .. ".pal"
-            if file_exists(try_pal) then return try_pal end
-        else
-            -- Floppy: pal_base is room number
-            local room_num = tonumber(pal_base)
-            if room_num then
-                local base
-                if room_num == 20 or room_num == 22 then base = "room19"
-                else base = "room" .. room_num end
-                return find_file(game_path, base .. ".pal")
-            end
-        end
-        return nil
+    -- Resolve a palette resource id (pal_<NAME>) to a .pal file path.
+    local function resolve_pal_path(pid)
+        if not pid or pid == "" then return nil end
+        local name = pid:match("^pal_(.+)$")
+        if not name then return nil end
+        return find_file(picture_dir(game_path, is_cd), name .. ".pal")
     end
 
-    -- CD version resource: bg_BASENAME
+    local function get_override_pal_path()
+        return resolve_pal_path(palette_id)
+    end
+
+    -- CD version resource: bg_BASENAME (named backgrounds in PICTURE/)
     local cd_base = resource_id:match("^bg_(.+)$")
     if cd_base and is_cd then
-        local pic_dir = game_path .. "/PICTURE"
-        if not file_exists(pic_dir .. "/" .. cd_base .. ".PIC") then
-            pic_dir = game_path .. "/picture"
-        end
-
-        local pic_path = pic_dir .. "/" .. cd_base .. ".PIC"
-        if not file_exists(pic_path) then
-            pic_path = pic_dir .. "/" .. cd_base .. ".pic"
-        end
+        local pic_dir = picture_dir(game_path, true)
+        local pic_path = find_file(pic_dir, cd_base .. ".pic")
 
         -- Use override palette or find matching .PAL
         local pal_path = get_override_pal_path()
         if not pal_path then
-            local try_pal = pic_dir .. "/" .. cd_base .. ".PAL"
-            if file_exists(try_pal) then
-                pal_path = try_pal
-            else
-                try_pal = pic_dir .. "/" .. cd_base .. ".pal"
-                if file_exists(try_pal) then pal_path = try_pal end
-            end
+            pal_path = find_file(pic_dir, cd_base .. ".pal")
         end
 
         return load_pic_image(pic_path, pal_path, cd_base)
     end
 
-    -- Floppy version resource: bg_N
-    local room_str = resource_id:match("^bg_(%d+)$")
-    if room_str then
-        local room_num = tonumber(room_str)
-        local base
-        if room_num == 20 or room_num == 22 then base = "room19"
-        else base = "room" .. room_num end
-
-        local pic_path = find_file(game_path, base .. ".pic")
-        if not pic_path then
-            return { type = "text", text = "No .pic file for room " .. room_num }
+    -- Floppy version resource: bg_roomNN (rooms described by ROOMn.ROM)
+    local floppy_room = resource_id:match("^bg_(room.+)$")
+    if floppy_room and not is_cd then
+        local _, pic, pal = parse_rom(game_path, room_rom_base(floppy_room))
+        if not pic or #pic == 0 then
+            return { type = "text", text = "No background for " .. floppy_room }
         end
 
-        local pal_path = get_override_pal_path() or find_file(game_path, base .. ".pal")
-        return load_pic_image(pic_path, pal_path, "Room " .. room_num)
+        local pic_path = find_file(game_path, pic .. ".pic")
+        if not pic_path then
+            return { type = "text", text = "Missing .pic file: " .. pic }
+        end
+
+        local pal_path = get_override_pal_path()
+        if not pal_path and pal and #pal > 0 then
+            pal_path = find_file(game_path, pal .. ".pal")
+        end
+        return load_pic_image(pic_path, pal_path, pic)
     end
 
-    -- Palette resource
+    -- Palette resource: pal_<NAME>
     local pal_arg = resource_id:match("^pal_(.+)$")
     if pal_arg then
-        local pal_path
-        if is_cd then
-            local pic_dir = game_path .. "/PICTURE"
-            if not file_exists(pic_dir) then pic_dir = game_path .. "/picture" end
-            pal_path = pic_dir .. "/" .. pal_arg .. ".PAL"
-            if not file_exists(pal_path) then pal_path = pic_dir .. "/" .. pal_arg .. ".pal" end
-        else
-            local room_num = tonumber(pal_arg)
-            if room_num then
-                local base = (room_num == 20 or room_num == 22) and "room19" or ("room" .. room_num)
-                pal_path = find_file(game_path, base .. ".pal")
-            end
-        end
+        local pal_path = find_file(picture_dir(game_path, is_cd), pal_arg .. ".pal")
         if pal_path and file_exists(pal_path) then
             local palette = load_palette(pal_path)
             if palette then
@@ -610,6 +644,17 @@ function engine.load_resource(game_path, resource_id, palette_id)
         end
     end
 
+    return nil
+end
+
+-- Default palette companion hook: for floppy rooms the ROM maps the room to a
+-- specific named .PAL, so expose it so the UI picks the right palette.
+function engine.default_palette(game_path, resource_id)
+    if has_picture_dir(game_path) then return nil end
+    local room = resource_id and resource_id:match("^bg_(room.+)$")
+    if not room then return nil end
+    local _, _, pal = parse_rom(game_path, room_rom_base(room))
+    if pal and #pal > 0 then return "pal_" .. pal end
     return nil
 end
 
