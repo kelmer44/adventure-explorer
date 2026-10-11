@@ -75,6 +75,30 @@ local function u32le(data, pos)
          + data:byte(pos + 2) * 65536
          + data:byte(pos + 3) * 16777216
 end
+local function s16le(val)
+    if val >= 32768 then
+        return val - 65536
+    end
+    return val
+end
+
+local function s16_from_low16(val)
+    local low = val % 65536
+    if low >= 32768 then
+        return low - 65536
+    end
+    return low
+end
+
+local function s16_from_high16(val)
+    local high = math.floor(val / 65536)
+    if high >= 32768 then
+        return high - 65536
+    end
+    return high
+end
+
+
 
 -- ── Constants ────────────────────────────────────────────────────
 
@@ -367,8 +391,8 @@ local function try_decode_block_list(raw, base_offset)
         cursor = cursor + 6
         if size == 0 or cursor + size - 1 > #raw then return nil end
 
-        local x = packed % 65536
-        local y = math.floor(packed / 65536)
+        local x = s16_from_low16(packed)
+        local y = s16_from_high16(packed)
         if x < 0 or x > 4096 or y < 0 or y > 4096 then return nil end
 
         entries[#entries + 1] = { x = x, y = y, size = size, data_offset = cursor }
@@ -469,13 +493,13 @@ local function scan_frame_descriptors(raw, max_count)
         local packed_rows = u32le(raw, base + 9)
         local span_count  = u16le(raw, base + 13)
 
-        local x = packed_xw % 65536
-        local width = math.floor(packed_xw / 65536)
-        local first_row = packed_rows % 65536
-        local last_row = math.floor(packed_rows / 65536)
+        local x = s16_from_low16(packed_xw)
+        local width = s16_from_high16(packed_xw)
+        local first_row = s16_from_low16(packed_rows)
+        local last_row = s16_from_high16(packed_rows)
 
         local plausible = width >= 1 and width <= 1024
-            and x >= 0 and x < 1024
+            and x > -4096 and x < 4096
             and first_row <= last_row and (last_row - first_row) < 2048
             and span_count <= 2000
             and rel_offset >= prev_rel and rel_offset < #raw
@@ -509,8 +533,8 @@ local function render_frame_descriptor(raw, table_end, descriptor, palette)
         cursor = cursor + 5
         if not length or cursor + length - 1 > #raw then return nil end
 
-        local span_x = packed % 65536
-        local span_y = math.floor(packed / 65536)
+        local span_x = s16_from_low16(packed)
+        local span_y = s16_from_high16(packed)
         local row = span_y - descriptor.first_row
         local col0 = span_x - descriptor.x
         if row >= 0 and row < h then
