@@ -183,6 +183,20 @@ tools in ags/tools/igor
 
 game in ags/igor and ags/igor-cd
 
+Spanish CD support refreshed against the local `scummvm-fork/engines/igor`
+checkout at `bd1bb3dfb81` (2026-10-11) and the matching catalog in
+`igor-stuff/reference/scummvm-create-igortbl/resource_sp_cdrom.h`.
+Room/resource pairing follows `resource_ids.h`, `room.cpp` and each part's
+load calls; sparse frame addressing follows `graphics.cpp::getAnimFrame` and
+parts 69, 74–79, 85; raw frame dimensions/strides follow parts 7, 70, 73, 76.
+Text transforms and table layouts follow `room.cpp` / `resource.cpp`;
+outfit palettes follow `static_cursor.cpp` / `resource.cpp`; intertitle colours
+follow `part_main.cpp::PART_meanwhile`. CD music is separate audio tracks
+(`sound.cpp::playMusic`), while floppy music is CMF.
+Coverage: 74 verified room/scene backgrounds, 12 title/splash/credit images,
+five intertitles, 31 frame groups (19 indexed/raw, 12 scanned), both Igor
+outfits, decoded room/main text, 68 effects and 1,292 speech clips.
+
 ### STAR TREK
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 extra tooling in ags/tools/st25thjr

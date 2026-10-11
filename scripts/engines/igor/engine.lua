@@ -31,7 +31,7 @@ local engine = {}
 engine.name        = "Igor: Objective Uikokahonia"
 engine.id          = "igor"
 engine.description = "Pendulo Studios (1994) - DOS floppy & CD"
-engine.version     = "7.3"
+engine.version     = "8.0"
 
 -- ============================================================================
 -- Binary helpers (no bit32 in LuaJ 3.0.1)
@@ -125,94 +125,99 @@ end
 -- ============================================================================
 
 -- ===== CD version (Spanish) - offsets into IGOR.EXE 9,115,648 bytes =====
--- Named rooms from scummvm-create-igortbl/resource_sp_cdrom.h (31 rooms).
--- Additional rooms found by scanning IGOR.EXE for 46080-byte image blocks
--- followed by valid VGA palettes (42 rooms, no text data).
+-- Verified IMG/PAL/MSK/BOX/TXT pairs from the current resource_sp_cdrom.h.
+-- Generic scan hits can overlap code or partial credit pictures; use catalog rows only.
 local CD_ROOMS = {
-    {"Room 3",                                0x02a76e, 46080, 0x035b6e, 768,  0,       0,    0,       0,    0,       0},
-    {"Room 9",                                0x1046e7, 46080, 0x10fae7, 624,  0x10fd57, 2718, 0x1107f5, 1280, 0,       0},
-    {"Room 10",                               0x134175, 46080, 0x13f575, 768,  0x13f875,    3, 0x13f878, 1280, 0,       0},
-    {"Room 11",                               0x165847, 46080, 0x170c47, 624,  0,       0,    0x170eb7, 1280, 0,       0},
-    {"Room 12",                               0x18ddea, 46080, 0x1991ea, 624,  0x19945a, 2760, 0x199f22, 1280, 0,       0},
-    {"Philip's Room",                           0x1a4f1c, 46080, 0x1b031c, 768, 0x1b061c, 3, 0x1b061f, 1280, 0x1a4a75, 1191},
-    {"Room 14",                               0x1b168a, 46080, 0x1bca8a, 624,  0,       0,    0,       0,    0,       0},
-    {"Room 15",                               0x1c2718, 46080, 0x1cdb18, 768,  0x1cde18,    3, 0x1cde1b, 1280, 0,       0},
-    {"Room 16",                               0x1d2a9f, 46080, 0x1dde9f, 624,  0x1de10f,  636, 0x1de38b, 1280, 0,       0},
-    {"Church Mosaic (alt copy)",                         0x1eb513, 46080, 0x1f6913, 720,  0x1f6be3, 2445, 0,       0,    0,       0},
-    {"Church Puzzle (alt copy)",                         0x2054e3, 46080, 0x2108e3, 624,  0x210b53, 1992, 0x21131b, 1280, 0x204eb0, 1587},
-    {"Room 18",                               0x206f01, 46080, 0x212301, 624,  0x212571, 5325, 0x213a3e, 1280, 0,       0},
-    {"Inside Church (alt copy)",                         0x21765f, 46080, 0x222a5f, 624,  0x222ccf, 2352, 0x2235ff, 1280, 0x217231, 1070},
-    {"Room 19",                               0x22a238, 46080, 0x235638, 624,  0x2358a8, 3546, 0x236682, 1280, 0,       0},
-    {"Outside Church (alt copy)",                        0x23ae4f, 46080, 0x24624f, 624,  0x2464bf, 3264, 0x24717f, 1280, 0x23a8bc, 1427},
-    {"Room 20",                               0x23df9c, 46080, 0x24939c, 624,  0x24960c, 2511, 0x249fdb, 1280, 0,       0},
-    {"Room 21",                               0x2625e0, 46080, 0x26d9e0, 624,  0,       0,    0x26dc4f, 1280, 0,       0},
-    {"Room 22",                               0x276236, 46080, 0x281636, 768,  0,       0,    0x281936, 1280, 0,       0},
-    {"Maze 66",                                 0x28beb2, 46080, 0x2972b2, 576, 0x297522, 2364, 0x297e5e, 1280, 0x28b9b3, 1279},
-    {"Maze 65",                                 0x29d1b2, 46080, 0x2a85b2, 576, 0x2a8822, 3366, 0x2a9548, 1280, 0x29ccb3, 1279},
-    {"Maze 64",                                 0x2ae6b2, 46080, 0x2b9ab2, 576, 0x2b9d22, 3273, 0x2ba9eb, 1280, 0x2ae1b3, 1279},
-    {"Maze 63",                                 0x2c03b2, 46080, 0x2cb7b2, 576, 0x2cba22, 2034, 0x2cc214, 1280, 0x2bfeb3, 1279},
-    {"Maze 62",                                 0x2d1db2, 46080, 0x2dd1b2, 576, 0x2dd422, 2139, 0x2ddc7d, 1280, 0x2d18b3, 1279},
-    {"Maze 61",                                 0x2e36b2, 46080, 0x2eeab2, 576, 0x2eed22, 2256, 0x2ef5f2, 1280, 0x2e31b3, 1279},
-    {"Maze 60",                                 0x2f4db2, 46080, 0x3001b2, 576, 0x300422, 1404, 0x30099e, 1280, 0x2f48b3, 1279},
-    {"Maze 59",                                 0x3060b2, 46080, 0x3114b2, 576, 0x311722, 1992, 0x311eea, 1280, 0x305bb3, 1279},
-    {"Maze 58",                                 0x3176b2, 46080, 0x322ab2, 576, 0x322d22, 1254, 0x323208, 1280, 0x3171b3, 1279},
-    {"Maze 57",                                 0x3287b2, 46080, 0x333bb2, 576, 0x333e22, 2058, 0x33462c, 1280, 0x3282b3, 1279},
-    {"Maze 56",                                 0x339eb2, 46080, 0x3452b2, 576, 0x345522, 1017, 0x34591b, 1280, 0x3399b3, 1279},
-    {"Maze Entrance",                           0x34adb2, 46080, 0x3561b2, 576, 0x356422, 1884, 0x356b7e, 1280, 0x34a8b3, 1279},
-    {"Maze 54",                                 0x35beb2, 46080, 0x3672b2, 576, 0x367522, 1278, 0x367a20, 1280, 0x35b9b3, 1279},
-    {"Maze 53",                                 0x36ceb2, 46080, 0x3782b2, 576, 0x378522, 267, 0x37862d, 1280, 0x36c9b3, 1279},
-    {"Maze 52",                                 0x37d9b2, 46080, 0x388db2, 576, 0x389022, 1128, 0x38948a, 1280, 0x37d4b3, 1279},
-    {"Maze 51",                                 0x392ab2, 46080, 0x39deb2, 576, 0x39e122, 873, 0x39e48b, 1280, 0x3925b3, 1279},
-    {"Physics Classroom",                       0x3a5a17, 46080, 0x3b0e17, 624, 0x3b1087, 1557, 0x3b169c, 1280, 0x3a55a2, 1141},
-    {"Chemistry Classroom",                     0x3b9173, 46080, 0x3c4573, 624, 0x3c47e3, 1980, 0x3c4f9f, 1280, 0x3b8ca2, 1233},
-    {"Park Right",                              0x3e042a, 46080, 0x3eb82a, 624, 0x3eba9a, 3972, 0x3eca1e, 1280, 0x3dffa2, 1160},
-    {"Park",                                    0x3f723d, 46080, 0x40263d, 624, 0x4028ad, 4728, 0x403b25, 1280, 0x3f6ba2, 1691},
-    {"College Stairs (2nd Floor)",              0x4115cf, 46080, 0x41c9cf, 624, 0x41cc3f, 4128, 0x41dc5f, 1280, 0x410fb3, 1564},
-    {"College Stairs (1st Floor)",              0x43577d, 46080, 0x440b7d, 624, 0x440ded, 2934, 0x441963, 1280, 0x4352b3, 1226},
-    {"Corridor (Miss Barrymore)",               0x44e61f, 46080, 0x459a1f, 624, 0x459c8f, 2484, 0x45a643, 1280, 0x44e0a2, 1405},
-    {"Corridor (Announcement Bd)",              0x466062, 46080, 0x471462, 624, 0x4716d2, 3117, 0x4722ff, 1280, 0x465ba2, 1216},
-    {"Corridor (Sharon & Michael)",             0x47f3d5, 46080, 0x48a7d5, 624, 0x48aa45, 3144, 0x48b68d, 1280, 0x47eea2, 1331},
-    {"Corridor (Caroline)",                     0x49c49d, 46080, 0x4a789d, 624, 0x4a7b0d, 2151, 0x4a8374, 1280, 0x49bcb3, 2026},
-    {"Corridor (Lucas)",                        0x4b34d7, 46080, 0x4be8d7, 624, 0x4beb47, 3297, 0x4bf828, 1280, 0x4b2fa2, 1333},
-    {"Corridor (Margaret)",                     0x4dafca, 46080, 0x4e63ca, 624, 0x4e663a, 3690, 0x4e74a4, 1280, 0x4da9b3, 1559},
-    {"College Lockers",                         0x4f1dbb, 46080, 0x4fd1bb, 624, 0x4fd42b, 2235, 0x4fdce6, 1280, 0x4f17a2, 1561},
-    {"Women's Toilets",                         0x511824, 46080, 0x51cc24, 624, 0x51ce94, 2022, 0x51d67a, 1280, 0x5111a2, 1666},
-    {"Men's Toilets",                           0x51e8e4, 46080, 0x529ce4, 624, 0x529f54, 1980, 0x52a710, 1280, 0x51e3a2, 1346},
-    {"Outside College",                         0x538ac2, 46080, 0x543ec2, 624, 0x544132, 4974, 0x5454a0, 1280, 0x5383a2, 1824},
-    {"Margaret's Room",                         0x55f022, 46080, 0x56a422, 768, 0x56a722, 3, 0x56a725, 1280, 0x55e975, 1709},
-    {"Laboratory",                              0x57e06c, 46080, 0x58946c, 624, 0x5896dc, 2130, 0x589f2e, 1280, 0x57daa2, 1482},
-    {"Map",                                     0x5906a1, 46080, 0x59baa1, 624, 0x59bd11, 1809, 0x59c422, 1280, 0x5902a2, 1023},
-    {"Tobias' Office",                          0x5b13c6, 46080, 0x5bc7c6, 624, 0x5bca36, 1455, 0x5bcfe5, 1280, 0x5b0ba2, 2084},
-    {"Bell Church",                             0x5cde24, 46080, 0x5d9224, 624, 0x5d9494, 861, 0x5d97f1, 1280, 0x5cd9a2, 1154},
-    {"Room 60",                               0x601291, 46080, 0x60c691, 624,  0x60c901, 3237, 0x60d5a6, 1280, 0,       0},
-    {"Church Mosaic",                           0x615952, 46080, 0x620d52, 720, 0x621022, 2445, 0, 0, 0, 0},
-    {"Church Puzzle",                           0x62fa11, 46080, 0x63ae11, 624, 0x63b081, 1992, 0x63b849, 1280, 0x62f3a2, 1647},
-    {"Inside Church",                           0x6430c3, 46080, 0x64e4c3, 624, 0x64e733, 2352, 0x64f063, 1280, 0x642ca2, 1057},
-    {"Outside Church",                          0x669515, 46080, 0x674915, 624, 0x674b85, 3264, 0x675845, 1280, 0x668f73, 1442},
-    {"Outside Administration Building B",       0x68692f, 46080, 0x691d2f, 624, 0x691f9f, 3858, 0x692eb1, 1280, 0x6864a2, 1165},
-    {"Outside Administration Building A",       0x6940b3, 46080, 0x69f4b3, 624, 0x69f723, 5766, 0x6a0da9, 1280, 0x693ba2, 1297},
-    {"Spring Bridge",                           0x6c0eda, 46080, 0x6cc2da, 624, 0x6cc5aa, 3936, 0x6cd50a, 1280, 0x6c0aa2, 1080},
-    {"Library",                                 0x6e31c1, 46080, 0x6ee5c1, 624, 0x6ee831, 2217, 0x6ef0da, 1280, 0x6e29b3, 2062},
-    {"Admin (Secretary Room)",                  0x7143fa, 46080, 0x71f7fa, 624, 0x71fa6a, 2400, 0x7203ca, 1280, 0x713da2, 1624},
-    {"Dean Pepper's Office",                    0x738c4e, 46080, 0x74404e, 624, 0x7442be, 2745, 0x744d77, 1280, 0x7385a2, 1708},
-    {"Administration Corridor",                 0x750190, 46080, 0x75b590, 624, 0x75b800, 2388, 0x75c154, 1280, 0x74fba2, 1518},
-    {"Outside Student Dormitory",               0x76fef6, 46080, 0x77b2f6, 624, 0x77b566, 1524, 0x77bb5a, 1280, 0x76f9ad, 1353},
-    {"Student Dormitory",                       0x7b1e66, 46080, 0x7bd266, 624, 0x7bd566, 6699, 0x7bef91, 1280, 0x7b18a2, 1476},
-    {"Room 75",                               0x7bf8b4, 46080, 0x7cacb4, 768,  0,       0,    0,       0,    0,       0},
-    {"Spring Bridge (Intro)",                   0x7d698f, 46080, 0x7e1d8f, 720, 0, 0, 0, 0, 0x7d6264, 1835},
-    {"Spring Rock",                             0x7e2de6, 46080, 0x7ee1e6, 720, 0x7ee4b6, 3117, 0x7ef0e3, 1280, 0x7e28a2, 1348},
-    {"Student Dormitory Attic",                 0x792de6, 46080, 0x79e1e6, 624, 0x79e456, 4545, 0x79f617, 1280, 0x7926a2, 1860},
-    {"Roman Numbers Paper",                     0x866eea, 46080, 0x8722ea, 624, 0, 0, 0, 0, 0, 0},
-    {"News Paper",                              0x87f2f8, 46080, 0x88a6f8, 624, 0, 0, 0, 0, 0, 0},
-    {"Photo Harrison Margaret",                 0x88ac06, 46080, 0x896006, 624, 0, 0, 0, 0, 0, 0},
+    {"Part 79", 0xcd17e, 46080, 0xd857e, 768, 0x0, 0, 0x0, 0, 0xccf93, 491},
+    {"Part 81", 0x1046e7, 46080, 0x10fae7, 624, 0x10fd57, 2718, 0x1107f5, 1280, 0x103eb3, 2100},
+    {"Lecture Hall (Part 78)", 0x134175, 46080, 0x13f575, 768, 0x0, 0, 0x13f878, 1280, 0x133a75, 1792},
+    {"Part 77", 0x165847, 46080, 0x170c47, 624, 0x170eb7, 4974, 0x172225, 1280, 0x1652a2, 1445},
+    {"Plane (Part 76)", 0x18ddea, 46080, 0x1991ea, 624, 0x19945a, 2760, 0x199f22, 1280, 0x18d6a2, 1864},
+    {"Philip's Room", 0x1a4f1c, 46080, 0x1b031c, 768, 0x1b061c, 3, 0x1b061f, 1280, 0x1a4a75, 1191},
+    {"Sailor (Part 74)", 0x1b168a, 46080, 0x1bca8a, 624, 0x0, 0, 0x0, 0, 0x1b11be, 1228},
+    {"Part 80", 0x1c2718, 46080, 0x1cdb18, 768, 0x1cde18, 3, 0x1cde1b, 1280, 0x1c2175, 1443},
+    {"Policeman (Part 73)", 0x1d2a9f, 46080, 0x1dde9f, 624, 0x1de10f, 636, 0x1de38b, 1280, 0x1d2586, 1305},
+    {"Island Map (Part 70)", 0x1efc7c, 46080, 0x1fb07c, 624, 0x1fb2ec, 1212, 0x1fb7a8, 1280, 0x1ef8a2, 986},
+    {"Flower (Part 72)", 0x206f01, 46080, 0x212301, 624, 0x212571, 5325, 0x213a3e, 1280, 0x206ab3, 1102},
+    {"Fireflies (Part 69)", 0x22a238, 46080, 0x235638, 624, 0x2358a8, 3546, 0x236682, 1280, 0x229cb3, 1413},
+    {"Outside Maze", 0x23df9c, 46080, 0x24939c, 576, 0x24960c, 2511, 0x249fdb, 1280, 0x23dbb3, 1001},
+    {"Part 68", 0x2625e0, 46080, 0x26d9e0, 624, 0x26dc50, 5499, 0x26f1cb, 1280, 0x261fa2, 1598},
+    {"Part 71", 0x276236, 46080, 0x281636, 624, 0x2818a6, 2586, 0x2822c0, 1280, 0x275cb3, 1411},
+    {"Maze 66", 0x28beb2, 46080, 0x2972b2, 576, 0x297522, 2364, 0x297e5e, 1280, 0x28b9b3, 1279},
+    {"Maze 65", 0x29d1b2, 46080, 0x2a85b2, 576, 0x2a8822, 3366, 0x2a9548, 1280, 0x29ccb3, 1279},
+    {"Maze 64", 0x2ae6b2, 46080, 0x2b9ab2, 576, 0x2b9d22, 3273, 0x2ba9eb, 1280, 0x2ae1b3, 1279},
+    {"Maze 63", 0x2c03b2, 46080, 0x2cb7b2, 576, 0x2cba22, 2034, 0x2cc214, 1280, 0x2bfeb3, 1279},
+    {"Maze 62", 0x2d1db2, 46080, 0x2dd1b2, 576, 0x2dd422, 2139, 0x2ddc7d, 1280, 0x2d18b3, 1279},
+    {"Maze 61", 0x2e36b2, 46080, 0x2eeab2, 576, 0x2eed22, 2256, 0x2ef5f2, 1280, 0x2e31b3, 1279},
+    {"Maze 60", 0x2f4db2, 46080, 0x3001b2, 576, 0x300422, 1404, 0x30099e, 1280, 0x2f48b3, 1279},
+    {"Maze 59", 0x3060b2, 46080, 0x3114b2, 576, 0x311722, 1992, 0x311eea, 1280, 0x305bb3, 1279},
+    {"Maze 58", 0x3176b2, 46080, 0x322ab2, 576, 0x322d22, 1254, 0x323208, 1280, 0x3171b3, 1279},
+    {"Maze 57", 0x3287b2, 46080, 0x333bb2, 576, 0x333e22, 2058, 0x33462c, 1280, 0x3282b3, 1279},
+    {"Maze 56", 0x339eb2, 46080, 0x3452b2, 576, 0x345522, 1017, 0x34591b, 1280, 0x3399b3, 1279},
+    {"Maze Entrance", 0x34adb2, 46080, 0x3561b2, 576, 0x356422, 1884, 0x356b7e, 1280, 0x34a8b3, 1279},
+    {"Maze 54", 0x35beb2, 46080, 0x3672b2, 576, 0x367522, 1278, 0x367a20, 1280, 0x35b9b3, 1279},
+    {"Maze 53", 0x36ceb2, 46080, 0x3782b2, 576, 0x378522, 267, 0x37862d, 1280, 0x36c9b3, 1279},
+    {"Maze 52", 0x37d9b2, 46080, 0x388db2, 576, 0x389022, 1128, 0x38948a, 1280, 0x37d4b3, 1279},
+    {"Maze 51", 0x392ab2, 46080, 0x39deb2, 576, 0x39e122, 873, 0x39e48b, 1280, 0x3925b3, 1279},
+    {"Physics Classroom", 0x3a5a17, 46080, 0x3b0e17, 624, 0x3b1087, 1557, 0x3b169c, 1280, 0x3a55a2, 1141},
+    {"Chemistry Classroom", 0x3b9173, 46080, 0x3c4573, 624, 0x3c47e3, 1980, 0x3c4f9f, 1280, 0x3b8ca2, 1233},
+    {"Park Right", 0x3e042a, 46080, 0x3eb82a, 624, 0x3eba9a, 3972, 0x3eca1e, 1280, 0x3dffa2, 1160},
+    {"Park", 0x3f723d, 46080, 0x40263d, 624, 0x4028ad, 4728, 0x403b25, 1280, 0x3f6ba2, 1691},
+    {"College Stairs (2nd Floor)", 0x4115cf, 46080, 0x41c9cf, 624, 0x41cc3f, 4128, 0x41dc5f, 1280, 0x410fb3, 1564},
+    {"College Stairs (1st Floor)", 0x43577d, 46080, 0x440b7d, 624, 0x440ded, 2934, 0x441963, 1280, 0x4352b3, 1226},
+    {"Corridor (Miss Barrymore)", 0x44e61f, 46080, 0x459a1f, 624, 0x459c8f, 2484, 0x45a643, 1280, 0x44e0a2, 1405},
+    {"Corridor (Announcement Bd)", 0x466062, 46080, 0x471462, 624, 0x4716d2, 3117, 0x4722ff, 1280, 0x465ba2, 1216},
+    {"Corridor (Sharon & Michael)", 0x47f3d5, 46080, 0x48a7d5, 624, 0x48aa45, 3144, 0x48b68d, 1280, 0x47eea2, 1331},
+    {"Corridor (Caroline)", 0x49c49d, 46080, 0x4a789d, 624, 0x4a7b0d, 2151, 0x4a8374, 1280, 0x49bcb3, 2026},
+    {"Corridor (Lucas)", 0x4b34d7, 46080, 0x4be8d7, 624, 0x4beb47, 3297, 0x4bf828, 1280, 0x4b2fa2, 1333},
+    {"Corridor (Margaret)", 0x4dafca, 46080, 0x4e63ca, 624, 0x4e663a, 3690, 0x4e74a4, 1280, 0x4da9b3, 1559},
+    {"College Lockers", 0x4f1dbb, 46080, 0x4fd1bb, 624, 0x4fd42b, 2235, 0x4fdce6, 1280, 0x4f17a2, 1561},
+    {"Women's Toilets", 0x511824, 46080, 0x51cc24, 624, 0x51ce94, 2022, 0x51d67a, 1280, 0x5111a2, 1666},
+    {"Men's Toilets", 0x51e8e4, 46080, 0x529ce4, 624, 0x529f54, 1980, 0x52a710, 1280, 0x51e3a2, 1346},
+    {"Outside College", 0x538ac2, 46080, 0x543ec2, 624, 0x544132, 4974, 0x5454a0, 1280, 0x5383a2, 1824},
+    {"Margaret's Room", 0x55f022, 46080, 0x56a422, 768, 0x56a722, 3, 0x56a725, 1280, 0x55e975, 1709},
+    {"Laboratory", 0x57e06c, 46080, 0x58946c, 624, 0x5896dc, 2130, 0x589f2e, 1280, 0x57daa2, 1482},
+    {"Map", 0x5906a1, 46080, 0x59baa1, 624, 0x59bd11, 1809, 0x59c422, 1280, 0x5902a2, 1023},
+    {"Tobias' Office", 0x5b13c6, 46080, 0x5bc7c6, 624, 0x5bca36, 1455, 0x5bcfe5, 1280, 0x5b0ba2, 2084},
+    {"Bell Church", 0x5cde24, 46080, 0x5d9224, 624, 0x5d9494, 861, 0x5d97f1, 1280, 0x5cd9a2, 1154},
+    {"Church Final Scene (Part 32)", 0x5df6d0, 46080, 0x5eaad0, 768, 0x0, 0, 0x0, 0, 0x0, 0},
+    {"Church Lock (Part 32)", 0x5f4a52, 46080, 0x5ffe52, 624, 0x6000c2, 1401, 0x0, 0, 0x0, 0},
+    {"Church Control Room", 0x601291, 46080, 0x60c691, 624, 0x60c901, 3237, 0x60d5a6, 1280, 0x600d73, 1310},
+    {"Church Mosaic", 0x615952, 46080, 0x620d52, 720, 0x621022, 2445, 0x0, 0, 0x0, 0},
+    {"Church Puzzle", 0x62fa11, 46080, 0x63ae11, 624, 0x63b081, 1992, 0x63b849, 1280, 0x62f3a2, 1647},
+    {"Inside Church", 0x6430c3, 46080, 0x64e4c3, 624, 0x64e733, 2352, 0x64f063, 1280, 0x642ca2, 1057},
+    {"Outside Church", 0x669515, 46080, 0x674915, 624, 0x674b85, 3264, 0x675845, 1280, 0x668f73, 1442},
+    {"Outside Administration Building B", 0x68692f, 46080, 0x691d2f, 624, 0x691f9f, 3858, 0x692eb1, 1280, 0x6864a2, 1165},
+    {"Outside Administration Building A", 0x6940b3, 46080, 0x69f4b3, 624, 0x69f723, 5766, 0x6a0da9, 1280, 0x693ba2, 1297},
+    {"Spring Bridge", 0x6c0eda, 46080, 0x6cc2da, 624, 0x6cc5aa, 3936, 0x6cd50a, 1280, 0x6c0aa2, 1080},
+    {"Library", 0x6e31c1, 46080, 0x6ee5c1, 624, 0x6ee831, 2217, 0x6ef0da, 1280, 0x6e29b3, 2062},
+    {"Admin (Secretary Room)", 0x7143fa, 46080, 0x71f7fa, 624, 0x71fa6a, 2400, 0x7203ca, 1280, 0x713da2, 1624},
+    {"Dean Pepper's Office", 0x738c4e, 46080, 0x74404e, 624, 0x7442be, 2745, 0x744d77, 1280, 0x7385a2, 1708},
+    {"Administration Corridor", 0x750190, 46080, 0x75b590, 624, 0x75b800, 2388, 0x75c154, 1280, 0x74fba2, 1518},
+    {"Outside Student Dormitory", 0x76fef6, 46080, 0x77b2f6, 624, 0x77b566, 1524, 0x77bb5a, 1280, 0x76f9ad, 1353},
+    {"Student Dormitory Attic", 0x792de6, 46080, 0x79e1e6, 624, 0x79e456, 4545, 0x79f617, 1280, 0x7926a2, 1860},
+    {"Student Dormitory", 0x7b1e66, 46080, 0x7bd266, 624, 0x7bd566, 6699, 0x7bef91, 1280, 0x7b18a2, 1476},
+    {"Spring Bridge (Intro)", 0x7d698f, 46080, 0x7e1d8f, 720, 0x0, 0, 0x0, 0, 0x7d6264, 1835},
+    {"Spring Rock", 0x7e2de6, 46080, 0x7ee1e6, 720, 0x7ee4b6, 3117, 0x7ef0e3, 1280, 0x7e28a2, 1348},
+    {"Roman Numbers Paper", 0x866eea, 46080, 0x8722ea, 624, 0x0, 0, 0x0, 0, 0x0, 0},
+    {"News Paper", 0x87f2f8, 46080, 0x88a6f8, 624, 0x0, 0, 0x0, 0, 0x0, 0},
+    {"Photo Harrison Margaret", 0x88ac06, 46080, 0x896006, 624, 0x0, 0, 0x0, 0, 0x0, 0},
 }
 
--- CD: full-screen images (320x200 = 64000 bytes)
+-- CD: splash / credit backgrounds (320x200), plus the 320x122 title image.
 local CD_FULLSCREEN = {
     {"Pendulo Studios",    0x7efa6e, 64000, 0x7ef76e, 768},
     {"Graphic Adventure",  0x7ff86e, 64000, 0x7ff56e, 768},
     {"Presents",           0x80f66e, 64000, 0x80f36e, 768},
     {"Optik Software",     0x81f46e, 64000, 0x81f16e, 768},
+    {"Igor Title (320x122)", 0x7c1434, 39040, 0x7cacb4, 768},
+    {"Credits Background 1", 0x6596e, 64000, 0x7536e, 768},
+    {"Credits Background 2", 0x55b6e, 64000, 0x6556e, 768},
+    {"Credits Background 3", 0x45d6e, 64000, 0x5576e, 768},
+    {"Credits Background 4", 0x35f6e, 64000, 0x4596e, 768},
+    {"Credits Background 5", 0x2616e, 64000, 0x35b6e, 768},
+    {"Credits Background 6", 0x1636e, 64000, 0x25d6e, 768},
+    {"Credits Background 7", 0x656e, 64000, 0x15f6e, 768},
 }
 
 -- CD: UI and sprite resources
@@ -220,7 +225,11 @@ local CD_UI = {
     {"Verbs Panel (320x12)",     0x848ae0, 3840},
     {"Inventory Panel (320x30)", 0x89a298, 9600},
     {"Objects Sheet (320x150)",  0x89c818, 48000},
-    {"Meanwhile (320x144)",      0x56aeb7, 46080},
+    {"Meanwhile (320x144)",      0x56aeb7, 46080, "card"},
+    {"Minutes Later (Part 78)",  0x13ffb7, 46080, "card"},
+    {"Next Day (Part 78)",       0x14b4b7, 46080, "card"},
+    {"Time Card (Part 73)",      0x1deab7, 46080, "card"},
+    {"Time Card (Part 76)",      0x179db7, 46080, "card"},
 }
 
 -- CD: Igor walking sprites
@@ -238,9 +247,11 @@ local CD_IGOR_SPRITES = {
 }
 
 -- CD: sprite / animation resource groups (FRM_*, ANM_*): { name, pal_off, pal_size, { {off, size}, ... } }
--- Chunks are concatenated in order (as the engine does) and then scanned for sparse RLE frames.
+-- Chunks are concatenated in the game's load order. Indexed layouts use the
+-- original offset tables; raw layouts use room-specific geometry / strides.
+-- Groups without a layout retain the older sparse-frame scan.
 local CD_ANIM_GROUPS = {
-    {"Philip Vodka (ANM)", 0x1b031c, 768, {{0x19e46f, 24175}}},
+    {"Philip Vodka (ANM)", 0x1b031c, 768, {{0x19e46f, 24175}, {0x1a42de, 80}}, indexed = {{0, 0x5e6d, 40, 1}}, fixed = false},
     {"Park (FRM)", 0x40263d, 624, {{0x3ed1d9, 30376}, {0x3f4881, 62}, {0x3f48bf, 3969}, {0x3f5840, 3150}}},
     {"College Stairs First Floor (FRM)", 0x440b7d, 624, {{0x428c70, 48790}, {0x434b06, 140}}},
     {"Women Toilets (FRM)", 0x51cc24, 624, {{0x50c907, 854}, {0x50cc5d, 12}, {0x50cc69, 2744}, {0x50d721, 12855}, {0x510958, 102}}},
@@ -249,12 +260,29 @@ local CD_ANIM_GROUPS = {
     {"Spring Rock (FRM)", 0x7ee1e6, 720, {{0x6ba53e, 84}, {0x6ba592, 759}, {0x6ba889, 5145}, {0x6bbca2, 4508}, {0x6bce3e, 13364}, {0x6c0272, 54}}},
     {"Park Laura (FRM)", 0x40263d, 624, {{0x3d58a5, 40622}, {0x3df753, 114}, {0x3df7c5, 48}}},
     {"Dean Pepper Office (FRM)", 0x74404e, 624, {{0x729b38, 2448}, {0x72a4c8, 2254}, {0x72ad96, 2744}, {0x72b84e, 2652}, {0x72c2aa, 2842}, {0x72cdc4, 2842}, {0x72d8de, 4293}, {0x72e9a3, 3850}, {0x72f8ad, 4704}, {0x730b0d, 1800}, {0x731215, 3480}, {0x731fad, 20}, {0x731fc1, 5075}, {0x733394, 620}, {0x733600, 18298}, {0x737d7a, 38}}},
-    {"Philip Laura Intro (ANM)", 0x1b031c, 768, {{0x7cb4d4, 29824}}},
-    {"Laura Intro (ANM)", 0x1b031c, 768, {{0x7d299e, 12793}}},
+    {"Philip Laura Intro (ANM)", 0x7e1d8f, 720, {{0x7cb4d4, 29824}, {0x7d2954, 74}}, indexed = {{0, 0x7480, 37}}, fixed = false},
+    {"Laura Intro (ANM)", 0x7e1d8f, 720, {{0x7d299e, 12793}, {0x7d5b97, 48}}, indexed = {{0, 0x31f9, 24}}, fixed = false},
     {"Outside Church (FRM)", 0x674915, 624, {{0x661f88, 1869}, {0x6626d5, 20}, {0x6626e9, 2472}, {0x663091, 16}, {0x6630a1, 5147}, {0x6644bc, 14}, {0x6644ca, 5145}, {0x65b469, 27365}, {0x661f4e, 58}, {0x6658e3, 6805}, {0x667378, 14}, {0x667386, 5145}}},
     {"Church Puzzle (FRM)", 0x63ae11, 624, {{0x621cd1, 980}, {0x6220a5, 945}, {0x622456, 1794}, {0x623418, 2106}, {0x623c52, 1260}, {0x62413e, 1036}, {0x62454a, 1053}, {0x624967, 6}, {0x62496d, 26980}, {0x62b2d1, 120}, {0x62b349, 11607}, {0x62e0a0, 20}, {0x622b58, 2240}, {0x62e0b4, 2904}}},
     {"Library (FRM)", 0x6ee5c1, 624, {{0x6d9108, 2254}, {0x6d99d6, 18823}, {0x6de35d, 50}, {0x6de38f, 1440}, {0x6de92f, 14616}}},
     {"Numbers Paper (FRM)", 0x1b031c, 768, {{0x8728d1, 51163}, {0x87f0ac, 40}}},
+    -- Frame banks identified by the current fork; offsets are relative to the concatenated data.
+    {"Firefly A (Part 69)", 0x235638, 624, {{0x21b0d3, 58485}}, indexed = {{0x0, 0xb138, 0x64}}},
+    {"Firefly B (Part 69)", 0x235638, 624, {{0x21b0d3, 58485}}, indexed = {{0xb200, 0xbba, 0x40}}},
+    {"Firefly Transformation (Part 69)", 0x235638, 624, {{0x21b0d3, 58485}}, indexed = {{0xbe3a, 0x3ff, 0x16}}},
+    {"Firefly Ending (Part 69)", 0x235638, 624, {{0x21b0d3, 58485}}, indexed = {{0xc265, 0x179c, 0xf}}},
+    {"Sailor (Part 74)", 0x1bca8a, 624, {{0x776ce, 5598}}, indexed = {{0x0, 0x15be, 0x10}}},
+    {"Plane Door (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, indexed = {{0x2902, 0x1753, 0x9}}, outfit = 2},
+    {"Parachute (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, indexed = {{0x4067, 0x3abb, 0x1b}}, outfit = 2},
+    {"Part 77 Frames", 0x170c47, 624, {{0x15e36f, 26666}}, indexed = {{0x0, 0x67d2, 0x2c}}},
+    {"Lecture Hall Figures (Part 78)", 0x13f575, 768, {{0x123807, 64402}}, indexed = {{0x0, 0xf832, 0x40}}},
+    {"Part 79 Figures", 0xd857e, 768, {{0xb1ba3, 64517}}, indexed = {{0x0, 0xf858, 0x58}}},
+    {"Administration Door 1", 0x75b590, 624, {{0x74c8d6, 11085}}, raw = {{0x0, 0x1e, 0x35, 0x3}}},
+    {"Administration Door 2", 0x75b590, 624, {{0x74c8d6, 11085}}, raw = {{0x12a2, 0x17, 0x37, 0x3}}},
+    {"Boat States (Part 70)", 0x1fb07c, 624, {{0x1d0062, 4290}}, raw = {{0x0, 0x37, 0x27, 0x2}}},
+    {"Policeman (Part 73)", 0x1dde9f, 624, {{0x1ce53d, 6890}}, raw = {{0x1a, 0x1a, 0x34, 0x5, 0x562}}},
+    {"Plane Door States (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, raw = {{0x54, 0x44, 0x36, 0x2}}, outfit = 2},
+    {"Take Parachute (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, raw = {{0x1d04, 0x11, 0x10, 0x3}}, outfit = 2},
 }
 
 -- CD: Text resources
@@ -877,7 +905,7 @@ end
 local function read_palette(fh, pal_off, pal_size)
     if pal_off == 0 or pal_size == 0 then return nil end
     local pal_raw = file_read(fh, pal_off, pal_size)
-    if not pal_raw then return nil end
+    if not pal_raw or #pal_raw ~= pal_size then return nil end
 
     local palette = {}
     local out_of_range = 0
@@ -1115,6 +1143,13 @@ local PAL_IGOR_1 = {
     0x04,0x08,0x0E, 0x02,0x05,0x09, 0x01,0x02,0x04, 0x25,0x05,0x05,
 }
 
+local PAL_IGOR_2 = {
+    0x34,0x1F,0x17, 0x30,0x19,0x11, 0x25,0x13,0x0B, 0x1D,0x0E,0x05,
+    0x06,0x06,0x06, 0x3D,0x3D,0x3D, 0x27,0x1A,0x00, 0x1C,0x0F,0x00,
+    0x2B,0x26,0x23, 0x25,0x20,0x1D, 0x1D,0x19,0x17, 0x33,0x33,0x33,
+    0,0,0, 0,0,0, 0,0,0, 0,0,0,
+}
+
 local PAL_96_1 = {
     0x00,0x00,0x00, 0x18,0x00,0x19, 0x00,0x00,0x1D, 0x00,0x03,0x21,
     0x00,0x09,0x26, 0x00,0x11,0x2B, 0x00,0x00,0x32, 0x00,0x16,0x00,
@@ -1140,8 +1175,8 @@ local function overlay_palette(palette, start_index, vals)
 end
 
 -- Overlay the engine's fixed colour ranges onto an (already expanded) palette.
-local function apply_fixed_palette(palette)
-    overlay_palette(palette, 192, PAL_IGOR_1)
+local function apply_fixed_palette(palette, outfit)
+    overlay_palette(palette, 192, outfit == 2 and PAL_IGOR_2 or PAL_IGOR_1)
     overlay_palette(palette, 208, PAL_96_1)
     overlay_palette(palette, 240, PAL_48_1)
     return palette
@@ -1169,9 +1204,9 @@ end
 local FRAME_MIN_BYTES = 12
 
 -- Returns end position (1-based, exclusive), y, h, minx, maxx or nil
-local function parse_sparse_frame(data, p)
+local function parse_sparse_frame(data, p, allow_empty)
     local n = #data
-    if p + 3 > n then return nil end
+    if p < 1 or p + 3 > n then return nil end
     local y = data:byte(p) + data:byte(p + 1) * 256
     local h = data:byte(p + 2) + data:byte(p + 3) * 256
     if h < 1 or h > 200 or y + h > 200 then return nil end
@@ -1190,9 +1225,8 @@ local function parse_sparse_frame(data, p)
                 if q > n then return nil end
                 len = 256 - len
                 q = q + 1
-                if len == 0 then return nil end
             else
-                if len == 0 then return nil end
+                if len == 0 and not allow_empty then return nil end
                 q = q + len
             end
             if pos < minx then minx = pos end
@@ -1202,8 +1236,47 @@ local function parse_sparse_frame(data, p)
         end
     end
     if q - 1 > n then return nil end
-    if minx == 999 then return nil end
+    if minx == 999 and not allow_empty then return nil end
     return q, y, h, minx, maxx
+end
+
+-- getAnimFrame() uses 1-based offsets relative to each frame bank, while
+-- the table's location is relative to that same bank. Never scan indexed data.
+local function read_indexed_frames(data, layouts)
+    local frames = {}
+    for _, layout in ipairs(layouts) do
+        local base, offset, count, skip = layout[1], layout[2], layout[3], layout[4] or 0
+        if count < 1 or count > 512 then return nil end
+        for i = 0, count - 1 do
+            local word = base + offset + (i + skip) * 2 + 1
+            if word < 1 or word + 1 > #data then return nil end
+            local relative = u16le(data, word)
+            if relative == 0 then return nil end
+            local pos = base + relative
+            local q, y, h, minx, maxx = parse_sparse_frame(data, pos, true)
+            if not q then return nil end
+            frames[#frames + 1] = {pos = pos, y = y, h = h, minx = minx, maxx = maxx}
+        end
+    end
+    return frames
+end
+
+-- Raw frames have geometry supplied by the room code, sometimes with a
+-- padded stride. Treating them as sparse streams produces accidental frames.
+local function render_raw_frames(data, layouts, palette)
+    local handles = {}
+    for _, layout in ipairs(layouts) do
+        local start, w, h, count = layout[1], layout[2], layout[3], layout[4]
+        local stride = layout[5] or w * h
+        if w < 1 or w > 320 or h < 1 or h > 200 or count < 1 or count > 512 then return nil end
+        if start < 0 or start + (count - 1) * stride + w * h > #data then return nil end
+        for frame = 0, count - 1 do
+            local pixels = {}
+            for i = 1, w * h do pixels[i] = data:byte(start + frame * stride + i) end
+            handles[#handles + 1] = image_create_indexed(w, h, pixels, palette)
+        end
+    end
+    return handles
 end
 
 local function scan_sparse_frames(data)
@@ -1375,8 +1448,9 @@ local CD_TEXT_HIGH = {
     [0xA2] = "\195\179", -- o-acute
     [0xA3] = "\195\186", -- u-acute
     [0xA4] = "\195\177", -- n-tilde
-    [0xA8] = "\194\168", -- inverted question
-    [0xAD] = "\194\169", -- inverted exclamation
+    [0xA5] = "\195\145", -- N-tilde
+    [0xA8] = "\194\191", -- inverted question
+    [0xAD] = "\194\161", -- inverted exclamation
 }
 
 -- Decode one shuffled byte from a room TXT_ block. Letters (upper and lower
@@ -1407,6 +1481,7 @@ local function codepoint_to_utf8(c)
 end
 
 local function decode_shifted_bytes(data, from, len)
+    if from < 1 or from + len - 1 > #data then return nil end
     local out = {}
     for i = 0, len - 1 do
         out[#out + 1] = codepoint_to_utf8((u8(data, from + i) - 0x6D) % 256)
@@ -1437,7 +1512,9 @@ local function decode_main_dialogue(data)
         local pos = TXT_MAIN_DLG_BASE + i * TXT_MAIN_DLG_STRIDE
         if pos > #data then break end
         local len = (u8(data, pos) - 0x6D) % 256
-        out[i] = len > 0 and decode_shifted_bytes(data, pos + 1, len) or nil
+        if len <= 50 then
+            out[i] = len > 0 and decode_shifted_bytes(data, pos + 1, len) or nil
+        end
     end
     return out
 end
@@ -1447,11 +1524,11 @@ end
 -- terminated by 0xF6 and 0xF4 marks the next list entry.
 local TXT_ROOM_HEADER = 752 + 1   -- 1-based
 
-local function decode_room_dialogue(data)
+local function decode_room_dialogue(data, header, dialogue_only)
     local out = {}
-    local pos = TXT_ROOM_HEADER
-    for _, base in ipairs({0, 200}) do
-        local idx = 0
+    local pos = header or TXT_ROOM_HEADER
+    for _, base in ipairs(dialogue_only and {200} or {0, 200}) do
+        local idx = base == 0 and -1 or 0
         while pos + 1 <= #data do
             local code = u8(data, pos)
             pos = pos + 1
@@ -1510,7 +1587,8 @@ local function speech_dialogue_text(game_path, rooms, id, cache)
         end
         file_close(fh)
         if not raw or #raw == 0 then return nil end
-        strings = source == "main" and decode_main_dialogue(raw) or decode_room_dialogue(raw)
+        strings = source == "main" and decode_main_dialogue(raw)
+            or (source == "Part 79" and decode_room_dialogue(raw, 1, true) or decode_room_dialogue(raw))
         cache[source] = strings
     end
 
@@ -1785,7 +1863,7 @@ function engine.get_resources(game_path)
             sub[#sub + 1] = {id = "room_box_" .. i, name = "Walkbox Areas", type = "image"}
         end
         if room[11] > 0 then
-            sub[#sub + 1] = {id = "room_txt_" .. i, name = "Text Strings", type = "image"}
+            sub[#sub + 1] = {id = "room_txt_" .. i, name = "Text Strings", type = "text"}
         end
         room_children[#room_children + 1] = {
             id = "room_" .. i,
@@ -1831,7 +1909,7 @@ function engine.get_resources(game_path)
         text_children[#text_children + 1] = {
             id = "text_" .. i,
             name = t[1],
-            type = "image",
+            type = "text",
         }
     end
 
@@ -2176,7 +2254,20 @@ function engine.load_resource(game_path, resource_id)
                 return {type = "text", text = "Failed to read text for " .. name}
             end
 
-            local decoded = decode_text(txt_raw)
+            local decoded
+            if version == VER_CD then
+                local strings = name == "Part 79" and decode_room_dialogue(txt_raw, 1, true)
+                    or decode_room_dialogue(txt_raw)
+                local lines = {}
+                for i = 0, 249 do
+                    if strings[i] then
+                        lines[#lines + 1] = string.format("[%d] %s", i, strings[i])
+                    end
+                end
+                decoded = table.concat(lines, "\n")
+            else
+                decoded = decode_text(txt_raw)
+            end
             return {
                 type = "text",
                 text = string.format("%s - Text Strings (%d bytes)\n\n%s", name, txt_size, decoded),
@@ -2238,6 +2329,12 @@ function engine.load_resource(game_path, resource_id)
         -- of a room palette for the low colours
         local palette = read_ui_palette(fh, version == VER_FLOPPY and FLOPPY_UI_PAL or nil)
         file_close(fh)
+        if u[4] == "card" then
+            -- Intertitles fade only three colours: black, orange, dark red.
+            palette = {}
+            for i = 1, 768 do palette[i] = 0 end
+            overlay_palette(palette, 1, {63,32,0, 44,12,0})
+        end
 
         if not img_raw or not palette then
             return {type = "text", text = "Failed to read UI data"}
@@ -2289,16 +2386,36 @@ function engine.load_resource(game_path, resource_id)
         local palette = read_palette(fh, g[2], g[3])
         local chunks = {}
         for _, c in ipairs(g[4]) do
-            chunks[#chunks + 1] = file_read(fh, c[1], c[2]) or ""
+            local chunk = file_read(fh, c[1], c[2])
+            if not chunk or #chunk ~= c[2] then
+                file_close(fh)
+                return {type = "text", text = "Incomplete animation data for " .. g[1]}
+            end
+            chunks[#chunks + 1] = chunk
         end
         file_close(fh)
         if not palette then
             return {type = "text", text = "Failed to read palette for " .. g[1]}
         end
-        apply_fixed_palette(palette)
+        if g.fixed ~= false then apply_fixed_palette(palette, g.outfit) end
 
         local data = table.concat(chunks)
-        local frames = scan_sparse_frames(data)
+        if g.raw then
+            local handles = render_raw_frames(data, g.raw, palette)
+            if not handles then return {type = "text", text = g[1] .. ": invalid raw frame layout"} end
+            return {
+                type = "animation", animation = animation_create(handles, 120), delay_ms = 120,
+                description = string.format("%s  |  %d raw frames  |  %dx%d  |  frame bank preview",
+                    g[1], #handles, g.raw[1][2], g.raw[1][3]),
+            }
+        end
+        local frames
+        if g.indexed then
+            frames = read_indexed_frames(data, g.indexed)
+            if not frames then return {type = "text", text = g[1] .. ": invalid frame offset table"} end
+        else
+            frames = scan_sparse_frames(data)
+        end
         if #frames == 0 then
             return {type = "text", text = g[1] .. ": no sparse frames found"}
         end
@@ -2313,6 +2430,7 @@ function engine.load_resource(game_path, resource_id)
             if f.y + f.h > y1 then y1 = f.y + f.h end
         end
         local w, h = x1 - x0, y1 - y0
+        if w < 1 or h < 1 then return {type = "text", text = g[1] .. ": empty frame bank"} end
 
         -- Render every frame; find a colour index no frame uses for transparency
         local rendered = {}
@@ -2341,8 +2459,8 @@ function engine.load_resource(game_path, resource_id)
             animation = anim,
             delay_ms = 120,
             description = string.format(
-                "%s  |  %d frames  |  canvas %dx%d at (%d,%d)  |  %d bytes",
-                g[1], #frames, w, h, x0, y0, #data),
+                "%s  |  %d %s frames  |  canvas %dx%d at (%d,%d)  |  %d bytes  |  frame bank preview",
+                g[1], #frames, g.indexed and "indexed" or "scanned", w, h, x0, y0, #data),
         }
     end
 
@@ -2358,8 +2476,9 @@ function engine.load_resource(game_path, resource_id)
         if not fh then return {type = "text", text = "Cannot open data file"} end
 
         local sprite_raw = file_read(fh, s[2], s[3])
-        -- Igor's own colours live at 192..207 (PAL_IGOR_1)
+        -- Both outfits use indices 192..207, with different fixed colours.
         local palette = read_ui_palette(fh, version == VER_FLOPPY and FLOPPY_UI_PAL or nil)
+        if palette and idx > 5 then overlay_palette(palette, 192, PAL_IGOR_2) end
         file_close(fh)
 
         if not sprite_raw or not palette then
@@ -2440,7 +2559,31 @@ function engine.load_resource(game_path, resource_id)
             return {type = "text", text = "Failed to read text data"}
         end
 
-        local decoded = decode_text(txt_raw)
+        local decoded
+        if version == VER_CD then
+            local lines = {}
+            local sections = {
+                {"Prepositions", 0, 7, 3}, {"Inventory Objects", 0x2A, 31, 37},
+                {"Dialogue", 0x8BA, 51, 250}, {"Verbs", 0x6CA4, 12, 9},
+            }
+            for _, section in ipairs(sections) do
+                lines[#lines + 1] = section[1]
+                for i = 0, section[4] - 1 do
+                    local pos = section[2] + i * section[3] * 2 + 1
+                    if pos <= #txt_raw then
+                        local len = (txt_raw:byte(pos) - 0x6D) % 256
+                        if len > 0 and len < section[3] then
+                            local line = decode_shifted_bytes(txt_raw, pos + 1, len)
+                            if line then lines[#lines + 1] = string.format("[%d] %s", i, line) end
+                        end
+                    end
+                end
+                lines[#lines + 1] = ""
+            end
+            decoded = table.concat(lines, "\n")
+        else
+            decoded = decode_text(txt_raw)
+        end
         return {
             type = "text",
             text = string.format("%s (%d bytes)\n\n%s", t[1], t[3], decoded),

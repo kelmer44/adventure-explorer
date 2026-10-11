@@ -38,7 +38,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
-| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Sprites, Animations, Music, Sound Effects, Speech | ✅ Working |
+| Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -67,6 +67,16 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file
 > in the game folder for encrypted games (format: `ID;Game Name;Key`, one entry per line).
 > Unencrypted archives and archives shipped with known keys work without any extra setup.
+
+Igor's Spanish CD version exposes 74 catalog-backed room/scene backgrounds with
+available masks, walkbox areas and decoded text; the title image, four splash
+screens, seven credit backgrounds and five intertitles; both Igor outfits; and
+31 sprite/animation groups. Nineteen groups use verified frame tables or raw
+frame geometry; twelve retain sparse-frame scanning. Animation previews show
+frame banks at a uniform speed, rather than replaying room scripts. CD audio
+includes 68 effects and 1,292 speech clips with dialogue labels where known.
+Music preview is available for the floppy version; CD music uses separate audio
+tracks and is not extracted from `IGOR.EXE` or `IGOR.DAT`.
 
 ## Building & Running
 
