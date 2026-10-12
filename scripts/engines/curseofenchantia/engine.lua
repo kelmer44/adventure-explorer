@@ -32,6 +32,23 @@
 -- The 56 rooms almost all paint with indices 0..191. A handful also touch
 -- 192..255, which the file does not store; the game rewrites those entries at
 -- runtime for effects such as water and fire.
+--
+-- .SPR  a room sprite bank, not compressed. It opens with a 16-bit paragraph
+--         count H, so it holds H*8 table entries; every entry is a paragraph
+--         (16-byte) offset of one sprite and a zero entry means "absent".
+--         A sprite is stored VGA-planar, exactly as the game blits it:
+--             u16 width, u16 height,
+--             u16 end2, u16 end1, u16 end0,   -- ends of planes 0, 1 and 2
+--             plane0 || plane1 || plane2 || plane3
+--         Plane 0 spans [0, end0), plane 1 [end0, end1), plane 2 [end1, end2)
+--         and plane 3 [end2, next sprite). Each plane is a run-length stream
+--         decoded row by row to ceil(width/4) bytes: a 0x00 byte ends the row,
+--         a byte in 0x01..0x7F is a literal run of that many bytes, and a byte
+--         in 0x80..0xFF first skips (256 - byte) transparent bytes and then
+--         reads a literal run (its count and bytes). The byte at plane p, row y
+--         and byte offset k is the colour of pixel (4*k + p, y), so the four
+--         planes interleave into one width-by-height image whose colours index
+--         SPRITES.PAL.
 -- ============================================================================
 
 local engine = {}
@@ -635,6 +652,127 @@ local function load_dat(game_path, stem)
     }
 end
 
+-- .SPR: a bank of small animated sprites
+-- ------------------------------------------------------------------------
+local SPR_PALETTE = "SPRITES"
+
+-- Read the paragraph offset table. entry[0] is the header size, so it also
+-- fixes the entry count at entry[0] * 8; each entry is a 16-byte paragraph.
+local function spr_entries(data)
+    if not data or #data < 2 then return nil end
+    local header = data:byte(1) + data:byte(2) * 256
+    if header < 1 then return nil end
+    local count = header * 8
+    if #data < count * 2 then return nil end
+    local ents = {}
+    for i = 0, count - 1 do
+        local o = i * 2
+        ents[i] = data:byte(o + 1) + data:byte(o + 2) * 256
+    end
+    return ents, count
+end
+
+-- Decode one sprite whose header starts at 1-based byte `base` into a
+-- width*height table of palette indices. `region_end` is the 1-based exclusive
+-- end of the sprite (the next sprite's first byte). The four planes are read
+-- one after another and interleaved by [pixel x = 4*byte + plane], unused
+-- pixels staying transparent as 0.
+local function spr_decode(data, base, region_end)
+    local function u16(o) return data:byte(o) + data:byte(o + 1) * 256 end
+    local w, h = u16(base), u16(base + 2)
+    local end2, end1, end0 = u16(base + 4), u16(base + 6), u16(base + 8)
+    local d0 = base + 10
+    local starts = { d0, d0 + end0, d0 + end1, d0 + end2 }
+    local stops = { d0 + end0, d0 + end1, d0 + end2, region_end }
+
+    local pixels = {}
+    for i = 1, w * h do pixels[i] = 0 end
+
+    for p = 0, 3 do
+        local si, stop = starts[p + 1], stops[p + 1]
+        local function read()
+            local v = data:byte(si)
+            si = si + 1
+            return v or 0
+        end
+        for y = 0, h - 1 do
+            if si >= stop then break end
+            local off = 0
+            local t = read()
+            if t ~= 0 then
+                local run
+                if t < 0x80 then
+                    run = t
+                else
+                    off = off + (256 - t)
+                    run = read()
+                end
+                while true do
+                    for k = 1, run do
+                        local v = read()
+                        local x = 4 * (off + k - 1) + p
+                        if x < w then pixels[y * w + x + 1] = v end
+                    end
+                    off = off + run
+                    t = read()
+                    if t == 0 then break end
+                    off = off + (256 - t)
+                    run = read()
+                end
+            end
+        end
+    end
+    return w, h, pixels
+end
+
+local function load_spr(game_path, stem, index)
+    local data = read_file(game_path .. DATA .. stem .. ".SPR")
+    if not data then
+        return { type = "text", text = "Missing " .. stem .. ".SPR" }
+    end
+    local ents, count = spr_entries(data)
+    if not ents then
+        return { type = "text", text = stem .. ".SPR: bad offset table" }
+    end
+    if not ents[index] or ents[index] == 0 then
+        return { type = "text",
+                 text = string.format("%s.SPR: sprite %d is absent", stem, index) }
+    end
+
+    local base = ents[index] * 16 + 1
+    local region_end = #data + 1
+    for k = index + 1, count - 1 do
+        if ents[k] and ents[k] > 0 then
+            region_end = ents[k] * 16 + 1
+            break
+        end
+    end
+
+    local w, h, pixels = spr_decode(data, base, region_end)
+    if w <= 0 or h <= 0 then
+        return { type = "text",
+                 text = string.format("%s.SPR: sprite %d is empty", stem, index) }
+    end
+
+    local pal = load_palette(game_path, SPR_PALETTE)
+    if not pal then
+        pal = {}
+        for i = 0, 255 do
+            pal[i * 3 + 1], pal[i * 3 + 2], pal[i * 3 + 3] = i, i, i
+        end
+    end
+
+    local img = image_create_indexed(w, h, pixels, pal)
+    return {
+        type = "image",
+        image = img,
+        paletteImage = palette_swatch(pal),
+        paletteColors = 256,
+        description = string.format("%s.SPR sprite #%d - %dx%d, %s palette",
+            stem, index, w, h, SPR_PALETTE),
+    }
+end
+
 -- engine interface
 -- ------------------------------------------------------------------------
 function engine.detect(game_path)
@@ -647,7 +785,7 @@ end
 -- BOXDET.DAT is a plain offset table rather than an image, so it is skipped.
 function engine.get_resources(game_path)
     local resources = {}
-    local maps, dats = {}, {}
+    local maps, dats, sprs = {}, {}, {}
     local files = list_files(game_path .. DATA) or {}
 
     for _, fn in ipairs(files) do
@@ -660,11 +798,14 @@ function engine.get_resources(game_path)
                 maps[#maps + 1] = stem
             elseif ext == "DAT" and starts_with_rnc(game_path, stem) then
                 dats[#dats + 1] = stem
+            elseif ext == "SPR" then
+                sprs[#sprs + 1] = stem
             end
         end
     end
     table.sort(maps)
     table.sort(dats)
+    table.sort(sprs)
 
     if #maps > 0 then
         local cat = {
@@ -690,6 +831,33 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = cat
     end
 
+    if #sprs > 0 then
+        local cat = {
+            id = "sprites", name = string.format("Sprite Banks (%d)", #sprs),
+            type = "category", children = {},
+        }
+        for _, stem in ipairs(sprs) do
+            local data = read_file(game_path .. DATA .. stem .. ".SPR")
+            local ents, count = spr_entries(data)
+            local bank = { id = "spr_" .. stem, name = stem, type = "category",
+                           children = {} }
+            if ents then
+                for idx = 0, count - 1 do
+                    if ents[idx] > 0 then
+                        bank.children[#bank.children + 1] = {
+                            id = string.format("spr_%s_%d", stem, idx),
+                            name = string.format("#%d", idx),
+                            type = "image",
+                        }
+                    end
+                end
+            end
+            bank.name = string.format("%s (%d)", stem, #bank.children)
+            cat.children[#cat.children + 1] = bank
+        end
+        resources[#resources + 1] = cat
+    end
+
     return resources
 end
 
@@ -700,6 +868,8 @@ function engine.load_resource(game_path, resource_id, palette_id)
     if stem then return load_map(game_path, stem:upper()) end
     stem = resource_id:match("^bg:dat:(.+)$")
     if stem then return load_dat(game_path, stem:upper()) end
+    local bank, index = resource_id:match("^spr_(.+)_(%d+)$")
+    if bank then return load_spr(game_path, bank:upper(), tonumber(index)) end
     return nil
 end
 
