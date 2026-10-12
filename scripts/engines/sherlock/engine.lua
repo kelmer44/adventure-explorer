@@ -256,13 +256,17 @@ end
 --   otherwise        : raw, size = w*h
 -- An optional palette block (390x2 frames + "VGA " signature + 768 bytes)
 -- may precede the first frame.
+-- The RLE payload itself differs per game: Serrated Scalpel uses a marker byte
+-- followed by (colour, count) runs, while Rose Tattoo uses per-scanline
+-- (skip, runLength, pixels...) pairs with no marker.
 -- Returns: palette (768 entries, 1-based) or nil, list of
 --          { w, h, x, y, pixels = { indices (0-based) } }
 -- ============================================================================
 
-local function decode_image(data)
+local function decode_image(data, is_tattoo)
     local pal, frames = nil, {}
-    if not data or #data < 8 then return nil, frames end
+    local has_transparency = false
+    if not data or #data < 8 then return nil, frames, has_transparency end
 
     local pos = 1
     local w = u16le(data, pos) + 1
@@ -316,13 +320,44 @@ local function decode_image(data)
                 pos = pos + size
             end
         elseif rle ~= 0 then
-            -- RLE with marker byte
+            -- RLE: u16le frame size + marker byte, then the compressed data
             local raw = u16le(data, pos)
             local marker = u8(data, pos + 2)
             pos = pos + 3
             local size = raw - 11
             if size < 0 or pos + size - 1 > #data then
                 ok = false
+            elseif is_tattoo then
+                -- Rose Tattoo: per-scanline (skip, runLength, colours...) with
+                -- no marker byte and a write pointer that runs continuously
+                -- across the whole image (skips are not clamped to the row).
+                -- Skipped pixels stay transparent (0xFF).
+                has_transparency = true
+                for i = 1, count do pixels[i] = 0xFF end
+                local d = pos
+                local dp = 1
+                for _ = 1, fh do
+                    local xsize = fw
+                    while xsize > 0 do
+                        local skip = u8(data, d); d = d + 1
+                        if not skip then ok = false; break end
+                        dp = dp + skip
+                        xsize = xsize - skip
+                        if xsize == 0 then break end
+                        local run = u8(data, d); d = d + 1
+                        if not run then ok = false; break end
+                        xsize = xsize - run
+                        for _ = 1, run do
+                            if dp >= 1 and dp <= count then
+                                pixels[dp] = u8(data, d)
+                            end
+                            dp = dp + 1
+                            d = d + 1
+                        end
+                    end
+                    if not ok then break end
+                end
+                pos = d
             else
                 local i = 0
                 local rem = count
@@ -356,7 +391,7 @@ local function decode_image(data)
         frames[#frames + 1] = { w = fw, h = fh, x = ox, y = oy, pixels = pixels }
     end
 
-    return pal, frames
+    return pal, frames, has_transparency
 end
 
 -- ============================================================================
@@ -429,6 +464,70 @@ local function scalpel_palette(data)
     return palette
 end
 
+-- Rose Tattoo room palette (768 bytes at the start of the background header)
+local function tattoo_palette(data)
+    if not data or #data < 44 then return nil end
+    local bg_off = u32le(data, 41)
+    local pal_start = bg_off + 17 + 1
+    if pal_start + 768 - 1 > #data then return nil end
+    local palette = {}
+    for i = 0, 255 do
+        local r = u8(data, pal_start + i * 3 + 0) or 0
+        local g = u8(data, pal_start + i * 3 + 1) or 0
+        local b = u8(data, pal_start + i * 3 + 2) or 0
+        palette[i * 3 + 1] = math.min(math.floor(r * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 2] = math.min(math.floor(g * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 3] = math.min(math.floor(b * 255 / 63 + 0.5), 255)
+    end
+    return palette
+end
+
+local function room_palette(game_path, base)
+    local data = read_rrm(game_path, base .. ".rrm")
+    if not data then return nil end
+    if is_tattoo(game_path) then return tattoo_palette(data) end
+    return scalpel_palette(data)
+end
+
+-- Standalone 16-bit VGA palettes bundled inside the LIB archives. Rose Tattoo
+-- pairs each of these with a specific screen rather than with a room, so they
+-- are not reachable through RES*.RRM.
+local LIB_PALETTES = {
+    map     = { lib = "walk.lib", entry = "MAP.PAL" },
+    journal = { lib = "vgs.lib",  entry = "JOURNAL.PAL" },
+    dartbd  = { lib = "vgs.lib",  entry = "DARTBD.PAL" },
+    room    = { lib = "vgs.lib",  entry = "ROOM.PAL" },
+}
+
+local function convert_vga_palette(raw)
+    if not raw or #raw < 768 then return nil end
+    local palette = {}
+    for i = 0, 255 do
+        palette[i * 3 + 1] = math.min(math.floor((u8(raw, i * 3 + 1) or 0) * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 2] = math.min(math.floor((u8(raw, i * 3 + 2) or 0) * 255 / 63 + 0.5), 255)
+        palette[i * 3 + 3] = math.min(math.floor((u8(raw, i * 3 + 3) or 0) * 255 / 63 + 0.5), 255)
+    end
+    return palette
+end
+
+local function lib_palette(game_path, base)
+    local def = LIB_PALETTES[base]
+    if not def then return nil end
+    local f = open_file(game_path, def.lib)
+    if not f then return nil end
+    local entries = parse_lib(f)
+    if not entries then file_close(f); return nil end
+    for _, e in ipairs(entries) do
+        if e.name:upper() == def.entry then
+            local raw = file_read(f, e.offset, e.size)
+            file_close(f)
+            return convert_vga_palette(raw)
+        end
+    end
+    file_close(f)
+    return nil
+end
+
 local function first_room_base(game_path)
     local best, best_num = nil, nil
     local function consider(nm)
@@ -459,22 +558,31 @@ local function resolve_palette(game_path, palette_id)
     if palette_id then
         local prefix, base = palette_id:match("^(%a+)_(.+)$")
         if prefix == "pal" and base then
-            local palette = scalpel_palette(read_rrm(game_path, base .. ".rrm"))
+            local palette = lib_palette(game_path, base) or room_palette(game_path, base)
             if palette then return palette end
         end
     end
     local base = first_room_base(game_path)
-    if base then return scalpel_palette(read_rrm(game_path, base .. ".rrm")) end
+    if base then return room_palette(game_path, base) end
     return nil
 end
 
-local function build_sprite_resource(game_path, palette_id, embedded, frames, label)
+local function build_sprite_resource(game_path, palette_id, embedded, frames, label, transparent_index)
     if not frames or #frames == 0 then return nil end
 
     local palette = embedded or resolve_palette(game_path, palette_id)
     if not palette then
         palette = {}
         for i = 1, 768 do palette[i] = 0 end
+    end
+
+    -- Indexed previews cannot represent alpha; follow the project convention of
+    -- painting the transparent index magenta so masked pixels read as a backdrop
+    -- instead of an opaque chunk of the underlying room colour.
+    if transparent_index then
+        palette[transparent_index * 3 + 1] = 255
+        palette[transparent_index * 3 + 2] = 0
+        palette[transparent_index * 3 + 3] = 255
     end
 
     local handles = {}
@@ -520,8 +628,12 @@ local function load_vgs_sprite(game_path, lib_name, entry_name, palette_id, labe
         if e.name:upper() == entry_name:upper() then
             local raw = file_read(f, e.offset, e.size)
             file_close(f)
-            local pal, frames = decode_image(decompress_lzv(raw))
-            return build_sprite_resource(game_path, palette_id, pal, frames, label)
+            -- Rose Tattoo uses a different RLE payload than Serrated Scalpel, so
+            -- global sprites must be decoded with the matching variant.
+            local tattoo = is_tattoo(game_path)
+            local pal, frames, transp = decode_image(decompress_lzv(raw), tattoo)
+            local ti = (tattoo and transp) and 0xFF or nil
+            return build_sprite_resource(game_path, palette_id, pal, frames, label, ti)
         end
     end
     file_close(f)
@@ -657,6 +769,421 @@ local function load_sound(game_path, basename)
     local data = file_read(f, entry.offset, entry.size)
     file_close(f)
     return decode_snd(data, entry.name)
+end
+
+-- ============================================================================
+-- Rose Tattoo sprites / speech / sound effects
+--
+-- Room object sprites live inside the compressed RES*.RRM files. To avoid
+-- reading multi-megabyte rooms just to enumerate them, only the room header
+-- (bgInfo table + section sizes) is read; the full compressed image blobs are
+-- read lazily when a sprite is actually selected.
+--
+-- Global sprites are stored uncompressed in VGS.LIB (interface, costumes,
+-- full screen images) and WALK.LIB (characters, inventory items, map).
+--
+-- SFX are RIFF WAVE files inside SOUND.LIB; speech clips are header-less
+-- 8-bit unsigned PCM at 11025 Hz inside the SPEECH*.LIB archives.
+-- ============================================================================
+
+-- RIFF/WAVE parser, returns rate, bits, channels, signed, pcm
+local function decode_wav(data)
+    if not data or #data < 12 then return nil end
+    if data:sub(1, 4) ~= "RIFF" or data:sub(9, 12) ~= "WAVE" then return nil end
+    local pos = 13
+    local rate, bits, channels, signed
+    while pos + 8 - 1 <= #data do
+        local id = data:sub(pos, pos + 3)
+        local size = u32le(data, pos + 4)
+        local body = pos + 8
+        if id == "fmt " and size >= 16 then
+            channels = u16le(data, body + 2)
+            rate = u32le(data, body + 4)
+            bits = u16le(data, body + 14)
+            signed = (bits == 16)
+        elseif id == "data" then
+            if body + size - 1 > #data then size = #data - body + 1 end
+            return rate, bits, channels, signed, data:sub(body, body + size - 1)
+        end
+        pos = body + size + (size % 2)
+    end
+    return nil
+end
+
+-- Read only the header data of a Rose Tattoo room: num images, the bgInfo
+-- table (filename/size/maxFrames) and the file offset where the compressed
+-- image blobs begin. Also returns the room palette.
+local function tattoo_room_info(game_path, rrm_name)
+    local path = find_file(game_path, rrm_name)
+    if not path then return nil end
+    local f = file_open(path)
+    if not f then return nil end
+    local function fail() file_close(f); return nil end
+
+    local head = file_read(f, 0, 44)
+    if not head or #head < 44 then return fail() end
+    if u8(head, 40) == 0 then return fail() end
+    local bg_off = u32le(head, 41)
+
+    local bgh = file_read(f, bg_off, 17)
+    if not bgh or #bgh < 17 then return fail() end
+    local num_structs = u16le(bgh, 1)
+    local num_images  = u16le(bgh, 3)
+    local desc_size   = u16le(bgh, 7)
+    local seq_size    = u16le(bgh, 9)
+    local scroll      = u16le(bgh, 11)
+    if num_images < 1 or num_structs < 1 then return fail() end
+
+    local pal_raw = file_read(f, bg_off + 17, 768)
+    local palette = nil
+    if pal_raw and #pal_raw >= 768 then
+        palette = {}
+        for i = 0, 255 do
+            palette[i * 3 + 1] = math.min(math.floor((u8(pal_raw, i * 3 + 1) or 0) * 255 / 63 + 0.5), 255)
+            palette[i * 3 + 2] = math.min(math.floor((u8(pal_raw, i * 3 + 2) or 0) * 255 / 63 + 0.5), 255)
+            palette[i * 3 + 3] = math.min(math.floor((u8(pal_raw, i * 3 + 3) or 0) * 255 / 63 + 0.5), 255)
+        end
+    end
+
+    -- Skip the (compressed) background image
+    local pos = bg_off + 17 + 768
+    local b = file_read(f, pos, 4)
+    if not b or #b < 4 then return fail() end
+    pos = pos + 4 + u32le(b, 1)
+
+    local info = file_read(f, pos, num_structs * 14)
+    if not info or #info < num_structs * 14 then return fail() end
+    local images = {}
+    for i = 0, num_structs - 1 do
+        local base = i * 14
+        local name = ""
+        for c = 0, 8 do
+            local ch = u8(info, base + 6 + c)
+            if not ch or ch == 0 then break end
+            name = name .. string.char(ch)
+        end
+        images[#images + 1] = {
+            name = name,
+            filesize = u32le(info, base + 1),
+            maxframes = u8(info, base + 5),
+        }
+    end
+    pos = pos + num_structs * 14
+
+    -- Skip the shape, description and sequence tables to reach the images
+    for _ = 1, 3 do
+        local s = file_read(f, pos, 4)
+        if not s or #s < 4 then return fail() end
+        pos = pos + 4 + u32le(s, 1)
+    end
+
+    file_close(f)
+    return {
+        path = path, images = images, images_start = pos,
+        palette = palette, num_images = num_images, num_structs = num_structs,
+    }
+end
+
+local function tattoo_room_image_list(game_path, rrm_name)
+    local info = tattoo_room_info(game_path, rrm_name)
+    if not info then return nil end
+    local list = {}
+    for i = 0, info.num_images - 1 do
+        local im = info.images[i + 1]
+        if im then list[#list + 1] = { name = im.name, index = i } end
+    end
+    return list
+end
+
+local function load_tattoo_room_sprite(game_path, basename, palette_id)
+    local room, index = basename:match("^(res%d+)_(%d+)$")
+    if not room or not index then return nil end
+    local info = tattoo_room_info(game_path, room .. ".rrm")
+    if not info then return nil end
+    local idx = tonumber(index)
+    local im = info.images[idx + 1]
+    if not im then return nil end
+
+    local f = file_open(info.path)
+    if not f then return nil end
+    local pos = info.images_start
+    for _ = 1, idx do
+        local b = file_read(f, pos, 4)
+        if not b or #b < 4 then file_close(f); return nil end
+        pos = pos + 4 + u32le(b, 1)
+    end
+    local b = file_read(f, pos, 4)
+    if not b or #b < 4 then file_close(f); return nil end
+    local in_size = u32le(b, 1)
+    local raw = file_read(f, pos + 4, in_size)
+    file_close(f)
+    if not raw or #raw < in_size then return nil end
+
+    local bytes = lzss_decompress(raw, 1, im.filesize)
+    local chars = {}
+    for i = 1, #bytes do chars[i] = string.char(bytes[i]) end
+    local pal, frames, transp = decode_image(table.concat(chars), true)
+    local label = (im.name ~= "" and im.name) or ("Sprite " .. (idx + 1))
+    local ti = transp and 0xFF or nil
+    return build_sprite_resource(game_path, palette_id or ("pal_" .. room), pal, frames, label, ti)
+end
+
+-- Interface images inside VGS.LIB
+local TATTOO_INTERFACE = {
+    { key = "rmouse",    file = "RMOUSE.VGS",  name = "Mouse" },
+    { key = "omouse",    file = "OMOUSE.VGS",  name = "Mouse (Alt)" },
+    { key = "hand1",     file = "HAND1.VGS",   name = "Hand 1" },
+    { key = "hand2",     file = "HAND2.VGS",   name = "Hand 2" },
+    { key = "intrface",  file = "INTRFACE.VGS", name = "Interface" },
+    { key = "darts",     file = "DARTS.VGS",   name = "Darts Board" },
+    { key = "dartslft",  file = "DARTSLFT.VGS", name = "Darts (Left)" },
+    { key = "dartmap",   file = "DARTMAP.VGS", name = "Darts Map" },
+    { key = "dartbd",    file = "DARTBD.VGS",  name = "Darts Background" },
+}
+
+-- Named costumes stored in VGS.LIB rather than WALK.LIB
+local TATTOO_COSTUMES = {
+    "TUX.VGS", "GREEN.VGS", "MYCROFT.VGS", "OPIUM.VGS",
+    "WIGGINS.VGS", "TOBY.VGS", "COAT3.VGS",
+}
+
+local TATTOO_MAP = { "MAP.VGS", "MAPICONS.VGS" }
+
+local function load_tattoo_global_sprite(game_path, basename, palette_id)
+    local lib, key = basename:match("^(%a+)_(.+)$")
+    if not lib or not key then return nil end
+    local lib_file = (lib == "vgs") and "vgs.lib" or "walk.lib"
+    return load_vgs_sprite(game_path, lib_file, key:upper() .. ".VGS", palette_id, key)
+end
+
+local function load_tattoo_effect(game_path, basename)
+    local idx = tonumber(basename)
+    if not idx then return nil end
+    local f = open_file(game_path, "sound.lib")
+    if not f then return nil end
+    local entries = parse_lib(f)
+    if not entries then file_close(f); return nil end
+    local entry = entries[idx + 1]
+    if not entry then file_close(f); return nil end
+    local data = file_read(f, entry.offset, entry.size)
+    file_close(f)
+    if not data then return nil end
+
+    local rate, bits, channels, signed, pcm = decode_wav(data)
+    if not rate or not pcm or #pcm == 0 then return nil end
+    local handle = sound_create_pcm(rate, bits, channels, signed, pcm)
+    if not handle then return nil end
+    local secs = #pcm / (rate * channels * (bits / 8))
+    return {
+        type = "sound", sound = handle,
+        description = string.format("%s - %d Hz, %d-bit, %.2f s", entry.name, rate, bits, secs),
+    }
+end
+
+local function load_tattoo_speech(game_path, basename)
+    local libnum, idx = basename:match("^(%d+)_(%d+)$")
+    if not libnum then return nil end
+    local f = open_file(game_path, string.format("SPEECH%02d.LIB", tonumber(libnum)))
+    if not f then return nil end
+    local entries = parse_lib(f)
+    if not entries then file_close(f); return nil end
+    local entry = entries[tonumber(idx) + 1]
+    if not entry then file_close(f); return nil end
+    local data = file_read(f, entry.offset, entry.size)
+    file_close(f)
+    if not data or #data == 0 then return nil end
+
+    local handle = sound_create_pcm(11025, 8, 1, false, data)
+    if not handle then return nil end
+    return {
+        type = "sound", sound = handle,
+        description = string.format("%s - 11025 Hz, %.2f s", entry.name, #data / 11025),
+    }
+end
+
+local function lib_entry_names(game_path, lib_name)
+    local names = {}
+    local f = open_file(game_path, lib_name)
+    if not f then return names end
+    local entries = parse_lib(f)
+    file_close(f)
+    if entries then
+        for _, e in ipairs(entries) do names[e.name:upper()] = e.size end
+    end
+    return names
+end
+
+local function build_global_sprites_tattoo(game_path)
+    local cat = { id = "sprites", name = "Sprites", type = "category", children = {} }
+    local walk = lib_entry_names(game_path, "walk.lib")
+    local vgs  = lib_entry_names(game_path, "vgs.lib")
+
+    -- Characters: walk cycles / directional sets from WALK.LIB plus costumes
+    local chars = {}
+    for name in pairs(walk) do
+        if name:match("%.VGS$") and not name:match("^ITEM%d") and not name:match("^MAP") then
+            chars[#chars + 1] = name
+        end
+    end
+    for _, name in ipairs(TATTOO_COSTUMES) do
+        if vgs[name] and not walk[name] then chars[#chars + 1] = name end
+    end
+    if #chars > 0 then
+        table.sort(chars)
+        local sub = { id = "sprchar", name = string.format("Characters (%d)", #chars), type = "category", children = {} }
+        for _, name in ipairs(chars) do
+            local key = name:match("^(.+)%.VGS$")
+            local lib = walk[name] and "walk" or "vgs"
+            sub.children[#sub.children + 1] = { id = "spr_" .. lib .. "_" .. key:lower(), name = key, type = "image" }
+        end
+        cat.children[#cat.children + 1] = sub
+    end
+
+    -- Inventory items: ITEMnn.VGS in WALK.LIB
+    local items = {}
+    for name in pairs(walk) do
+        local n = name:match("^ITEM(%d+)%.VGS$")
+        if n then items[#items + 1] = tonumber(n) end
+    end
+    if #items > 0 then
+        table.sort(items)
+        local sub = { id = "spritem", name = string.format("Inventory Items (%d)", #items), type = "category", children = {} }
+        for _, n in ipairs(items) do
+            sub.children[#sub.children + 1] = {
+                id = string.format("spr_walk_item%02d", n),
+                name = string.format("Item %02d", n), type = "image",
+            }
+        end
+        cat.children[#cat.children + 1] = sub
+    end
+
+    -- Interface images from VGS.LIB
+    local sub = nil
+    for _, def in ipairs(TATTOO_INTERFACE) do
+        if vgs[def.file] then
+            if not sub then
+                sub = { id = "sprui", name = "Interface", type = "category", children = {} }
+                cat.children[#cat.children + 1] = sub
+            end
+            sub.children[#sub.children + 1] = { id = "spr_vgs_" .. def.key, name = def.name, type = "image" }
+        end
+    end
+
+    -- Map screens from WALK.LIB
+    sub = nil
+    for _, name in ipairs(TATTOO_MAP) do
+        if walk[name] then
+            if not sub then
+                sub = { id = "sprmap", name = "Map", type = "category", children = {} }
+                cat.children[#cat.children + 1] = sub
+            end
+            local key = name:match("^(.+)%.VGS$")
+            sub.children[#sub.children + 1] = { id = "spr_walk_" .. key:lower(), name = key, type = "image" }
+        end
+    end
+
+    -- Full-screen images (640x480 single-frame) from VGS.LIB
+    local screens = {}
+    for name, size in pairs(vgs) do
+        if name:match("%.VGS$") and size == 307208 then
+            local is_ui = false
+            for _, def in ipairs(TATTOO_INTERFACE) do
+                if def.file == name then is_ui = true end
+            end
+            if not is_ui then screens[#screens + 1] = name end
+        end
+    end
+    if #screens > 0 then
+        table.sort(screens)
+        local scsub = { id = "sprscreen", name = string.format("Screens (%d)", #screens), type = "category", children = {} }
+        for _, name in ipairs(screens) do
+            local key = name:match("^(.+)%.VGS$")
+            scsub.children[#scsub.children + 1] = { id = "spr_vgs_" .. key:lower(), name = key, type = "image" }
+        end
+        cat.children[#cat.children + 1] = scsub
+    end
+
+    -- Standalone LIB palettes, so the map/journal/darts screens can be paired
+    -- with the palette they were authored against.
+    sub = nil
+    for _, base in ipairs({ "map", "journal", "dartbd" }) do
+        if lib_palette(game_path, base) then
+            if not sub then
+                sub = { id = "sprpal", name = "Palettes", type = "category", children = {} }
+                cat.children[#cat.children + 1] = sub
+            end
+            sub.children[#sub.children + 1] = {
+                id = "pal_" .. base, name = base:upper() .. " palette", type = "palette",
+            }
+        end
+    end
+
+    if #cat.children == 0 then return nil end
+    return cat
+end
+
+local function build_sound_category_tattoo(game_path)
+    local cat = { id = "sounds", name = "Sounds", type = "category", children = {} }
+
+    -- Sound effects: RIFF WAVE entries in SOUND.LIB
+    local f = open_file(game_path, "sound.lib")
+    if f then
+        local entries = parse_lib(f)
+        file_close(f)
+        if entries then
+            local sub = nil
+            for i, e in ipairs(entries) do
+                if e.name:upper():match("%.WAV$") then
+                    if not sub then
+                        sub = { id = "sndcat_sfx", name = "Sound Effects", type = "category", children = {} }
+                        cat.children[#cat.children + 1] = sub
+                    end
+                    sub.children[#sub.children + 1] = {
+                        id = "sfx_" .. (i - 1),
+                        name = (e.name:gsub("%.[Ww][Aa][Vv]$", "")), type = "sound",
+                    }
+                end
+            end
+            if sub then sub.name = string.format("Sound Effects (%d)", #sub.children) end
+        end
+    end
+
+    -- Speech: one subcategory per SPEECHnn.LIB archive
+    local speech = { id = "sndcat_speech", name = "Speech", type = "category", children = {} }
+    local libs = {}
+    local files = list_files(game_path)
+    if files then
+        for _, fn in ipairs(files) do
+            local num = fn:lower():match("^speech(%d+)%.lib$")
+            if num then libs[#libs + 1] = { num = tonumber(num), file = fn } end
+        end
+    end
+    table.sort(libs, function(a, b) return a.num < b.num end)
+    for _, lib in ipairs(libs) do
+        local sf = open_file(game_path, lib.file)
+        if sf then
+            local entries = parse_lib(sf)
+            file_close(sf)
+            if entries and #entries > 0 then
+                local sub = {
+                    id = string.format("spccat_%02d", lib.num),
+                    name = string.format("Scene %02d (%d)", lib.num, #entries),
+                    type = "category", children = {},
+                }
+                for i, e in ipairs(entries) do
+                    sub.children[#sub.children + 1] = {
+                        id = string.format("spc_%02d_%d", lib.num, i - 1),
+                        name = e.name, type = "sound",
+                    }
+                end
+                speech.children[#speech.children + 1] = sub
+            end
+        end
+    end
+    if #speech.children > 0 then cat.children[#cat.children + 1] = speech end
+
+    if #cat.children == 0 then return nil end
+    return cat
 end
 
 -- Global sprite + sound resource tree helpers
@@ -830,25 +1357,28 @@ function engine.get_resources(game_path)
             type = "palette"
         }
 
-        -- Per-room object sprites (Scalpel uncompressed RRMs only)
-        if not tattoo then
-            local images = scalpel_room_image_names(read_rrm(game_path, rrm_name))
-            if images and #images > 0 then
-                local sprites = {
-                    id       = "sprcat_" .. basename:lower(),
-                    name     = string.format("Sprites (%d)", #images),
-                    type     = "category",
-                    children = {}
+        -- Per-room object sprites (header read only, blobs loaded lazily)
+        local images
+        if tattoo then
+            images = tattoo_room_image_list(game_path, rrm_name)
+        else
+            images = scalpel_room_image_names(read_rrm(game_path, rrm_name))
+        end
+        if images and #images > 0 then
+            local sprites = {
+                id       = "sprcat_" .. basename:lower(),
+                name     = string.format("Sprites (%d)", #images),
+                type     = "category",
+                children = {}
+            }
+            for _, img in ipairs(images) do
+                sprites.children[#sprites.children + 1] = {
+                    id   = string.format("sp_%s_%d", basename:lower(), img.index),
+                    name = img.name ~= "" and img.name or string.format("Sprite %d", img.index + 1),
+                    type = "image"
                 }
-                for _, img in ipairs(images) do
-                    sprites.children[#sprites.children + 1] = {
-                        id   = string.format("sp_%s_%d", basename:lower(), img.index),
-                        name = img.name ~= "" and img.name or string.format("Sprite %d", img.index + 1),
-                        type = "image"
-                    }
-                end
-                room_node.children[#room_node.children + 1] = sprites
             end
+            room_node.children[#room_node.children + 1] = sprites
         end
 
         rooms_cat.children[#rooms_cat.children + 1] = room_node
@@ -858,17 +1388,20 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = rooms_cat
     end
 
-    -- Global sprites and sounds (Serrated Scalpel only)
-    if not tattoo then
-        local sprites = build_global_sprites(game_path)
-        if sprites and #sprites.children > 0 then
-            resources[#resources + 1] = sprites
-        end
-
-        local sounds = build_sound_category(game_path)
-        if sounds then
-            resources[#resources + 1] = sounds
-        end
+    -- Global sprites and sounds
+    local sprites, sounds
+    if tattoo then
+        sprites = build_global_sprites_tattoo(game_path)
+        sounds  = build_sound_category_tattoo(game_path)
+    else
+        sprites = build_global_sprites(game_path)
+        sounds  = build_sound_category(game_path)
+    end
+    if sprites and #sprites.children > 0 then
+        resources[#resources + 1] = sprites
+    end
+    if sounds then
+        resources[#resources + 1] = sounds
     end
 
     return resources
@@ -883,9 +1416,17 @@ function engine.load_resource(game_path, resource_id, palette_id)
     if not prefix or not basename then return nil end
     if prefix == "bg"  then return load_background(game_path, basename) end
     if prefix == "pal" then return load_palette_swatch(game_path, basename) end
-    if prefix == "sp"  then return load_sprite(game_path, basename, palette_id) end
-    if prefix == "spr" then return load_sprite(game_path, basename, palette_id) end
+    if prefix == "sp"  then
+        if is_tattoo(game_path) then return load_tattoo_room_sprite(game_path, basename, palette_id) end
+        return load_sprite(game_path, basename, palette_id)
+    end
+    if prefix == "spr" then
+        if is_tattoo(game_path) then return load_tattoo_global_sprite(game_path, basename, palette_id) end
+        return load_sprite(game_path, basename, palette_id)
+    end
     if prefix == "snd" then return load_sound(game_path, basename) end
+    if prefix == "sfx" then return load_tattoo_effect(game_path, basename) end
+    if prefix == "spc" then return load_tattoo_speech(game_path, basename) end
     return nil
 end
 
@@ -896,6 +1437,21 @@ end
 function engine.default_palette(game_path, resource_id)
     local room = resource_id:match("^sp_(res%d+)_%d+$")
     if room then return "pal_" .. room end
+
+    if is_tattoo(game_path) then
+        -- The main map (MAP/MAPICONS) and the RES*.VGS map close-ups all use
+        -- MAP.PAL; the journal and dartboard bring their own palettes.
+        if resource_id == "spr_walk_map" or resource_id == "spr_walk_mapicons" then
+            return "pal_map"
+        end
+        local vgs = resource_id:match("^spr_vgs_(.+)$")
+        if vgs then
+            if vgs == "journal" then return "pal_journal" end
+            if vgs == "dartbd"  then return "pal_dartbd" end
+            if vgs:match("^res") then return "pal_map" end
+        end
+    end
+
     if resource_id:match("^spr_") then return first_palette_id(game_path) end
     return nil
 end
@@ -1161,17 +1717,20 @@ function load_background(game_path, basename)
 end
 
 function load_palette_swatch(game_path, basename)
-    local rrm_name = basename .. ".rrm"
-    local data = read_rrm(game_path, rrm_name)
-    if not data then return nil end
-
     local tattoo = is_tattoo(game_path)
-    local _, palette
+    local palette
 
-    if tattoo then
-        _, palette = load_tattoo_bg(data)
-    else
-        _, palette = load_scalpel_bg(data)
+    -- Standalone LIB palettes (map/journal/dartbd/room) take precedence
+    if tattoo then palette = lib_palette(game_path, basename) end
+
+    if not palette then
+        local data = read_rrm(game_path, basename .. ".rrm")
+        if not data then return nil end
+        if tattoo then
+            _, palette = load_tattoo_bg(data)
+        else
+            _, palette = load_scalpel_bg(data)
+        end
     end
     if not palette then return nil end
 
