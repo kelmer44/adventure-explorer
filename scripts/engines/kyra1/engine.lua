@@ -226,84 +226,164 @@ local function decompress_type4(data, src_start, output_size)
 end
 
 -- ============================================================================
--- WSA Animation decoder
--- Header: u16le numFrames, u16le width, u16le height
--- Then offset table: (numFrames+2) x u32le offsets
--- All frames are Format 80 compressed. Frame 0 decompresses to raw pixels;
--- frames 1+ decompress to XOR deltas against the previous frame.
+-- WSA Animation decoder ("v1" layout - Legend of Kyrandia)
+-- ----------------------------------------------------------------------------
+-- Header (1-based byte offsets in parentheses):
+--   u16 numFrames (1), u16 width (3), u16 height (5), u16 deltaBufferSize (7)
+-- Then a table of (numFrames + 2) u32 offsets starting at byte 9. The first
+-- entry is the base offset of the frame data region; the remaining entries are
+-- absolute and are stored minus that base. (The DOS release has no flags /
+-- embedded palette; the Amiga "alt shape header" is not handled here.)
+--
+-- Each frame blob is a "Format 80" stream (decompress_type4) whose output is a
+-- delta command stream that must be applied with decodeFrameDelta to a
+-- persistent width*height framebuffer. Frames are cumulative (XOR deltas).
+-- Mirrors ScummVM engines/kyra/graphics/wsamovie.cpp (WSAMovie_v1) and
+-- screen.cpp (decodeFrame4 / decodeFrameDelta).
 -- ============================================================================
 
+-- Byte-wise XOR (Lua 5.2/LuaJ has no guaranteed bit32).
+local function bxor8(a, b)
+    local res, bit = 0, 1
+    a = a % 256; b = b % 256
+    for _ = 1, 8 do
+        if (a % 2) ~= (b % 2) then res = res + bit end
+        a = math.floor(a / 2); b = math.floor(b / 2)
+        bit = bit * 2
+    end
+    return res
+end
+
+-- Apply a decoded delta command stream onto dst (1-based, width*height bytes).
+local function apply_frame_delta(dst, src, dst_size)
+    local d = 0          -- 0-based write position
+    local i = 1
+    local n = #src
+
+    while i <= n do
+        local code = src[i]; i = i + 1
+
+        if code == 0 then
+            local len = src[i] or 0; i = i + 1
+            local val = src[i] or 0; i = i + 1
+            for _ = 1, len do
+                if d >= 0 and d < dst_size then
+                    dst[d + 1] = bxor8(dst[d + 1] or 0, val)
+                end
+                d = d + 1
+            end
+
+        elseif code >= 128 then
+            code = code - 128
+            if code ~= 0 then
+                d = d + code
+            else
+                local subcode = (src[i] or 0) + (src[i + 1] or 0) * 256; i = i + 2
+                if subcode == 0 then
+                    break
+                elseif subcode >= 32768 then
+                    subcode = subcode - 32768
+                    if subcode >= 16384 then
+                        local len = subcode - 16384
+                        local val = src[i] or 0; i = i + 1
+                        for _ = 1, len do
+                            if d >= 0 and d < dst_size then
+                                dst[d + 1] = bxor8(dst[d + 1] or 0, val)
+                            end
+                            d = d + 1
+                        end
+                    else
+                        for _ = 1, subcode do
+                            local val = src[i] or 0; i = i + 1
+                            if d >= 0 and d < dst_size then
+                                dst[d + 1] = bxor8(dst[d + 1] or 0, val)
+                            end
+                            d = d + 1
+                        end
+                    end
+                else
+                    d = d + subcode
+                end
+            end
+
+        else
+            for _ = 1, code do
+                local val = src[i] or 0; i = i + 1
+                if d >= 0 and d < dst_size then
+                    dst[d + 1] = bxor8(dst[d + 1] or 0, val)
+                end
+                d = d + 1
+            end
+        end
+    end
+end
+
 local function decode_wsa(data)
-    if not data or #data < 10 then return nil end
+    if not data or #data < 11 then return nil end
 
     local num_frames = u16le(data, 1)
     local width      = u16le(data, 3)
     local height     = u16le(data, 5)
+    local delta_size = u16le(data, 7)
+
+    -- Amiga releases set bit 15 of numFrames and flip the image; not handled.
+    if num_frames >= 32768 then num_frames = num_frames - 32768 end
 
     if num_frames < 1 or width < 1 or height < 1 then return nil end
     if width > 640 or height > 480 then return nil end
 
     local frame_size = width * height
 
-    -- Read offset table: (numFrames + 2) entries starting at byte 7
-    local offsets = {}
-    local ot_start = 7
-    for i = 0, num_frames + 1 do
-        local pos = ot_start + i * 4
+    -- Offset table begins at byte 9; the first u32 is the frame-data base.
+    local pos = 9
+    if pos + 3 > #data then return nil end
+    local base_off = u32le(data, pos); pos = pos + 4
+
+    local first_frame = true
+    if base_off == 0 then
+        first_frame = false
         if pos + 3 > #data then return nil end
-        offsets[i] = u32le(data, pos)
+        base_off = u32le(data, pos); pos = pos + 4
     end
 
-    -- Data starts after header + offset table
-    local data_base = ot_start + (num_frames + 2) * 4
+    local offsets = { [0] = 0 }
+    for i = 1, num_frames + 1 do
+        if pos + 3 > #data then return nil end
+        local v = u32le(data, pos); pos = pos + 4
+        offsets[i] = (v > 0) and (v - base_off) or 0
+    end
 
-    -- Decode all frames
+    local data_base = pos  -- 1-based index of the first frame byte
+
     local frames = {}
-    local prev_frame = nil
+    local buf = {}
+    for i = 1, frame_size do buf[i] = 0 end
 
-    for f = 0, num_frames - 1 do
-        local frame_off = offsets[f]
-        local next_off  = offsets[f + 1]
-        if frame_off == 0 and next_off == 0 then
-            -- Empty frame: copy previous
-            if prev_frame then
-                local copy = {}
-                for i = 1, frame_size do copy[i] = prev_frame[i] end
-                frames[#frames + 1] = copy
-                prev_frame = copy
-            end
-        else
-            local src_start = data_base + frame_off
-            if src_start > #data then break end
+    local function snapshot()
+        local copy = {}
+        for i = 1, frame_size do copy[i] = buf[i] end
+        return copy
+    end
 
-            -- Decompress using Format 80
-            local decoded = decompress_type4(data, src_start, frame_size)
-
-            if prev_frame then
-                -- XOR delta: XOR decoded with previous frame
-                for i = 1, frame_size do
-                    local a = decoded[i] or 0
-                    local b = prev_frame[i] or 0
-                    -- XOR without bit32: a XOR b = a + b - 2*(a AND b)
-                    -- Use the pattern: XOR via arithmetic
-                    local xor_val = 0
-                    local va, vb = a, b
-                    local bit_val = 1
-                    for _ = 1, 8 do
-                        local ba = va % 2
-                        local bb = vb % 2
-                        if ba ~= bb then xor_val = xor_val + bit_val end
-                        va = math.floor(va / 2)
-                        vb = math.floor(vb / 2)
-                        bit_val = bit_val * 2
-                    end
-                    decoded[i] = xor_val
-                end
-            end
-
-            frames[#frames + 1] = decoded
-            prev_frame = decoded
+    local function emit(frame_off)
+        if frame_off < 0 or data_base + frame_off > #data then
+            frames[#frames + 1] = snapshot()
+            return
         end
+        local delta = decompress_type4(data, data_base + frame_off, delta_size)
+        apply_frame_delta(buf, delta, frame_size)
+        frames[#frames + 1] = snapshot()
+    end
+
+    if first_frame then
+        emit(offsets[0])
+    else
+        -- First frame is absent: it renders as a blank (all zero) frame.
+        frames[#frames + 1] = snapshot()
+    end
+
+    for f = 1, num_frames - 1 do
+        emit(offsets[f])
     end
 
     return frames, width, height, num_frames
