@@ -396,6 +396,342 @@ local function scan_embedded_backgrounds(game_path, prefix)
 end
 
 -- ============================================================================
+-- Sprite banks (Guilty / GBG)
+-- ----------------------------------------------------------------------------
+-- GBG_MAIN.DAT is XOR-0x6F obfuscated after the first 2 bytes and ends with a
+-- 0xB6-byte footer of u16le offsets into the descrambled data:
+--   0x18 spriteCount   0x1A spriteMap      0x1C imagesCount
+--   0x1E imageDirectory 0x20 graphicFileCount 0x22 graphicFileNames
+--
+-- GRAF.DAT is a flat table of u32le offsets (one per image, 1-based) into the
+-- numbered graphic files.  The sprite map holds fixed 10-byte records:
+--   u16 image, u16 index, u16 width, u16 height, u16 extra
+-- Records are grouped by image.  Each referenced image is a "sprite bank":
+--   u32 size, then `count` u32le offsets (relative to the table start), then
+--   the raw uncompressed 8-bit sprite pixels, followed by an 8-byte name
+--   ("font", "gen_graf", "statanim", ...).  Sprites share the palette of the
+-- graphic file they live in (taken from that file's first embedded image).
+-- ============================================================================
+
+local xor6f = {}
+do
+    for i = 0, 255 do
+        local v = 0
+        for b = 0, 7 do
+            local xb = math.floor(i / 2 ^ b) % 2
+            local kb = math.floor(0x6f / 2 ^ b) % 2
+            if xb ~= kb then v = v + 2 ^ b end
+        end
+        xor6f[i] = v
+    end
+end
+
+local function descramble_main(raw)
+    local len = u16le(raw, 1)
+    if len <= 2 or len > #raw then return nil end
+    local parts = { raw:sub(1, 2) }
+    for i = 3, len do
+        parts[#parts + 1] = string.char(xor6f[raw:byte(i)])
+    end
+    return table.concat(parts), len
+end
+
+local function read_graf_table(game_path, prefix)
+    local path = game_path .. "/" .. prefix .. "GRAF.DAT"
+    if not file_exists(path) then return nil end
+    local fh = file_open(path)
+    if not fh then return nil end
+    local data = file_read(fh, 0, file_size(fh))
+    file_close(fh)
+    return data
+end
+
+local function graf_offset(graf, index)
+    local pos = (index - 1) * 4 + 1
+    if pos + 3 > #graf then return nil end
+    return u32le(graf, pos)
+end
+
+local function find_file_palette(data)
+    local imgs = find_embedded_images(data)
+    if #imgs == 0 then return nil end
+    local img = imgs[1]
+    local s = img.offset + 1
+    local _, p = rle_pixel_count(data, s + 4, img.width * img.height)
+    if p + 768 <= #data and data:byte(p) == 0x0C then
+        local palette = {}
+        for i = 0, 255 do
+            palette[i * 3 + 1] = data:byte(p + 1 + i * 3)
+            palette[i * 3 + 2] = data:byte(p + 2 + i * 3)
+            palette[i * 3 + 3] = data:byte(p + 3 + i * 3)
+        end
+        return palette
+    end
+    return nil
+end
+
+local function grayscale_palette()
+    local palette = {}
+    for i = 0, 255 do
+        palette[i * 3 + 1] = i
+        palette[i * 3 + 2] = i
+        palette[i * 3 + 3] = i
+    end
+    return palette
+end
+
+local bank_cache = {}
+
+local function resolve_file(game_path, name)
+    if not name or name == "" then return nil end
+    local direct = game_path .. "/" .. name
+    if file_exists(direct) then return direct end
+    local files = list_files(game_path)
+    if files then
+        local lower = name:lower()
+        for _, f in ipairs(files) do
+            if f:lower() == lower then return game_path .. "/" .. f end
+        end
+    end
+    return nil
+end
+
+-- GBG graphic file names are NUL-terminated, each preceded by 2 bytes.
+local function build_names_gbg(d, graphic_names, graphic_count)
+    local files = {}
+    local p = graphic_names + 1
+    for i = 1, graphic_count do
+        p = p + 2
+        local s = p
+        while p <= #d and d:byte(p) ~= 0 do p = p + 1 end
+        files[i] = d:sub(s, p - 1)
+        while p <= #d and d:byte(p) == 0 do p = p + 1 end
+    end
+    return files
+end
+
+-- GENE graphic file names are stored as [attrs...][0xFF][name NUL][attrs...],
+-- so a valid name must start immediately after the 0xFF marker.
+local function build_names_gene(d, graphic_names, graphic_count)
+    local files = {}
+    local len = #d
+    local pos = graphic_names + 1
+    while #files < graphic_count and pos <= len do
+        while pos <= len and d:byte(pos) ~= 0xFF do pos = pos + 1 end
+        pos = pos + 1
+        local nm = pos <= len and d:sub(pos):match("^([%w_]+%.dat)%z")
+        if nm then
+            files[#files + 1] = nm
+            pos = pos + #nm
+        end
+    end
+    return files
+end
+
+-- GENE GRAF.DAT is a concatenation of per-file offset lists separated by a
+-- zero.  The first image of every file has offset 0 (the separator itself).
+local function graf_groups(graf)
+    local groups = {}
+    local current = nil
+    local count = math.floor(#graf / 4)
+    for i = 0, count - 1 do
+        local v = u32le(graf, i * 4 + 1)
+        if v == 0 then
+            if current then groups[#groups + 1] = current end
+            current = { 0 }
+        else
+            if not current then current = { 0 } end
+            current[#current + 1] = v
+        end
+    end
+    if current then groups[#groups + 1] = current end
+    return groups
+end
+
+-- GENE sprites live in the palette of the room backdrop, so sprites have no
+-- palette of their own.  Use the palette of a scene backdrop as the default.
+local gene_pal_cache = {}
+local function gene_default_palette(game_path)
+    if gene_pal_cache[game_path] ~= nil then return gene_pal_cache[game_path] end
+    local pal = nil
+    local files = list_files(game_path)
+    if files then
+        local scenes = {}
+        for _, f in ipairs(files) do
+            if f:upper():match("^VIC_%d%d%dS%.DAT$") then scenes[#scenes + 1] = f end
+        end
+        table.sort(scenes)
+        for _, f in ipairs(scenes) do
+            local fh = file_open(game_path .. "/" .. f)
+            if fh then
+                local data = file_read(fh, 0, file_size(fh))
+                file_close(fh)
+                if data then
+                    local w = u16le(data, 1)
+                    local h = u16le(data, 3)
+                    if w >= 16 and h >= 16 then
+                        local _, p = decode_rle(data, 5, w * h)
+                        pal = read_palette_at_pos(data, p)
+                    end
+                end
+            end
+            if pal then break end
+        end
+    end
+    gene_pal_cache[game_path] = pal
+    return pal
+end
+
+local function get_sprite_banks(game_path, prefix)
+    local key = game_path .. "|" .. prefix
+    if bank_cache[key] then return bank_cache[key] end
+    bank_cache[key] = {}
+
+    local prefix_upper = prefix:upper()
+    local is_gene = (prefix_upper == "VIC_")
+
+    local main_path = game_path .. "/" .. prefix .. "MAIN.DAT"
+    if not file_exists(main_path) then return {} end
+    local fh = file_open(main_path)
+    if not fh then return {} end
+    local raw = file_read(fh, 0, file_size(fh))
+    file_close(fh)
+    if not raw then return {} end
+
+    local d, len = descramble_main(raw)
+    if not d then return {} end
+    local footer = len + 1
+    local function F(o) return u16le(raw, footer + o) end
+
+    local sprite_count     = F(0x18)
+    local sprite_map       = F(0x1a)
+    local image_directory  = F(0x1e)
+    local graphic_count    = F(0x20)
+    local graphic_names    = F(0x22)
+
+    local files
+    if is_gene then
+        files = build_names_gene(d, graphic_names, graphic_count)
+    else
+        files = build_names_gbg(d, graphic_names, graphic_count)
+    end
+
+    local graf = read_graf_table(game_path, prefix)
+    if not graf then return {} end
+
+    -- Group the sprite map records by source image.
+    local groups = {}
+    local order = {}
+    if is_gene then
+        -- GENE: 9-byte records - image u16, index u8, width u16, height u16, hot u8,u8
+        for i = 0, sprite_count - 1 do
+            local b = sprite_map + i * 9 + 1
+            if b + 8 > #d then break end
+            local image = u16le(d, b)
+            local idx   = d:byte(b + 2)
+            local w     = u16le(d, b + 3)
+            local h     = u16le(d, b + 5)
+            local group = groups[image]
+            if not group then group = {}; groups[image] = group; order[#order + 1] = image end
+            group[#group + 1] = { index = idx, width = w, height = h }
+        end
+    else
+        -- GBG: 10-byte records - image u16, index u16, width u16, height u16, extra u16
+        for i = 0, sprite_count - 1 do
+            local b = sprite_map + i * 10 + 1
+            if b + 9 > #d then break end
+            local image = u16le(d, b)
+            local idx   = u16le(d, b + 2)
+            local w     = u16le(d, b + 4)
+            local h     = u16le(d, b + 6)
+            local group = groups[image]
+            if not group then group = {}; groups[image] = group; order[#order + 1] = image end
+            group[#group + 1] = { index = idx, width = w, height = h }
+        end
+    end
+
+    -- GENE images are addressed by (file, offset) through the grouped GRAF.
+    local image_file, image_off = {}, {}
+    if is_gene then
+        local ggroups = graf_groups(graf)
+        local im = 0
+        for fi, grp in ipairs(ggroups) do
+            for _, off in ipairs(grp) do
+                im = im + 1
+                image_file[im] = fi - 1
+                image_off[im] = off
+            end
+        end
+    end
+
+    table.sort(order)
+
+    local banks = {}
+    for _, image in ipairs(order) do
+        if image >= 1 then
+            local fi, base, encoding
+            if is_gene then
+                fi = image_file[image]
+                base = image_off[image]
+                encoding = "rle"
+            else
+                fi = u16le(d, image_directory + (image - 1) * 4 + 3)
+                base = graf_offset(graf, image)
+                encoding = "raw"
+            end
+            local fname = files[fi + 1]
+            local path = resolve_file(game_path, fname)
+            if not path and fname then
+                local num = fname:match("(%d%d%d)")
+                if num then path = resolve_file(game_path, prefix .. num .. ".DAT") end
+            end
+            if base and path then
+                local bf = file_open(path)
+                if bf then
+                    local bdata = file_read(bf, 0, file_size(bf))
+                    file_close(bf)
+                    if bdata and base + 8 <= #bdata then
+                        local count = #groups[image]
+                        local off0 = u32le(bdata, base + 4 + 1)
+                        if off0 == count * 4 then
+                            local size = u32le(bdata, base + 1)
+                            local name = bdata:sub(base + 4 + size + 1, base + 4 + size + 8)
+                            name = name:gsub("%z", ""):gsub("%s+$", "")
+                            if name == "" then name = "bank" .. image end
+
+                            local offsets = {}
+                            local valid = true
+                            for k = 0, count - 1 do
+                                local oo = u32le(bdata, base + 4 + k * 4 + 1)
+                                offsets[k] = oo
+                                if encoding == "raw" then
+                                    local sz = groups[image][k + 1].width * groups[image][k + 1].height
+                                    if oo + sz > size then valid = false end
+                                end
+                            end
+                            if valid then
+                                banks[image] = {
+                                    image    = image,
+                                    file     = path,
+                                    base     = base,
+                                    name     = name,
+                                    sprites  = groups[image],
+                                    offsets  = offsets,
+                                    encoding = encoding
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    bank_cache[key] = banks
+    return banks
+end
+
+-- ============================================================================
 -- Scan for overlays in numbered DAT files using GRAF offsets (IUC only)
 -- ============================================================================
 
@@ -538,6 +874,43 @@ function engine.get_resources(game_path)
         end
     end
 
+    -- Sprites (Guilty / GBG and Genesis / GENE sprite banks)
+    if prefix_upper == "GBG_" or prefix_upper == "VIC_" then
+        local banks = get_sprite_banks(game_path, prefix)
+        local bank_ids = {}
+        for image, _ in pairs(banks) do bank_ids[#bank_ids + 1] = image end
+        table.sort(bank_ids)
+
+        if #bank_ids > 0 then
+            local total = 0
+            local bank_children = {}
+            for _, image in ipairs(bank_ids) do
+                local bank = banks[image]
+                local spr_children = {}
+                for i, sp in ipairs(bank.sprites) do
+                    spr_children[#spr_children + 1] = {
+                        id   = "spr_" .. image .. "_" .. i,
+                        name = string.format("#%d (%dx%d)", sp.index, sp.width, sp.height),
+                        type = "image"
+                    }
+                end
+                total = total + #bank.sprites
+                bank_children[#bank_children + 1] = {
+                    id       = "sprbank_" .. image,
+                    name     = string.format("%s (%d)", bank.name, #bank.sprites),
+                    type     = "category",
+                    children = spr_children
+                }
+            end
+            resources[#resources + 1] = {
+                id       = "sprites",
+                name     = "Sprites (" .. total .. ")",
+                type     = "category",
+                children = bank_children
+            }
+        end
+    end
+
     return resources
 end
 
@@ -640,6 +1013,51 @@ function engine.load_resource(game_path, resource_id, palette_id)
             type        = "image",
             image       = img,
             description = string.format("Overlay %d in %s (%dx%d)", ov_idx, ov_file, sub.width, sub.height)
+        }
+    end
+
+    -- Sprite from a Guilty (GBG) sprite bank
+    local spr_image, spr_index = resource_id:match("^spr_(%d+)_(%d+)$")
+    if spr_image then
+        local banks = get_sprite_banks(game_path, prefix)
+        local bank = banks[tonumber(spr_image)]
+        if not bank then return nil end
+
+        local i = tonumber(spr_index)
+        local sp = bank.sprites[i]
+        local off = bank.offsets[i - 1]
+        if not sp or not off then return nil end
+
+        local fh = file_open(bank.file)
+        if not fh then return nil end
+        local bdata = file_read(fh, 0, file_size(fh))
+        file_close(fh)
+        if not bdata then return nil end
+
+        local w, h = sp.width, sp.height
+        if w <= 0 or h <= 0 then return nil end
+        local start = bank.base + 4 + off + 1
+
+        local pixels
+        if bank.encoding == "rle" then
+            pixels = decode_rle(bdata, start, w * h)
+        else
+            if start + w * h - 1 > #bdata then return nil end
+            pixels = {}
+            for k = 0, w * h - 1 do
+                pixels[k + 1] = bdata:byte(start + k)
+            end
+        end
+
+        local palette = find_file_palette(bdata) or grayscale_palette()
+        if bank.encoding == "rle" then
+            palette = gene_default_palette(game_path) or find_file_palette(bdata) or grayscale_palette()
+        end
+        local img = image_create_indexed(w, h, pixels, palette)
+        return {
+            type        = "image",
+            image       = img,
+            description = string.format("%s #%d (%dx%d)", bank.name, sp.index, w, h)
         }
     end
 
