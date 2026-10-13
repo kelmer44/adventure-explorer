@@ -21,6 +21,14 @@
 --
 -- GRAF.DAT: groups of u32le offsets (separated by 0), pointing to sub-images
 --   within numbered DAT files. For IUC, these are scene overlays.
+--
+-- ORION sprite banks (partial support, no renderable sprites):
+--   ORION has no MAIN file. CER_GRAF.DAT groups map 1:1 to the alphabetically
+--   sorted CER_*.DAT files; each offset is a per-file sprite bank:
+--   u32 size + u32le `count*4` offset table + sprite data + 8-byte ASCII name.
+--   Banks are self-describing, but sprite dimensions live in the game EXE, so
+--   banks are listed as info resources. ORION.RNC is a Pro-Pack archive whose
+--   plain filename index is also exposed as an info resource.
 -- ============================================================================
 
 local engine = {}
@@ -582,6 +590,148 @@ local function gene_default_palette(game_path)
     return pal
 end
 
+-- ============================================================================
+-- ORION sprite banks (CER_ prefix, partial support)
+-- ----------------------------------------------------------------------------
+-- CER_GRAF.DAT is a concatenation of per-file offset lists separated by zeros
+-- (same zero-grouped layout as GENE).  Group index g (1-based) maps to the
+-- g-th alphabetically sorted CER_*.DAT scene file, and each offset in the
+-- group is a per-file sprite bank: u32 size, u32le `count*4` offset table,
+-- sprite data, 8-byte ASCII name.  Offsets that are not banks are background
+-- images (w/h header) and are skipped.  Sprite dimensions are not stored, so
+-- banks are exposed as info (text) resources rather than images.
+-- ============================================================================
+
+local orion_cache = {}
+
+local function orion_bank_files(game_path, prefix)
+    local names = {}
+    local files = list_files(game_path)
+    if not files then return names end
+    local prefix_upper = prefix:upper()
+    for _, f in ipairs(files) do
+        local fu = f:upper()
+        if fu:sub(1, #prefix_upper) == prefix_upper
+           and fu:match("%.DAT$")
+           and not fu:match("^" .. prefix_upper .. "GRAF%.DAT$") then
+            names[#names + 1] = f
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+local function orion_bank_info(data, base)
+    if base + 8 > #data then return nil end
+    local size = u32le(data, base + 1)
+    local off0 = u32le(data, base + 5)
+    if off0 == 0 or off0 > size or off0 % 4 ~= 0 then return nil end
+    local count = math.floor(off0 / 4)
+    if count < 1 or count > 2048 then return nil end
+    local prev = 0
+    for k = 0, count - 1 do
+        local pos = base + 4 + k * 4 + 1
+        if pos + 3 > #data then return nil end
+        local v = u32le(data, pos)
+        if v < prev or v >= size then return nil end
+        prev = v
+    end
+    local name_end = math.min(base + 4 + size + 8, #data)
+    for i = base + 4 + size + 1, name_end do
+        local b = data:byte(i)
+        if b < 32 or b > 126 then return nil end
+    end
+    local name = data:sub(base + 4 + size + 1, name_end)
+    name = name:gsub("%s+$", "")
+    return { size = size, count = count, name = name }
+end
+
+local function scan_orion_banks(game_path, prefix)
+    local key = game_path .. "|" .. prefix
+    if orion_cache[key] then return orion_cache[key] end
+
+    local banks = {}
+    local graf = read_graf_table(game_path, prefix)
+    if graf then
+        local files = orion_bank_files(game_path, prefix)
+        local groups = graf_groups(graf)
+        for gi, group in ipairs(groups) do
+            local file = files[gi]
+            if file then
+                local fh = file_open(game_path .. "/" .. file)
+                if fh then
+                    local data = file_read(fh, 0, file_size(fh))
+                    file_close(fh)
+                    if data then
+                        for _, base in ipairs(group) do
+                            local info = orion_bank_info(data, base)
+                            if info then
+                                info.file = file
+                                info.base = base
+                                banks[#banks + 1] = info
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    orion_cache[key] = banks
+    return banks
+end
+
+local function orion_bank_text(game_path, bank)
+    local text = {
+        string.format("ORION sprite bank: %s", bank.name),
+        string.format("File:    %s", bank.file),
+        string.format("Offset:  0x%X (%d)", bank.base, bank.base),
+        string.format("Sprites: %d", bank.count),
+        ""
+    }
+    local fh = file_open(game_path .. "/" .. bank.file)
+    if fh then
+        local data = file_read(fh, 0, file_size(fh))
+        file_close(fh)
+        if data then
+            local prev = 0
+            for k = 1, bank.count do
+                local off = u32le(data, bank.base + 4 + (k - 1) * 4 + 1)
+                -- Fall back to bank-end if this is the last sprite
+                local next_off = bank.size
+                if k < bank.count then
+                    next_off = u32le(data, bank.base + 4 + k * 4 + 1)
+                end
+                text[#text + 1] = string.format("  #%d offset 0x%X (%d bytes)", k - 1, off, next_off - off)
+                prev = off
+            end
+        end
+    end
+    return table.concat(text, "\n")
+end
+
+local function orion_archive_index(game_path)
+    local path = resolve_file(game_path, "ORION.RNC")
+    if not path then return nil end
+    local fh = file_open(path)
+    if not fh then return nil end
+    local data = file_read(fh, 0, math.min(300000, file_size(fh)))
+    file_close(fh)
+    if not data then return nil end
+
+    local names = {}
+    local entry_pat = "[A-Z][A-Z0-9_]*%.[A-Z0-9][A-Z0-9][A-Z0-9]%z"
+    local pos = 1
+    while #names < 300 do
+        local s, e = data:find(entry_pat, pos)
+        if not s or s > 260000 then break end
+        names[#names + 1] = data:sub(s, e - 1)
+        pos = e + 1
+    end
+    if #names == 0 then return nil end
+    return table.concat(names, "\n")
+end
+
 local function get_sprite_banks(game_path, prefix)
     local key = game_path .. "|" .. prefix
     if bank_cache[key] then return bank_cache[key] end
@@ -911,6 +1061,68 @@ function engine.get_resources(game_path)
         end
     end
 
+    -- ORION: no MAIN file, so sprite banks are exposed as info resources.
+    if prefix_upper == "CER_" then
+        local banks = scan_orion_banks(game_path, prefix)
+        if #banks > 0 then
+            local by_file = {}
+            local file_order = {}
+            for _, b in ipairs(banks) do
+                if not by_file[b.file] then
+                    by_file[b.file] = {}
+                    file_order[#file_order + 1] = b.file
+                end
+            end
+            table.sort(file_order)
+
+            local total = 0
+            local bank_children = {}
+            for _, f in ipairs(file_order) do
+                local bank_list = by_file[f]
+                for _, b in ipairs(banks) do
+                    if b.file == f then bank_list[#bank_list + 1] = b end
+                end
+                local file_children = {}
+                for _, b in ipairs(bank_list) do
+                    file_children[#file_children + 1] = {
+                        id   = "obank_" .. f .. "_" .. b.base,
+                        name = string.format("%s (%d sprites)", b.name, b.count),
+                        type = "text"
+                    }
+                    total = total + b.count
+                end
+                bank_children[#bank_children + 1] = {
+                    id       = "obanks_" .. f,
+                    name     = string.format("%s (%d banks)", f, #bank_list),
+                    type     = "category",
+                    children = file_children
+                }
+            end
+            resources[#resources + 1] = {
+                id       = "sprites_orion",
+                name     = "Sprite Banks (" .. total .. " sprites)",
+                type     = "category",
+                children = bank_children
+            }
+        end
+
+        local archive_text = orion_archive_index(game_path)
+        if archive_text then
+            resources[#resources + 1] = {
+                id       = "orion_archive",
+                name     = "Game Archive (ORION.RNC)",
+                type     = "category",
+                children = {
+                    {
+                        id   = "oarch",
+                        name = "Archive Index",
+                        type = "text"
+                    }
+                }
+            }
+        end
+    end
+
     return resources
 end
 
@@ -1058,6 +1270,36 @@ function engine.load_resource(game_path, resource_id, palette_id)
             type        = "image",
             image       = img,
             description = string.format("%s #%d (%dx%d)", bank.name, sp.index, w, h)
+        }
+    end
+
+    -- ORION: sprite bank info resource (from the zero-grouped CER_GRAF.DAT)
+    local ob_file, ob_base = resource_id:match("^obank_(.-)_(%d+)$")
+    if ob_file and ob_base then
+        local banks = scan_orion_banks(game_path, prefix)
+        local base = tonumber(ob_base)
+        local bank
+        for _, b in ipairs(banks) do
+            if b.file == ob_file and b.base == base then bank = b break end
+        end
+        if not bank then return nil end
+        return {
+            type        = "text",
+            description = string.format("ORION sprite bank %s in %s", bank.name, bank.file),
+            text        = orion_bank_text(game_path, bank)
+        }
+    end
+
+    -- ORION: package archive index (ORION.RNC, a Pro-Pack archive)
+    if resource_id == "oarch" then
+        local archive_text = orion_archive_index(game_path)
+        if not archive_text then return nil end
+        local count = 0
+        for line in archive_text:gmatch("[^\n]+") do count = count + 1 end
+        return {
+            type        = "text",
+            description = "ORION.RNC contents (" .. count .. " files)",
+            text        = archive_text
         }
     end
 
