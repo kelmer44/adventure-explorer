@@ -29,6 +29,9 @@
 --   uint16 LE frame count
 --   Per frame: uint16 LE width, height, xhotspot, yhotspot
 --              then width*height raw 8-bit pixels (index 0 = transparent)
+--   Hotspots are the draw anchor: a bank animates correctly when every frame
+--   is aligned on its hotspot. Sprite pixels are drawn with the room's PCX
+--   palette; palette index 0 is a transparent mask in the game's blit.
 -- ============================================================================
 
 local engine = {}
@@ -207,6 +210,8 @@ local function decode_pcx(data)
     local palette = {}
     for i = 0, 767 do palette[i + 1] = 0 end
 
+    -- Standard PCX: the last 768 bytes are the palette, preceded by a 0x0C
+    -- marker (so the marker sits at offset #data-768).
     if #data >= 769 then
         local pal_offset = #data - 768
         local marker = data:byte(pal_offset)
@@ -268,6 +273,197 @@ local function decode_sprite_bank(data)
     end
 
     return frames
+end
+
+-- ============================================================================
+-- Palette helpers
+-- ============================================================================
+
+local TRANSPARENT = { 255, 0, 255 }
+
+local function grayscale_palette()
+    local pal = {}
+    for i = 0, 255 do
+        pal[i * 3 + 1] = i; pal[i * 3 + 2] = i; pal[i * 3 + 3] = i
+    end
+    return pal
+end
+
+-- Read the 256-color palette embedded in a PCX resource.
+local function load_pcx_palette(rt, entry)
+    if not entry then return nil end
+    local fh = file_open(rt.path)
+    if not fh then return nil end
+    local data = file_read(fh, entry.offset, entry.size)
+    file_close(fh)
+    local pcx = decode_pcx(data)
+    if not pcx then return nil end
+    return pcx.palette
+end
+
+-- Sprite rendering palette: index 0 is the transparency mask in bob blits,
+-- rendered as magenta so the masked areas stay visible against the art.
+local function sprite_palette(pal)
+    local p = {}
+    for i = 1, 768 do p[i] = (pal and pal[i]) or 0 end
+    p[1], p[2], p[3] = TRANSPARENT[1], TRANSPARENT[2], TRANSPARENT[3]
+    return p
+end
+
+local function palette_swatch(pal, desc)
+    local CELL, GRID = 16, 16
+    local SIZE = CELL * GRID
+    local rgb, n = {}, 0
+    for py = 0, SIZE - 1 do
+        for px = 0, SIZE - 1 do
+            local ci = math.floor(py / CELL) * GRID + math.floor(px / CELL)
+            rgb[n + 1] = pal[ci * 3 + 1]
+            rgb[n + 2] = pal[ci * 3 + 2]
+            rgb[n + 3] = pal[ci * 3 + 3]
+            n = n + 3
+        end
+    end
+    return { type = "image", image = image_create_rgb(SIZE, SIZE, rgb), description = desc }
+end
+
+-- Find a resource entry by exact name
+local function find_entry(entries, name)
+    for _, entry in ipairs(entries) do
+        if entry.name == name then return entry end
+    end
+    return nil
+end
+
+-- ============================================================================
+-- Sprite bank loaders
+-- ============================================================================
+
+local function read_bank(rt, entry)
+    local fh = file_open(rt.path)
+    if not fh then return nil end
+    local data = file_read(fh, entry.offset, entry.size)
+    file_close(fh)
+    return data
+end
+
+local function decode_bank(rt, bank_file)
+    local entry = find_entry(rt.entries, bank_file)
+    if not entry then return nil end
+    local data = read_bank(rt, entry)
+    if not data then return nil end
+    return decode_sprite_bank(data)
+end
+
+-- Best palette for a sprite bank: explicit choice, matching room PCX,
+-- the UI panel palette, then any room palette.
+local function palette_for_bank(rt, bank_file, palette_id)
+    if palette_id then
+        local pname = palette_id:match("^pal_(.+)$")
+        local e = pname and find_entry(rt.entries, pname)
+        if e then
+            local pal = load_pcx_palette(rt, e)
+            if pal then return pal end
+        end
+    end
+    local base = bank_file:match("^(.-)%.")
+    if base then
+        for _, guess in ipairs({ base .. ".PCX", base:sub(1, -2) .. ".PCX" }) do
+            local e = find_entry(rt.entries, guess)
+            if e then
+                local pal = load_pcx_palette(rt, e)
+                if pal then return pal end
+            end
+        end
+    end
+    local panel = find_entry(rt.entries, "PANEL.PCX")
+    if panel then
+        local pal = load_pcx_palette(rt, panel)
+        if pal then return pal end
+    end
+    for _, e in ipairs(rt.entries) do
+        if e.name:upper():match("%.PCX$") then
+            local pal = load_pcx_palette(rt, e)
+            if pal then return pal end
+        end
+    end
+    return grayscale_palette()
+end
+
+-- Whole-bank animated preview: every frame aligned on its hotspot so the
+-- animation does not jump. Returns an animation (or a single image).
+local function load_sprite_bank(rt, bank_file, palette_id)
+    local frames = decode_bank(rt, bank_file)
+    if not frames or #frames == 0 then return nil end
+
+    -- Some rarely-drawn frames carry junk hotspot values; clamp them so the
+    -- aligned canvas stays sane and those frames just draw at the origin.
+    local function hot(v)
+        return (v and v < 2048) and v or 0
+    end
+
+    local minX, minY, maxX, maxY
+    for _, f in ipairs(frames) do
+        local x0, y0 = -hot(f.xhotspot), -hot(f.yhotspot)
+        local x1, y1 = x0 + f.width, y0 + f.height
+        if not minX then
+            minX, minY, maxX, maxY = x0, y0, x1, y1
+        else
+            if x0 < minX then minX = x0 end
+            if y0 < minY then minY = y0 end
+            if x1 > maxX then maxX = x1 end
+            if y1 > maxY then maxY = y1 end
+        end
+    end
+    local cw = maxX - minX
+    local ch = maxY - minY
+    if cw <= 0 or ch <= 0 or cw > 4096 or ch > 4096 or cw * ch > 4000000 then
+        return nil
+    end
+
+    local pal = sprite_palette(palette_for_bank(rt, bank_file, palette_id))
+    local handles = {}
+    for _, f in ipairs(frames) do
+        local out = {}
+        for i = 1, cw * ch do out[i] = 0 end
+        local dx = -hot(f.xhotspot) - minX + 1
+        local dy = -hot(f.yhotspot) - minY + 1
+        for y = 0, f.height - 1 do
+            local dst = (y + dy - 1) * cw + dx
+            local src = y * f.width
+            for x = 0, f.width - 1 do
+                out[dst + x] = f.pixels[src + x + 1]
+            end
+        end
+        handles[#handles + 1] = image_create_indexed(cw, ch, out, pal)
+    end
+
+    local desc = string.format("%s - %d frame(s), %dx%d", bank_file, #frames, cw, ch)
+    if #handles == 1 then
+        return { type = "image", image = handles[1], description = desc }
+    end
+    return {
+        type = "animation", animation = animation_create(handles, 120),
+        delay_ms = 120, description = desc
+    }
+end
+
+local function load_sprite_frame(rt, bank_file, frame_idx, palette_id)
+    local frames = decode_bank(rt, bank_file)
+    if not frames then return nil end
+    local frame
+    for _, f in ipairs(frames) do
+        if f.index == frame_idx then frame = f break end
+    end
+    if not frame then return nil end
+
+    local pal = sprite_palette(palette_for_bank(rt, bank_file, palette_id))
+    local img = image_create_indexed(frame.width, frame.height, frame.pixels, pal)
+    return {
+        type = "image", image = img,
+        description = string.format("%s Frame %d: %dx%d hotspot=(%d,%d)",
+            bank_file, frame_idx, frame.width, frame.height,
+            frame.xhotspot, frame.yhotspot)
+    }
 end
 
 -- ============================================================================
@@ -343,17 +539,19 @@ function engine.get_resources(game_path)
     end
 
     -- Sprite banks (BBK)
+    local bank_index = {}
     if #sprite_banks > 0 then
         local bbk_children = {}
         for _, entry in ipairs(sprite_banks) do
             local base = entry.name:match("^(.-)%.") or entry.name
-            -- Read frame count to create sub-entries
-            bbk_children[#bbk_children + 1] = {
+            local node = {
                 id   = "bbk_" .. entry.name,
                 name = base,
                 type = "category",
                 children = {}  -- filled on load
             }
+            bank_index[node.id] = node
+            bbk_children[#bbk_children + 1] = node
         end
         resources[#resources + 1] = {
             id       = "sprite_banks",
@@ -368,12 +566,14 @@ function engine.get_resources(game_path)
         local act_children = {}
         for _, entry in ipairs(actor_banks) do
             local base = entry.name:match("^(.-)%.") or entry.name
-            act_children[#act_children + 1] = {
+            local node = {
                 id   = "act_" .. entry.name,
                 name = base,
                 type = "category",
                 children = {}
             }
+            bank_index[node.id] = node
+            act_children[#act_children + 1] = node
         end
         resources[#resources + 1] = {
             id       = "actor_banks",
@@ -383,45 +583,61 @@ function engine.get_resources(game_path)
         }
     end
 
-    -- Now populate sprite bank children by reading frame counts
+    -- Now populate bank children: an animated preview then the single frames
     local fh = file_open(rt.path)
     if fh then
         for _, entry in ipairs(rt.entries) do
             local name_upper = entry.name:upper()
             local is_bbk = name_upper:match("%.BBK$")
             local is_act = name_upper:match("%.ACT$")
-            if is_bbk or is_act then
+            if (is_bbk or is_act) then
                 local prefix = is_bbk and "bbk_" or "act_"
-                local header_data = file_read(fh, entry.offset, 2)
-                if header_data and #header_data >= 2 then
-                    local nframes = u16le(header_data, 1)
+                local node = bank_index[prefix .. entry.name]
+                if node then
+                    local header_data = file_read(fh, entry.offset, 2)
+                    local nframes = header_data and #header_data >= 2 and u16le(header_data, 1) or 0
                     if nframes > 0 and nframes <= 5000 then
-                        local frame_children = {}
+                        local base = entry.name:match("^(.-)%.") or entry.name
+                        local child = {
+                            { id   = prefix .. entry.name,
+                              name = "Play animation",
+                              type = "animation" }
+                        }
                         for fr = 0, nframes - 1 do
-                            frame_children[#frame_children + 1] = {
+                            child[#child + 1] = {
                                 id   = prefix .. entry.name .. "_f" .. fr,
                                 name = "Frame " .. fr,
                                 type = "image"
                             }
                         end
-                        -- Find the matching category node and set children
-                        local cat_id = prefix .. entry.name
-                        for _, cat in ipairs(resources) do
-                            if cat.children then
-                                for _, node in ipairs(cat.children) do
-                                    if node.id == cat_id then
-                                        node.children = frame_children
-                                        node.name = node.name .. " (" .. nframes .. " frames)"
-                                        break
-                                    end
-                                end
-                            end
-                        end
+                        node.children = child
+                        node.name = base .. " (" .. nframes .. " frames)"
                     end
                 end
             end
         end
         file_close(fh)
+    end
+
+    -- Palettes (every room/UI PCX exposes its 256-color palette)
+    local pal_children = {}
+    for _, entry in ipairs(rt.entries) do
+        if entry.name:upper():match("%.PCX$") then
+            local base = entry.name:match("^(.-)%.") or entry.name
+            pal_children[#pal_children + 1] = {
+                id   = "pal_" .. entry.name,
+                name = base .. " palette",
+                type = "palette"
+            }
+        end
+    end
+    if #pal_children > 0 then
+        resources[#resources + 1] = {
+            id       = "palettes",
+            name     = "Palettes (" .. #pal_children .. ")",
+            type     = "category",
+            children = pal_children
+        }
     end
 
     -- Cutaways
@@ -487,14 +703,6 @@ end
 -- Resource loader
 -- ============================================================================
 
--- Find a resource entry by name
-local function find_entry(entries, name)
-    for _, entry in ipairs(entries) do
-        if entry.name == name then return entry end
-    end
-    return nil
-end
-
 -- Find entry for a resource from the table by resource_id pattern
 local function resolve_entry(rt, resource_id)
     -- bg_FILENAME.PCX -> FILENAME.PCX
@@ -537,136 +745,46 @@ function engine.load_resource(game_path, resource_id, palette_id)
         }
     end
 
-    -- Sprite frame from BBK or ACT bank
-    local bank_file, frame_str = resource_id:match("^[ba][bc][kt]_(.-)_f(%d+)$")
-    if bank_file then
-        local frame_idx = tonumber(frame_str)
-        local entry = find_entry(rt.entries, bank_file)
+    -- Palette swatch (room / UI PCX palette)
+    if resource_id:match("^pal_") then
+        local filename = resource_id:match("^pal_(.+)$")
+        local entry = find_entry(rt.entries, filename)
         if not entry then return nil end
-
-        local fh = file_open(rt.path)
-        if not fh then return nil end
-        local data = file_read(fh, entry.offset, entry.size)
-        file_close(fh)
-
-        local frames = decode_sprite_bank(data)
-        if not frames then return nil end
-
-        -- Find the matching frame
-        local frame = nil
-        for _, f in ipairs(frames) do
-            if f.index == frame_idx then
-                frame = f
-                break
-            end
-        end
-        if not frame then return nil end
-
-        -- Try to get palette from a background PCX
-        -- Use palette_id if provided, otherwise find any PCX
-        local palette = nil
-        if palette_id and palette_id:match("^bg_") then
-            local pal_entry = resolve_entry(rt, palette_id)
-            if pal_entry then
-                local pfh = file_open(rt.path)
-                if pfh then
-                    local pdata = file_read(pfh, pal_entry.offset, pal_entry.size)
-                    file_close(pfh)
-                    local ppcx = decode_pcx(pdata)
-                    if ppcx then palette = ppcx.palette end
-                end
-            end
-        end
-
-        -- Try to find a room PCX with matching name prefix
-        if not palette then
-            local base = bank_file:match("^(.-)%.")
-            if base then
-                local pcx_name = base .. ".PCX"
-                local pcx_entry = find_entry(rt.entries, pcx_name)
-                if not pcx_entry then
-                    pcx_name = base:sub(1, -2) .. ".PCX"
-                    pcx_entry = find_entry(rt.entries, pcx_name)
-                end
-                if pcx_entry then
-                    local pfh = file_open(rt.path)
-                    if pfh then
-                        local pdata = file_read(pfh, pcx_entry.offset, pcx_entry.size)
-                        file_close(pfh)
-                        local ppcx = decode_pcx(pdata)
-                        if ppcx then palette = ppcx.palette end
-                    end
-                end
-            end
-        end
-
-        -- Fallback: use first available PCX palette
-        if not palette then
-            for _, e in ipairs(rt.entries) do
-                if e.name:upper():match("%.PCX$") then
-                    local pfh = file_open(rt.path)
-                    if pfh then
-                        local pdata = file_read(pfh, e.offset, e.size)
-                        file_close(pfh)
-                        local ppcx = decode_pcx(pdata)
-                        if ppcx then palette = ppcx.palette; break end
-                    end
-                end
-            end
-        end
-
-        -- Last resort: grayscale palette
-        if not palette then
-            palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-        end
-
-        local img = image_create_indexed(frame.width, frame.height, frame.pixels, palette)
-        return {
-            type        = "image",
-            image       = img,
-            description = string.format("Frame %d: %dx%d hotspot=(%d,%d)",
-                frame_idx, frame.width, frame.height, frame.xhotspot, frame.yhotspot)
-        }
+        local pal = load_pcx_palette(rt, entry)
+        if not pal then return nil end
+        return palette_swatch(pal, filename .. " palette")
     end
 
-    -- Sprite bank overview (clicking the bank itself shows first frame)
+    -- Sprite bank animation or single frame (BBK / ACT)
     if resource_id:match("^bbk_") or resource_id:match("^act_") then
-        local filename = resource_id:match("^[ba][bc][kt]_(.+)$")
-        if filename then
-            local entry = find_entry(rt.entries, filename)
-            if not entry then return nil end
-
-            local fh = file_open(rt.path)
-            if not fh then return nil end
-            local data = file_read(fh, entry.offset, entry.size)
-            file_close(fh)
-
-            local frames = decode_sprite_bank(data)
-            if not frames or #frames == 0 then return nil end
-
-            -- Show first frame as preview
-            local frame = frames[1]
-            local palette = {}
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-            local img = image_create_indexed(frame.width, frame.height, frame.pixels, palette)
-            return {
-                type        = "image",
-                image       = img,
-                description = string.format("%s: %d frames (preview: %dx%d)",
-                    filename, #frames, frame.width, frame.height)
-            }
+        local bank_file, frame_str = resource_id:match("^[ba][bc][kt]_(.+)_f(%d+)$")
+        if bank_file then
+            return load_sprite_frame(rt, bank_file, tonumber(frame_str), palette_id)
+        end
+        bank_file = resource_id:match("^[ba][bc][kt]_(.+)$")
+        if bank_file then
+            return load_sprite_bank(rt, bank_file, palette_id)
         end
     end
 
+    return nil
+end
+
+-- Default palette companions: a sprite bank matches its room PCX palette.
+function engine.default_palette(game_path, resource_id)
+    local rt = parse_resource_table(game_path)
+    if not rt then return nil end
+    if not (resource_id:match("^bbk_") or resource_id:match("^act_")) then return nil end
+    local name = resource_id:match("^[ba][bc][kt]_(.+)$")
+    if not name then return nil end
+    name = name:gsub("_f%d+$", "")
+    local base = name:match("^(.-)%.")
+    if base then
+        for _, guess in ipairs({ base .. ".PCX", base:sub(1, -2) .. ".PCX" }) do
+            if find_entry(rt.entries, guess) then return "pal_" .. guess end
+        end
+    end
+    if find_entry(rt.entries, "PANEL.PCX") then return "pal_PANEL.PCX" end
     return nil
 end
 
