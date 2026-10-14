@@ -354,6 +354,19 @@ Key references used:
   break.
 - `video.cpp` - Smacker videos handled as header metadata (id, size) since playback
   needs libsmacker.
+- `modules/*.cpp` / `*.h` (`modules/module*.cpp`, `scene.cpp`, `resource.cpp`) -
+  scene composition is not stored in the BLB data, so palettes for surfaces without
+  an embedded palette are associated *per scene*. Each scene constructor calls
+  `setBackground(hash)`/`setPalette(hash)` (the background bitmap carries the
+  scene palette); the sprites/mice/rects it inserts (`insertStaticSprite(0x...)`,
+  `insertSprite<Class>(0x...)`, `insertScreenMouse(0x...)`, `insertPuzzleMouse`,
+  `createStaticScene(bg, cursor)`, `loadSprite(0x...)`, and the file-scope
+  `kSceneNNNN*`/`kSsSceneNNNN*` hash tables) borrow that scene's palette. This map
+  is extracted offline from the sources into the `SCENE_PALETTE_DATA` table in
+  `engine.lua` (surface hash -> palette bitmap/palette hash). A surface without an
+  embedded palette resolves to its scene palette; if unmapped it is rendered in
+  neutral grayscale (the automatic/external palette override is not applied, so no
+  bitmap is shown with an arbitrary palette).
 
 Archives verified: HD (74), A (329), S (358 animations incl. 84 redirects),
 T (577), M (13), I (1316), C (83) -> 2706 tree nodes in 8 categories.

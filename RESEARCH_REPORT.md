@@ -2509,7 +2509,37 @@ Type 5 (data) is exposed as a hex/size preview. Type 8 (music) and type 10 (vide
 Smacker) require their respective decoders; video is exposed as header metadata.
 Music is surfaced under the "Music" category.
 
-## 12.9 Verification
+## 12.9 Palette association for surfaces without an embedded palette
+
+Most bitmaps carry no embedded palette: of 1379 bitmaps, 298 carry a palette
+(flags `HAS_PAL`) and 1081 do not. The 1081 no-palette surfaces are sprites, mice,
+fonts, cursors and UI pieces. In game they are drawn over a scene background and
+use that scene's palette, which is not recorded in the BLB archives — scene
+composition lives only in the compiled game code (mirrored by ScummVM's
+`modules/*.cpp`). The viewer originally applied an arbitrary palette to these,
+which produced wrong colours.
+
+Association is derived offline from the ScummVM module sources: each scene
+constructor establishes its palette via `setBackground(hash)`/`setPalette(hash)`
+(the background bitmap holds the scene palette), and the entities it inserts
+borrow it. Signals used: `insertStaticSprite(0x...)`, `insertSprite<Class>(0x...)`,
+`insertScreenMouse`/`insertPuzzleMouse`/`insertNavigationMouse(0x...)`,
+`createStaticScene(bg, cursor)`, `loadSprite(0x...)`, class names embedding a scene
+number (`SceneNNNN`, `AsSceneNNNN…`), and file-scope hash arrays named after the
+scene (`kSceneNNNN*`, `kSsSceneNNNN*`). The result is emitted as the
+`SCENE_PALETTE_DATA` table in `engine.lua` (surface hash -> palette hash, where the
+palette value is a bitmap with an embedded palette or a type-3 palette resource).
+
+Coverage is partial by nature: 565 of the 1081 no-palette surfaces are mapped;
+many of the rest are not referenced by any scene (unused/left-over assets), and
+some shared sprites are legitimately reused across scenes with different
+backgrounds. Resolution in `load_bitmap` when no embedded palette exists: use the
+mapped scene palette if available, otherwise render neutral grayscale. The
+automatic/external palette override is deliberately ignored for these surfaces, so
+no bitmap is ever shown with an arbitrary palette. Scene palettes are memoised per
+process so a shared background palette is decoded once.
+
+## 12.10 Verification
 
 Engine `scripts/engines/neverhood/engine.lua`; headless harness `devcli`
 (`tree`/`scan`/`load`). Reference decoder in Python (`verify.py`, `dcltest.py`).
@@ -2528,5 +2558,8 @@ Engine `scripts/engines/neverhood/engine.lua`; headless harness `devcli`
 - **Trees:** 2706 nodes in 8 categories — Bitmaps 1379, Animations 327 (= 316 from
   S.BLB + 13 from I.BLB minus 2 cross-archive duplicate hashes), Palettes 54,
   Sounds 295, Music 34, Text 12, Data 54, Videos 551.
+- **Palette association:** sprite `0x020462e0` (21x266 RLE, no embedded palette)
+  renders pixel-for-pixel identical to a Python render that applies the embedded
+  palette of its mapped scene background `0x41983216`.
 - **Sweep:** `devcli scan` over every category (bmp_, anim_, pal_, snd_, txt_,
   dat_) decoded with 0 load failures.
