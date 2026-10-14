@@ -51,7 +51,7 @@ local function u32le(s, i)
     return a + (b or 0) * 256 + (c or 0) * 65536 + (d or 0) * 16777216
 end
 
-local band, lshift, rshift = bit32.band, bit32.lshift, bit32.rshift
+local band, bor, lshift, rshift = bit32.band, bit32.bor, bit32.lshift, bit32.rshift
 
 local NUM_ENTRIES = 0xBF
 local HEADER_SIZE = 8 + NUM_ENTRIES * 8   -- "heywow"(6) + fileNum(2) + entries
@@ -259,7 +259,8 @@ end
 
 -- Determine the palette resource id for a screen id (with fallbacks).
 local function palette_id_for(ctx, id)
-    local candidates = { band(id, 0xffe0) - 1, id + 1, id - 1 }
+    local candidates = { band(id, 0xffe0) - 1, id + 1, id - 1,
+                         bor(band(id, 0xff00), 0xff), band(id, 0xff00) }
     for _, pid in ipairs(candidates) do
         if pid >= 0 and pid <= 0xffff then
             local e = ctx.entries[pid]
@@ -292,6 +293,11 @@ end
 -- Resource tree
 -- ============================================================================
 
+local function parse_id(resource_id, prefix)
+    local h = resource_id and resource_id:match("^" .. prefix .. "(%x+)$")
+    return h and tonumber(h, 16) or nil
+end
+
 local function hex4(v) return string.format("%04x", v) end
 
 local function classify(ctx)
@@ -311,7 +317,7 @@ local function classify(ctx)
                 -- Cheap pre-filter: the byte stream offset must point inside the file
                 if dp >= 0x408 and dp <= #bytes then
                     local ok, _, olen = pcall(vga_decode, bytes)
-                    if ok and olen and olen >= 320 * 180 and olen <= 320 * 220 then
+                    if ok and olen and ((olen >= 61408 and olen <= 61441) or (olen >= 63999 and olen <= 64001)) then
                         screens[#screens + 1] = { id = id, height = math.floor(olen / 320) }
                     end
                 end
@@ -365,13 +371,13 @@ local function load_palette_bytes(ctx, id)
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
-    local scrId = tonumber(resource_id:match("^lure_scr_(%x+)$"), 16)
+    local scrId = parse_id(resource_id, "lure_scr_")
     if scrId then
         local ctx = build(game_path)
         local bytes = get_bytes(ctx, scrId)
         if not bytes then return nil end
         local ok, pixels, olen = pcall(vga_decode, bytes)
-        if not ok or not pixels or not olen or olen < 320 * 180 then return nil end
+        if not ok or not pixels or not olen or olen < 61408 or olen > 64001 then return nil end
 
         local w = 320
         local h = math.floor(olen / 320)
@@ -380,7 +386,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
         -- Resolve palette
         local palBytes
         if palette_id then
-            local pid = tonumber(palette_id:match("^lure_pal_(%x+)$"), 16)
+            local pid = parse_id(palette_id, "lure_pal_")
             if pid then palBytes = load_palette_bytes(ctx, pid) end
         end
         if not palBytes then
@@ -400,14 +406,22 @@ function engine.load_resource(game_path, resource_id, palette_id)
         }
     end
 
-    local palId = tonumber(resource_id:match("^lure_pal_(%x+)$"), 16)
+    local palId = parse_id(resource_id, "lure_pal_")
     if palId then
         local ctx = build(game_path)
         local bytes = load_palette_bytes(ctx, palId)
         if not bytes then return nil end
+        local pix = {}
+        for y = 0, 127 do
+            for x = 0, 127 do
+                pix[y * 128 + x + 1] = math.floor(y / 8) * 16 + math.floor(x / 8)
+            end
+        end
+        local handle = image_create_indexed(128, 128, pix, palette_from_rgb64(bytes) or {})
+        if not handle then return nil end
         return {
             type = "image",
-            image = image_create_indexed(1, 1, { 0 }, palette_from_rgb64(bytes) or {}),
+            image = handle,
             description = string.format("Palette %s (%d entries)", string.format("%04x", palId), math.floor(#bytes / 3)),
         }
     end
@@ -420,7 +434,7 @@ end
 -- ============================================================================
 
 function engine.default_palette(game_path, resource_id)
-    local scrId = tonumber(resource_id:match("^lure_scr_(%x+)$"), 16)
+    local scrId = parse_id(resource_id, "lure_scr_")
     if not scrId then return nil end
     local ctx = build(game_path)
     local pid = palette_id_for(ctx, scrId)

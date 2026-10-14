@@ -134,7 +134,7 @@ local function rnc_unpack(src)
                     end
                     tb[p] = a; p = p + 1
                     tb[p + 0x1e] = bor(lshift(lens[i], 8), band(i - 1, 0xff))
-                    huffCode = huffCode + lshift(1, 16 - blen)
+                    huffCode = band(huffCode + lshift(1, 16 - blen), 0xffff)
                 end
             end
         end
@@ -153,7 +153,7 @@ local function rnc_unpack(src)
         value = band(value, 0xff)
         if value >= 2 then
             value = value - 1
-            local v = band(inputBits(value), 0xff)
+            local v = inputBits(value)
             v = bor(v, lshift(1, value))
             value = v
         end
@@ -229,8 +229,12 @@ end
 -- ============================================================================
 
 -- Returns a table: fileNum -> { offset, size, compressed, incHeader }
-local function parse_dnr(dnr)
+-- `dsk_size` is only used to tell floppy v0.0331 (offsets shifted by 3) from
+-- the other versions (shifted by 4), as ScummVM's Disk::determineGameVersion.
+local function parse_dnr(dnr, dsk_size)
     local count = u32le(dnr, 1)
+    local shift = 4
+    if count == 1445 and dsk_size ~= 8830435 then shift = 3 end
     local map = {}
     for i = 0, count - 1 do
         local base = 5 + i * 8                 -- 1-based entry start (C: 4+i*8)
@@ -241,8 +245,8 @@ local function parse_dnr(dnr)
             local b6 = u8(dnr, base + 6)
             local b7 = u8(dnr, base + 7)
             local ff = b5 + b6 * 256 + b7 * 65536
-            local offset = band(foRaw, 0xFFFFFF)
-            if band(rshift(foRaw, 23), 1) == 1 then offset = lshift(offset, 4) end
+            local offset = band(foRaw, 0x7FFFFF)
+            if band(rshift(foRaw, 23), 1) == 1 then offset = lshift(offset, shift) end
             map[fnum] = {
                 offset = offset,
                 size = band(ff, 0x3FFFFF),
@@ -366,7 +370,7 @@ function engine.get_resources(game_path)
     end
     local dnr = read_all(dnrPath)
     if not dnr then file_close(dsk); return {} end
-    local map = parse_dnr(dnr)
+    local map = parse_dnr(dnr, file_size(dsk))
 
     local screens, sprites, palettes = {}, {}, {}
     -- deterministic ordering
@@ -435,12 +439,28 @@ function engine.load_resource(game_path, resource_id, palette_id)
     end
     local dnr = read_all(dnrPath)
     if not dnr then file_close(dsk); return nil end
-    local map = parse_dnr(dnr)
+    local map = parse_dnr(dnr, file_size(dsk))
 
     local num = tonumber(resource_id:match("^sky_%a+_(%d+)$"))
 
     local result = nil
-    if num and map[num] then
+    if num and map[num] and resource_id:match("^sky_pal_") then
+        -- Palette resource: show as a 16x16 swatch grid (each cell 8x8)
+        local pal = palette_table_from(read_at(dsk, map[num].offset, map[num].size))
+        if pal then
+            local pix = {}
+            for y = 0, 127 do
+                for x = 0, 127 do
+                    pix[y * 128 + x + 1] = math.floor(y / 8) * 16 + math.floor(x / 8)
+                end
+            end
+            local handle = image_create_indexed(128, 128, pix, pal)
+            if handle then
+                result = { type = "image", image = handle,
+                           description = string.format("Palette %d (256 colors)", num) }
+            end
+        end
+    elseif num and map[num] then
         local hdr, pixels = load_file(dsk, map[num])
         if hdr and pixels and #pixels > 0 then
             -- Resolve palette
@@ -455,11 +475,28 @@ function engine.load_resource(game_path, resource_id, palette_id)
             local palette = palette_table_from(palBytes) or {}
 
             if hdr.spSize == 0 then
-                local w = hdr.width
-                local h = math.floor(#pixels / w)
-                if w >= 1 and h >= 1 then
+                -- Backgrounds are stored as a sequence of 16x8 tiles in
+                -- row-major tile order (20 tiles per row, see Screen::recreate).
+                local TW, TH, COLS = 16, 8, 20
+                local w = COLS * TW
+                local tiles = math.floor(#pixels / (TW * TH))
+                local rows = math.floor((tiles + COLS - 1) / COLS)
+                local h = rows * TH
+                if tiles >= 1 then
                     local pix = {}
-                    for i = 1, w * h do pix[i] = u8(pixels, i) end
+                    for i = 1, w * h do pix[i] = 0 end
+                    for t = 0, tiles - 1 do
+                        local tx = (t % COLS) * TW
+                        local ty = math.floor(t / COLS) * TH
+                        local src = t * TW * TH
+                        for y = 0, TH - 1 do
+                            local dst = (ty + y) * w + tx
+                            local so = src + y * TW
+                            for x = 1, TW do
+                                pix[dst + x] = u8(pixels, so + x)
+                            end
+                        end
+                    end
                     local handle = image_create_indexed(w, h, pix, palette)
                     if handle then
                         result = { type = "image", image = handle,
