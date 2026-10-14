@@ -23,6 +23,9 @@
 --     yHalfCount=ceil(h/100)); each tile is raw 8bpp 160x100.
 --   * Palettes: RES_PALETTE section, resource 0. Data after decompression:
 --     u16 palStart, u16 palCount, then palCount*3 RGB bytes (8-bit channels).
+--     The effective palette for a scene is the game's startup low-end palette
+--     (Ringworld: palette 0, Blue Force: palette 2) overlaid by the scene's
+--     own palette (which typically covers only indices 64..254).
 --   * Sprites: RES_VISAGE sections, resource 9999 is a frame-set index. Each
 --     other resource is a frame set: u16 numFrames + u32 offset table, then
 --     numFrames surfaceFromRes records (u16 w, u16 h, u16 cx, u16 cy,
@@ -68,9 +71,12 @@ local RES_PRIORITY, RES_BITMAP, RES_SEQUENCE = 11, 14, 16
 -- Detection
 -- ============================================================================
 
+-- basePal is the game's low-end palette, loaded once at startup
+-- (SceneHandler::postInit / SceneHandlerExt::postInit); scene palettes only
+-- cover indices 64..254. Ringworld loads palette 0, Blue Force loads palette 2.
 local GAME_DIRS = {
-    { name = "Ringworld", marker = { "RING.RLB", "ring.rlb" }, defPal = { 0, 0 } },
-    { name = "Blue Force", marker = { "BLUE.RLB", "blue.rlb" }, defPal = { 1, 0 } },
+    { name = "Ringworld", marker = { "RING.RLB", "ring.rlb" }, basePal = { 0, 0 } },
+    { name = "Blue Force", marker = { "BLUE.RLB", "blue.rlb" }, basePal = { 2, 0 } },
 }
 
 local function file_exists_any(game_path, names)
@@ -392,24 +398,27 @@ local function palette_table(rgb)
     return t
 end
 
-local function grayscale_table()
-    local t = {}
-    for i = 0, 255 do
-        t[i * 3 + 1] = i
-        t[i * 3 + 2] = i
-        t[i * 3 + 3] = i
-    end
-    return t
+-- Merge one palette resource (honouring its own start index) into a table.
+local function merge_palette(dst, libs, sec, rid)
+    local rgb = palette_entries(libs, sec, rid)
+    if not rgb then return false end
+    for idx, c in pairs(rgb) do dst[idx] = c end
+    return true
 end
 
--- Preferred palette for a sprite section: same-numbered scene palette when one
--- exists, otherwise the game's dialog/interface palette.
+-- The palette actually shown for a scene/sprite is the startup low-end palette
+-- overlaid by the scene palette (which only covers indices 64..254).
+local function compose_palette(libs, game, sceneNum)
+    local pal = {}
+    merge_palette(pal, libs, game.basePal[1], game.basePal[2])
+    if sceneNum then merge_palette(pal, libs, sceneNum, 0) end
+    return pal
+end
+
+-- Sprites are drawn with the scene palette active, so use the same-numbered
+-- scene palette when one exists, always over the game's low-end palette.
 local function sprite_palette(libs, resNum, game)
-    local rgb = palette_entries(libs, resNum, 0)
-    if not rgb then
-        rgb = palette_entries(libs, game.defPal[1], game.defPal[2])
-    end
-    return rgb and palette_table(rgb) or grayscale_table()
+    return palette_table(compose_palette(libs, game, resNum))
 end
 
 -- ============================================================================
@@ -730,6 +739,8 @@ local function load_sprite(libs, game, resNum, rlbNum)
     if numFrames < 1 or numFrames > 64 then return nil end
     if 2 + numFrames * 4 > #d then return nil end
 
+    local pal = sprite_palette(libs, resNum, game)
+
     local frames = {}
     for i = 0, numFrames - 1 do
         local start = u32le(d, 3 + i * 4)
@@ -737,7 +748,7 @@ local function load_sprite(libs, game, resNum, rlbNum)
         if start < 0 or stop <= start or stop > #d or stop - start < 10 then return nil end
         local pixels, w, h = decode_surface(d, start + 1)
         if not pixels then return nil end
-        local img = image_create_indexed(w, h, pixels, sprite_palette(libs, resNum, game))
+        local img = image_create_indexed(w, h, pixels, pal)
         if not img then return nil end
         frames[#frames + 1] = img
     end
@@ -745,10 +756,8 @@ local function load_sprite(libs, game, resNum, rlbNum)
     return frames
 end
 
-local function load_palette_image(libs, resNum)
-    local rgb = palette_entries(libs, resNum, 0)
-    if not rgb then return nil end
-    local pal = palette_table(rgb)
+local function load_palette_image(libs, game, resNum)
+    local pal = palette_table(compose_palette(libs, game, resNum))
 
     local t = {}
     for y = 0, 15 do
@@ -834,9 +843,8 @@ function engine.load_resource(game_path, resource_id)
         if not ok or not pixels then
             return { type = "text", text = "Cannot decode background " .. arg1 }
         end
-        local rgb = palette_entries(libs, arg1, 0)
-        local img = image_create_indexed(w, h, pixels,
-            rgb and palette_table(rgb) or grayscale_table())
+        local rgb = compose_palette(libs, game, arg1)
+        local img = image_create_indexed(w, h, pixels, palette_table(rgb))
         if not img then return nil end
         return {
             type        = "image",
@@ -874,19 +882,16 @@ function engine.load_resource(game_path, resource_id)
 
     -- Palettes
     if kind == "pal" then
-        local ok, img, pal = pcall(load_palette_image, libs, arg1)
+        local ok, img, pal = pcall(load_palette_image, libs, game, arg1)
         if not ok or not img then
             return { type = "text", text = "Cannot decode palette " .. arg1 }
         end
-        local rgb = palette_entries(libs, arg1, 0)
         local count = 0
-        if rgb then
-            for _ in pairs(rgb) do count = count + 1 end
-        end
+        for _ in pairs(compose_palette(libs, game, arg1)) do count = count + 1 end
         return {
             type        = "image",
             image       = img,
-            description = string.format("%s - Palette %d (%d colours)",
+            description = string.format("%s - Palette %d (%d colours, low-end + scene)",
                 game.name, arg1, count),
         }
     end
