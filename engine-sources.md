@@ -307,3 +307,53 @@ Key references used:
 
 Libraries: Ringworld = `RING.RLB` + `TSAGE.RLB`; Blue Force = `BLUE.RLB` +
 `FILES.RLB` + `TSAGE.RLB` (`INSTALL.RLB` skipped).
+
+### NEVERHOOD (The Neverhood)
+Scummvm source code (`/scummvm-fork/engines/neverhood`, `common/compression/dcl.cpp`)
+and http://github.com/scummvm/scummvm. Game data in `ags/neverhood/DATA`.
+
+Key references used:
+- `detection.cpp` - `AD_ENTRY1s("hd.blb", "22958d968458c9ff221aee38577bb2b2", 4279716)`.
+  Data files are UPPERCASE on disk (`HD.BLB`); search order is `DATA/`, `data/`, root.
+- `blbarchive.cpp` / `blbarchive.h` - `BlbArchive::load`:
+  header `u32 id1=0x2004940, u16 id2=7, u16 extDataSize, u32 fileSize, u32 fileCount`
+  (16 bytes), then `fileCount` `u32` hashes, then `fileCount` 20-byte entries
+  (`u8 type, u8 comprType, u16LE extDataOffset, u32LE timeStamp, u32LE offset,
+  u32LE diskSize, u32LE size`), then the ext-data blob. `comprType` 1 = stored,
+  3 = DCL, `0x65` = redirect (`diskSize` holds the target hash; follow the chain).
+- `neverhood.cpp` - archive order `a, c, hd, i, m (optional jpn), s, t`; on hash
+  collision the entry with the strictly greater timestamp wins.
+- `resource.h` / `resourceman.cpp` (`Resource::load`, `queryResource`) - resource
+  types: 2 bitmap, 3 palette, 4 animation, 5 data, 6 text, 7 sound, 8 music,
+  10 video (Smacker). For `0x65` the ext-data comes from the alias entry while the
+  payload comes from the resolved entry.
+- `common/compression/dcl.cpp` - fixed-tree "blast" decompressor. Header byte 0 =
+  mode (0 binary, 1 ASCII; Neverhood always 0), byte 1 = dictType (4/5/6). Fixed
+  `lengthTree` (31) and `distanceTree` (127) sentinels `BN(pos,l,r)=(l<<12)|r`,
+  leaves `LN(pos,v)=v|0x40000000`; LSB-first 24-bit-window bit reader. Copy:
+  `len = value<8 ? value+2 : 8+(1<<(value-7))+getBits(value-7)` (519 = end);
+  `offset = len==2 ? (value<<2)|getBits(2) : (value<<dictType)|getBits(dictType)`,
+  then `+1`. Dictionary size = `2^(dictType+6)` (dictType 6 -> 4096); the token-offset
+  shift uses `dictType` directly (`value << 6`). LSB-first getBits(24) for seed bits.
+- `graphics.cpp` (`Bitmap::load`/`Bitmap::decodeRle`) - `u16 flags`:
+  RLE 1, HAS_DIM 2, HAS_POS 4, HAS_PAL 8, HAS_IMG 16; optional size/pos, optional
+  1024-byte palette (R,G,B,unused), image. RLE = `u16 rows, u16 chunks` blocks:
+  `chunks==0` skips `rows`; else per row `chunks` x (`u16 skip, u16 copy, copy
+  bytes`); terminated by `rows==0`. Normal pitch = `(w+3)&~3`.
+- `animation.cpp` (`Animation::load`) - header `u16 animListCount, u16
+  animInfoStartOfs, u32 spriteDataOfs, u32 paletteDataOfs`; animList entries 8 bytes
+  (`u32 hash, u16 frameCount, u16 frameListStartOfs`) at offset 12; frame records
+  32 bytes (`u32 frameHash, u16 counter, u16 drawX, u16 drawY, u16 w, u16 h,
+  ..., u32 spriteDataOffs` at +28). Frame pixels are always RLE at
+  `base + spriteDataOfs + spriteDataOffs`; palette at `base + paletteDataOfs`.
+- `sound.cpp` (`SoundResource`, `NeverhoodAudioStream`) - `extData[0]` = shift;
+  0xFF = 16-bit signed LE PCM @22050 mono; otherwise 8-bit signed delta
+  (`sample = ((prev + int8) & 0xFFFF) << shift`).
+- `text.cpp` - `u32 count`, then count+1 offsets; string i spans
+  `data[base+off[i]..base+off[i+1]]` with `base = 4 + count*4`; embedded NUL = line
+  break.
+- `video.cpp` - Smacker videos handled as header metadata (id, size) since playback
+  needs libsmacker.
+
+Archives verified: HD (74), A (329), S (358 animations incl. 84 redirects),
+T (577), M (13), I (1316), C (83) -> 2706 tree nodes in 8 categories.

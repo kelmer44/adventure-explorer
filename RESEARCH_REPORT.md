@@ -1089,6 +1089,7 @@ Individual resource files on disk can override volume resources:
 |------------|-----------------|-----------|-------------|----------------|
 | AITD PAK   | PKWare DCL      | LSB-first | 1K/2K/4K    | Fixed Shannon-Fano |
 | AITD PAK   | zlib Deflate    | —         | 32K         | Dynamic Huffman |
+| Neverhood BLB | PKWare DCL (blast) | LSB-first | 1K/2K/4K | Fixed Shannon-Fano |
 | GC (Cobra) | Custom Huffman+LZ | MSB-first | 256×4 backing | Fixed 6-code  |
 | SCI0       | LZW             | LSB-first | 4096 entries | —              |
 | SCI1+      | LZW1            | MSB-first | 4096 entries | — (early change) |
@@ -2352,3 +2353,180 @@ own sound driver to play, so they are exposed as header metadata only
   sound metadata); Blue Force 1560 leaves (67 backgrounds, 85 palettes, 1242 sprite
   sets = 8526 frames, of which 8325 across 1041 multi-frame animations, 47 messages,
   119 sound metadata).
+
+---
+
+# Part 12: The Neverhood — BLB Archives & Resources
+
+Source: ScummVM `engines/neverhood` (`blbarchive.cpp`/`.h`, `resource.cpp`/`.h`,
+`resourceman.cpp`, `graphics.cpp`, `animation.cpp`, `sound.cpp`, `text.cpp`,
+`video.cpp`, `neverhood.cpp`, `detection.cpp`) and `common/compression/dcl.cpp`
+at `/scummvm-fork`. Game data in `ags/neverhood/DATA`. Engine script:
+`scripts/engines/neverhood/engine.lua`.
+
+The Neverhood (1996) stores every asset in a set of `.BLB` ("DreamWorks
+interactive") archives. Detection is
+`AD_ENTRY1s("hd.blb", md5 22958d968458c9ff221aee38577bb2b2, 4279716)`. On disk the
+names are upper-case (`HD.BLB`); the loader searches `DATA/`, `data/`, then the game
+root. Archives are merged in the order `a, c, hd, i, m` (plus an optional Japanese
+`m`), `s, t`.
+
+## 12.1 BLB Archive Layout
+
+```
+0x00  u32le id1          = 0x02004940
+0x04  u16le id2          = 7
+0x06  u16le extDataSize
+0x08  u32le fileSize
+0x0C  u32le fileCount
+0x10  fileCount * u32le  resource hashes
+      fileCount * 20 bytes entry headers
+      extData blob (extDataSize bytes)
+```
+
+Each 20-byte entry (`blbarchive.h`):
+
+```
++0x00 u8    type           (2 bitmap, 3 palette, 4 animation, 5 data,
+                            6 text, 7 sound, 8 music, 10 video)
++0x01 u8    comprType      (1 stored, 3 DCL, 0x65 redirect)
++0x02 u16le extDataOffset  (1-based into the extData blob)
++0x04 u32le timeStamp
++0x08 u32le offset         (absolute file offset of the payload)
++0x0C u32le diskSize       (bytes on disk; for 0x65 = target hash)
++0x10 u32le size           (uncompressed size)
+```
+
+On hash collisions the entry with the **strictly greater** timestamp replaces an
+existing one (`neverhood.cpp`).
+
+### Redirect entries (`comprType == 0x65`)
+
+A redirect stores the target hash in `diskSize`; `resolve_entry` follows the chain
+to the real entry. The ext-data always comes from the **alias** entry while the
+payload comes from the resolved entry (`ResourceManager::queryResource`). In this
+game redirects appear only in `S.BLB` and always point at animation containers.
+
+## 12.2 PKWare DCL (blast)
+
+The compression is PKWare's "implode"/blast, identical in family to the AITD
+decompressor. Stream header: byte 0 = mode (`0` binary, `1` ASCII; Neverhood always
+binary), byte 1 = dictType (4, 5 or 6). Two hard-coded canonical Huffman trees
+(`lengthTree` 31 entries, `distanceTree` 127) are encoded as
+`BN(pos,l,r)=(l<<12)|r`; leaves are `LN(pos,v)=v|0x40000000`. A 24-bit LSB-first
+window feeds `getBits`.
+
+Decode loop:
+
+```
+len = value < 8 ? value + 2 : 8 + (1 << (value - 7)) + getBits(value - 7)
+len == 519  -> end of stream
+off = len == 2 ? (value << 2) | getBits(2)
+               : (value << dictType) | getBits(dictType)
+off += 1
+copy len bytes from (dictPos - off) mod dictionarySize
+```
+
+**Critical detail:** the dictionary size is `2^(dictType + 6)` (1024/2048/4096 for
+dictType 4/5/6), while the token-offset shift uses `dictType` itself
+(`value << 6` for dictType 6). Confusing the two produces output that is correct
+for the first ~64 bytes and then silently corrupts, since the dictionary wrap mask
+is wrong. This was the one bug found during bring-up.
+
+## 12.3 Bitmap (type 2)
+
+`u16le flags`: RLE 1, HAS_DIM 2, HAS_POS 4, HAS_PAL 8, HAS_IMG 16. Header fields in
+order: optional `u16 w, u16 h`; optional `u16 x, u16 y`; optional 1024-byte palette
+(R,G,B,unused per entry); then the image.
+
+- Non-RLE: rows are `(w+3) & ~3` bytes (pitch), values are palette indices.
+- RLE: repeated `u16 rows, u16 chunks` blocks. `chunks == 0` skips `rows` rows;
+  otherwise each of `rows` rows is `chunks` x (`u16 skip`, `u16 copy`, `copy`
+  bytes). Terminated by a block with `rows == 0`. Always follows `spriteDataOffs`
+  for animation frames.
+
+Palette presence: full-screen HD backgrounds (entries 1-3) always embed one; most
+sprite/font bitmaps do not and rely on an external palette. In the tree, images with
+no embedded palette are rendered grayscale unless the user (or the auto-palette
+hook) supplies one.
+
+## 12.4 Animation (type 4)
+
+```
+0x00 u16le animListCount
+0x02 u16le animInfoStartOfs
+0x04 u32le spriteDataOfs
+0x08 u32le paletteDataOfs
+0x0C animListCount * 8 bytes:
+       +0x00 u32le hash
+       +0x04 u16le frameCount
+       +0x06 u16le frameListStartOfs
+```
+
+`frameList = base + animInfoStartOfs + frameListStartOfs`. Each 32-byte frame record:
+
+```
++0x00 u32le frameHash
++0x04 u16le counter        (draw delay accumulator)
++0x06 u16le drawX
++0x08 u16le drawY
++0x0A u16le w
++0x0C u16le h
++0x0E u16le deltaX
++0x10 u16le deltaY
++0x12 u16le collisionX/Y/W/H (4 * u16)
++0x1C u32le spriteDataOffs
+```
+
+Frame pixels are **always** RLE, located at
+`base + spriteDataOfs + spriteDataOffs`; the palette (if `paletteDataOfs > 0`) is at
+`base + paletteDataOfs`. A container's animList may carry more than one hash; the
+addressable hashes include those contributed by redirects that point at it. The
+per-frame delay is `(sum of counter) / frameCount * 1000 / 24 ms`. The Lua engine
+caps frames at 150 for responsiveness. `S.BLB` holds 274 containers plus 84
+redirects; `I.BLB` holds 13 self-contained animations.
+
+## 12.5 Palette (type 3)
+
+1024 bytes = 256 x (R, G, B, unused). Rendered as a 256x256 swatch (16x16 blocks).
+
+## 12.6 Sound (type 7)
+
+`extData[0]` is the shift. `0xFF` = 16-bit signed little-endian PCM @ 22050 Hz mono.
+Otherwise the payload is 8-bit signed delta encoded:
+`prev = (prev + int8) & 0xFFFF; sample = (prev << shift) & 0xFFFF` (16-bit signed
+PCM). Shift is taken from the ext-data regardless of the BLB `comprType`.
+
+## 12.7 Text (type 6)
+
+`u32le count`; `base = 4 + count*4`; string *i* spans
+`data[base + off(i*4) .. base + off((i+1)*4)]` using a `(count+1)`-entry offset
+table (the last string runs to end of data). Embedded `\0` bytes are line breaks.
+
+## 12.8 Data / Music / Video
+
+Type 5 (data) is exposed as a hex/size preview. Type 8 (music) and type 10 (video,
+Smacker) require their respective decoders; video is exposed as header metadata.
+Music is surfaced under the "Music" category.
+
+## 12.9 Verification
+
+Engine `scripts/engines/neverhood/engine.lua`; headless harness `devcli`
+(`tree`/`scan`/`load`). Reference decoder in Python (`verify.py`, `dcltest.py`).
+
+- **DCL:** byte-exact vs the Python reference for text resource `0x00918480`
+  (`compr 3`, 916 bytes), including the long LZ copy/overlap runs.
+- **Bitmaps:** pixel-for-pixel match with the Python reference — `0x00004011`
+  640x480 non-RLE embedded palette, `0x0ca04202` 640x480 RLE embedded palette, and
+  `0x0e018400` 96x224 non-RLE with an external palette override.
+- **Animations:** `0x04441334` (12 frames, 2280x101 strip) and `0x06019390`
+  (5 frames) decoded pixel-for-pixel against the Python reference.
+- **Sounds:** `0x90805c50` (shift 2, 52736 samples) matched the Python delta decoder
+  sample-for-sample (2391 ms @ 22050 Hz).
+- **Text:** `0x00918480` decodes to "I am Quater. Read my words, ..." with correct
+  line breaks.
+- **Trees:** 2706 nodes in 8 categories — Bitmaps 1379, Animations 327 (= 316 from
+  S.BLB + 13 from I.BLB minus 2 cross-archive duplicate hashes), Palettes 54,
+  Sounds 295, Music 34, Text 12, Data 54, Videos 551.
+- **Sweep:** `devcli scan` over every category (bmp_, anim_, pal_, snd_, txt_,
+  dat_) decoded with 0 load failures.
