@@ -272,3 +272,38 @@ Key references used (`engines/m4`):
 - `graphics/gr_font.cpp` (`gr_font_load`) - `.FNT`
 - `platform/sound/digi.cpp` - `.RAW` is 11025 Hz unsigned 8-bit
 - `audio/midiparser_hmp.cpp` - `.HMP` header, converted to SMF in the script
+
+
+### TSUNAMI / TsAGE (Ringworld, Blue Force)
+Scummvm source code (/scummvm-fork/engines/tsage or http://github.com/scummvm/scummvm)
+
+games in ags/Tsunami/RINGWORLD and ags/Tsunami/BLUE
+
+Key references used:
+- `resources.cpp` - `RLB`/`TLib` containers: root `TMI-` section holds the section
+  index (6-byte `resNum, configId, fileOffset` records; `resType = configId & 0x1F`,
+  absolute offset `= ((configId >> 5) & 0x7FF) << 16 | fileOffset`). Per-section
+  `TMI-` entries are 12 bytes (`u16 id, u16 size, u16 uncSize, u8 sizeHi, u8 type,
+  u32 offset`); `storedSize = size | ((sizeHi & 0x0F) << 16)`, `uncSize = unc |
+  ((sizeHi & 0xF0) << 12)`, `compressed = (type >> 5) != 0`. Compressed bodies use
+  the 9->12 bit LSB-first LZW stream (`BitReader`, terminator 0x101, reset 0x100).
+- `resources.h` - `ResourceType` enum (RES_STRIP 1, RES_IMAGE 2, RES_PALETTE 3,
+  RES_VISAGE 4, RES_SOUND 5, RES_MESSAGE 6, RES_FONT 7, RES_PRIORITY 11,
+  RES_CONTROL 12, RES_WALKRGNS 13, RES_BITMAP 14, RES_SEQUENCE 16)
+- `graphics.cpp` (`surfaceFromRes`) - sprite/frame record: `u16 w, u16 h, u16 cx,
+  u16 cy, u8 transColor, u8 flags`, pixels at +10. `rleEncoded = (flags & 2) != 0`;
+  raw else per-row RLE (control <0x80 = literal run, 0x80-0xBF = skip, >=0xC0 =
+  fill run with following byte).
+- `scenes.cpp` (`ScenePalette::loadPalette`) - palettes live in the RES_PALETTE
+  section `getResource(RES_PALETTE, paletteNum, 0)`; bytes are `u16 start, u16
+  count, count*3` 8-bit RGB. `TLib::getPalette(n)` uses section 0 (only for the
+  global `getPalette(0)` dialog palette).
+- Backgrounds: RES_BITMAP section resNum = scene; resource 9999 = `u16 w, u16 h`;
+  tiles are `id = xSection*yHalfCount + ySection` (xSection=ceil(w/160),
+  yHalfCount=ceil(h/100)), each a 160x100 8bpp block composited at (x*160, y*100).
+- Messages: RES_MESSAGE resource 0, NUL-separated CP850 strings.
+- Sounds: RES_SOUND scored Adlib/MIDI tracker data needing the game driver, exposed
+  as header metadata only.
+
+Libraries: Ringworld = `RING.RLB` + `TSAGE.RLB`; Blue Force = `BLUE.RLB` +
+`FILES.RLB` + `TSAGE.RLB` (`INSTALL.RLB` skipped).

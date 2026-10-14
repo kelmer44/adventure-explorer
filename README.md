@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-37 game engines are currently supported via Lua scripts — no recompilation needed.
+38 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -54,6 +54,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
+| Ringworld: Revenge of the Patriarch / Blue Force | 1992-94 | `tsage` | Backgrounds, Palettes, Sprites & Animations, Messages, Sound metadata | ✅ Working* |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
@@ -68,6 +69,10 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > \* Visionaire archives may be encrypted with a game-specific XOR key. Place a `vis.key` file
 > in the game folder for encrypted games (format: `ID;Game Name;Key`, one entry per line).
 > Unencrypted archives and archives shipped with known keys work without any extra setup.
+
+> \* TsAGE (Ringworld, Blue Force) sound resources are scored Adlib/MIDI tracker data
+> that require the game's own sound driver, so they are listed as metadata only and
+> cannot be played back in the explorer.
 
 Igor's Spanish CD version exposes 74 catalog-backed room/scene backgrounds with
 available masks, walkbox areas and decoded text; the title image, four splash
@@ -312,6 +317,7 @@ adventure-explorer/
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
 │       ├── tot/engine.lua        # Trick or Treat
 │       ├── toonstruck/engine.lua # Toonstruck
+│       ├── tsage/engine.lua      # Ringworld & Blue Force (Tsunami/TsAGE)
 │       ├── touche/engine.lua     # Touché
 │       ├── riddle/               # The Riddle of Master Lu (M4 / HAG)
 │       └── visionaire/           # Visionaire (Daedalic games)
@@ -347,8 +353,8 @@ adventure-explorer/
 - [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
 - [ ] Support for Sanitarium
-- [ ] Support for Microprose adventures
-- [ ] Support for Tsunami games
+- [x] Support for Microprose adventures
+- [x] Support for Tsunami games
 - [ ] Support for Noctropolis
 
 

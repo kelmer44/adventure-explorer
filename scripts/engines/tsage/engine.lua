@@ -428,7 +428,9 @@ local function decode_surface(data, pos)
     local pixels = {}
     local src = pos + 10
 
-    if flags % 2 == 0 then
+    -- Bit 1 (value 2) selects the per-row RLE stream; otherwise raw 8bpp.
+    local rleEncoded = math.floor(flags / 2) % 2 ~= 0
+    if not rleEncoded then
         for i = 0, len - 1 do
             pixels[i + 1] = u8(data, src + i)
         end

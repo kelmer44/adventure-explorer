@@ -2151,3 +2151,204 @@ Two containers remain opaque and are exposed as metadata only:
   `S_KLANG.KRO` entry 642 resolves to "¡Diablos! ¡Subo al puente de mando!" and record
   `107` of entry 645 resolves to the five-block hypnosis exchange, both including the
   continuations that a single-block reader drops.
+
+---
+
+# Part 11: Tsunami / TsAGE — RLB Resource Libraries (Ringworld & Blue Force)
+
+Source: ScummVM `engines/tsage` (`resources.cpp`/`.h`, `graphics.cpp`, `scenes.cpp`,
+`core.cpp`, `sound.cpp`) at `/scummvm-fork`. Games in `ags/Tsunami/RINGWORLD` and
+`ags/Tsunami/BLUE`.
+
+Tsunami Media shipped two adventure games on a shared in-house engine that ScummVM
+calls **TsAGE**: *Ringworld: Revenge of the Patriarch* (1992) and *Blue Force*
+(1993). All assets live in one or more `.RLB` ("resource library") files, each a
+sequence of self-describing `TMI-` sections addressed through a root index.
+
+## 11.1 Top-Level Layout
+
+Every `.RLB` starts at file offset 0 with a `TMI-` section header:
+
+```
+0x00  ASCII "TMI-"           (0x54 0x4D 0x49 0x2D)
+0x04  u8    unknown1
+0x05  u8    numEntries
+0x06  numEntries * 12 bytes:
+        +0x00 u16le id
+        +0x02 u16le sizeLo
+        +0x04 u16le uncSizeLo
+        +0x06 u8    sizeHi
+        +0x07 u8    typeWord
+        +0x08 u32le offset      (relative to the section base)
+```
+
+Derived fields (`resources.cpp`):
+
+```
+storedSize = sizeLo | ((sizeHi & 0x0F) << 16)
+uncSize    = uncSizeLo | ((sizeHi & 0xF0) << 12)
+compressed = (typeWord >> 5) != 0
+```
+
+Each `offset` is relative to the section base (i.e. the start of the enclosing
+`TMI-` block), not the file.
+
+## 11.2 Section Index (Resource 0)
+
+The root section holds a single resource with `id 0`. Its body is a flat table of
+6-byte records, terminated by `0xFFFF`:
+
+```
+u16le resNum
+u16le configId
+u16le fileOffset
+```
+
+```
+resourceType = configId & 0x1F
+absOffset    = ((configId >> 5) & 0x7FF) << 16 | fileOffset
+```
+
+`absOffset` points at the `TMI-` section for that resource. Every section in the
+file is described by exactly one record, so the index is the complete map of the
+library. When a file has several libraries (Ringworld uses `RING.RLB` + shared
+`TSAGE.RLB`; Blue Force uses `BLUE.RLB` + `FILES.RLB` + `TSAGE.RLB`) a given
+section number can appear in more than one, so sections are de-duplicated by
+`(type, resNum)` when building the tree.
+
+## 11.3 Compression — LSB-First LZW
+
+Compressed resources use the same 9→12 bit LZW stream as ScummVM's `BitReader`
+(`resources.cpp`). Codes are packed **LSB-first** within the byte stream, so the
+first code occupies the low bits of the first byte:
+
+```
+numBits     starts at 9, widens to 12
+code 0x100  resets the dictionary (numBits back to 9)
+code 0x101  terminates the stream
+```
+
+The dictionary starts with single bytes `0x000..0x0FF`, `ctrCurrent = 0x102`.
+On a normal code the previous word (prepended with the current code when
+`code >= ctrCurrent`) is emitted, the new entry `(prevCode, firstByteOfCurrent)`
+is appended while `ctrCurrent <= 0xFFF`, and `numBits` widens whenever
+`ctrCurrent >= ctrMax` (`ctrMax` doubles from `0x200`). A simpler equivalent
+bit reader (read bytes, shift out low bits) reproduces ScummVM's byte/bit order
+exactly and is what the Lua decoder uses. Output is truncated to `uncSize`.
+
+## 11.4 Resource Types
+
+`resources.h` defines the `ResourceType` enum:
+
+| Value | Name | Content |
+|---|---|---|
+| 1 | `RES_STRIP` | cutscene script strips (not decoded) |
+| 2 | `RES_IMAGE` | full-screen images |
+| 3 | `RES_PALETTE` | palettes |
+| 4 | `RES_VISAGE` | sprite frame sets |
+| 5 | `RES_SOUND` | scored Adlib/MIDI tracker data |
+| 6 | `RES_MESSAGE` | dialogue strings |
+| 7 | `RES_FONT` | bitmap fonts |
+| 11 | `RES_PRIORITY` | z-order tables |
+| 12 | `RES_CONTROL` | input tables |
+| 13 | `RES_WALKRGNS` | walk regions |
+| 14 | `RES_BITMAP` | scene backgrounds |
+| 16 | `RES_SEQUENCE` | animation sequences |
+
+## 11.5 Backgrounds (RES_BITMAP)
+
+A `RES_BITMAP` section's section number is the **scene number**. It is a tile set:
+
+- Resource `id 9999` is the size record: `u16le width, u16le height` (10 bytes).
+- Every other resource is one raw 8bpp tile that decompresses to exactly 16000
+  bytes (160×100).
+- Tile id is `xSection * yHalfCount + ySection`, where
+  `xSection = ceil(width/160)` and `yHalfCount = ceil(height/100)`.
+- Tiles composite at `(xSection*160, ySection*100)` into a `width × height` index
+  buffer.
+
+Every `RES_BITMAP` scene has a matching `RES_PALETTE` section of the same number.
+
+## 11.6 Palettes (RES_PALETTE)
+
+`ScenePalette::loadPalette(n)` fetches section `n`, resource `0`. The decoded
+buffer is:
+
+```
+u16le palStart
+u16le palCount
+palCount * 3 bytes RGB        (8-bit components, 0-255 — not 6-bit scaled)
+```
+
+The palette image fills indices `palStart .. palStart+palCount-1`.
+
+`TLib::getPalette(n)` is a *different* lookup: section `0`, resource `n`. It is
+only ever called with `getPalette(0)` for the global dialog/interface palette, so
+resource `0` of the global palette section is used as each game's default. The
+Lua engine uses the same-numbered scene palette for a sprite when it exists and
+otherwise falls back to that default (Ringworld `(0, 0)`, Blue Force `(1, 0)`).
+
+## 11.7 Sprites / Visages (RES_VISAGE)
+
+A `RES_VISAGE` section's number identifies the visage. Resource `id 9999` is an
+index; each other resource is a **frame set**:
+
+```
+u16le numFrames
+u32le offsets[numFrames]      (relative to the start of the frame-set resource)
+```
+
+Each offset points at a `surfaceFromRes` record (`graphics.cpp`):
+
+```
++0x00 u16le width
++0x02 u16le height
++0x04 u16le centroidX
++0x06 u16le centroidY
++0x08 u8    transColor
++0x09 u8    flags
++0x0A ...   pixel data
+```
+
+`rleEncoded = (flags & 2) != 0` (bit 1, **not** bit 0). Otherwise the pixels are
+raw `width * height` bytes.
+
+RLE is per scanline. The buffer is pre-filled with `transColor`, then each row is
+consumed until `width` pixels are produced:
+
+| Control byte | Meaning |
+|---|---|
+| `< 0x80` | copy the next `control` bytes literally |
+| `0x80..0xBF` | skip `control & 0x3F` pixels (leave as `transColor`) |
+| `>= 0xC0` | read one colour byte and fill `control & 0x3F` pixels with it |
+
+A frame set with one frame becomes an image; multiple frames become an animation
+(previewed at 100 ms/frame).
+
+## 11.8 Messages (RES_MESSAGE)
+
+Each `RES_MESSAGE` section holds one resource (`id 0`) of NUL-separated strings in
+**CP850**. The Blue Force copy is Spanish. The Lua engine decodes each byte with an
+embedded CP850→Unicode table and emits UTF-8, one string per line.
+
+## 11.9 Sound (RES_SOUND)
+
+`RES_SOUND` resources are scored Adlib/MIDI tracker data that require the game's
+own sound driver to play, so they are exposed as header metadata only
+(`maxVersion@4`, `minVersion@6`, `groupTableOffset@8`, `priority@12`, `loop@14`).
+`RES_STRIP` cutscene scripts are likewise not decoded.
+
+## 11.10 Verification
+
+- Independent Python reference decoder (RLB parse + LZW + tile composite +
+  palette + surfaceFromRes/RLE) reproduced pixel-for-pixel and, under the real
+  LuaJ 3.0.1 runtime via `./gradlew devcli load`, matched with **0 differing
+  pixels**: Ringworld `bg_20` 640×200 (0/128000), Ringworld `spr_1502_1` 5 frames
+  (0/13340), Blue Force `bg_20` 320×200 (0/64000), Blue Force `spr_0_1` 5 frames
+  (0/12480).
+- Full-corpus sweep under LuaJ (`devcli scan`, every leaf) decoded with **0 load
+  failures**: Ringworld 1298 leaves (90 backgrounds, 92 palettes, 896 sprite sets
+  = 4638 frames, of which 4457 across 715 multi-frame animations, 56 messages, 164
+  sound metadata); Blue Force 1560 leaves (67 backgrounds, 85 palettes, 1242 sprite
+  sets = 8526 frames, of which 8325 across 1041 multi-frame animations, 47 messages,
+  119 sound metadata).
