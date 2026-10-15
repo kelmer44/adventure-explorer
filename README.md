@@ -35,6 +35,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
+| Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
@@ -42,6 +43,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
+| L.A. Law: The Computer Game | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
 | MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
@@ -54,6 +56,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
+| The Beverly Hillbillies | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
 | The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -65,6 +68,12 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Capstone / Manley support covers the supplied AMTAIL, BHB and LALAW releases.
+> Fievel actor previews play stored frames in order at 100 ms; choose a scene palette
+> for the intended colours. Scene/animation bytecode and BHB sound effects are decoded
+> data previews; LA Law ABT speech is metadata only. Driver-encoded audio playback and
+> scripted animation timing/compositing are not implemented.
 
 > \* Prisoner of Ice scene graphics (`scn_*` resources) are exposed as metadata only; the
 > scene picture/opcode stream is not decoded. `mus_ksound_*` entries are Miles
@@ -308,6 +317,7 @@ adventure-explorer/
 │       ├── darkseed2/engine.lua  # Dark Seed 2
 │       ├── drascula/engine.lua   # Drascula: The Vampire Strikes Back
 │       ├── gob/engine.lua        # Gobliiins series
+│       ├── capstone/engine.lua  # Fievel, Beverly Hillbillies, L.A. Law
 │       ├── gxl/engine.lua        # Capstone Genus GXL (Wayne's World, The Dark Half)
 │       ├── harvester/engine.lua  # Harvester
 │       ├── hollywoodmonsters/    # Hollywood Monsters
@@ -361,7 +371,7 @@ adventure-explorer/
 - [ ] Batch export
 - [ ] Support for all scumm games
 - [ ] Support for all Coktel games
-- [ ] Support for Capstone games
+- [x] Support for Capstone games (Genus GXL and Manley/Synergistic resource formats; driver audio remains metadata)
 - [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
 - [ ] Support for Sanitarium

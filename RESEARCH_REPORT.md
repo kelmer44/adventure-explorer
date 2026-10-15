@@ -2699,7 +2699,7 @@ container; only the file naming differs (`R00-R39`, `E00/E01`, `M00-M06`,
 engine exists for them — the format was reverse engineered from the data.
 
 Fievel / An American Tail (Capstone, 1993) is a *different*, Manley &
-Associates engine and is covered separately in section 14.4 (not yet supported).
+Associates engine and is covered separately in section 14.4 (implemented in the `capstone` engine).
 
 ## 14.2 GXL container
 
@@ -2739,7 +2739,7 @@ Detection requires at least two `*.GXL` files carrying the `01 CA` +
 (ARREST 320x133, GAMEOVER 213x36, DEADTHAD 320x133) all decode to matching
 dimensions. Each game exposes 52 GXL files.
 
-## 14.4 Fievel / An American Tail (AMTAIL) — `.PIC` format (not yet implemented)
+## 14.4 Fievel / An American Tail (AMTAIL) — implemented PIC and ACT resources
 
 Reverse engineered from `AMTAIL.EXE`. Each `.PIC` is a container
 (`LZPX` = LZ-compressed, `UNCP` = stored):
@@ -2758,6 +2758,7 @@ u16le width
 u16le height
 768 bytes   palette 1 (256 x RGB, 6-bit VGA)
 768 bytes   palette 2 (fade / dark variant)
+u16le       encoded pixel-stream length
 RLE pixel data
 ```
 
@@ -2768,5 +2769,68 @@ row slightly; the decoder stops at `width * height`.
 The `LZPX` decompressor (AMTAIL.EXE, code segment paragraph 0x2a28) is an
 **adaptive Huffman + LZ77** codec over 314 symbols (0-255 literals, 256-313
 match lengths) with a 4096-byte sliding window seeded with `0x20` bytes. It was
-fully emulated with Unicorn to validate the format; a pure-Lua port is still
-required before the engine can be shipped.
+ported to pure Lua in `scripts/engines/capstone/engine.lua`, including tree
+reconstruction at frequency 0x8000. The saved earlier emulator outputs diverge
+from the standard LH1 reconstruction on some long streams and should not be
+used as a byte-exact oracle for those tails. The implemented streams produce
+size-consistent image and actor data and have been scanned and visually checked.
+
+ACT (`LZST`/`LZSP`) headers store frame count at +4 and decoded size at +10.
+The LH1 stream starts at +14. Each frame contains eight u16 fields: width,
+height, left/right/top/bottom bounds, mask length, literal-pixel count. After the
+16-byte header come the mask bytes and then the literal pixels. A mask high bit
+starts a new row; bit 6 copies `low6` pixels, otherwise `low6` pixels are skipped.
+Some Geneva sprites have a right bound one beyond the nominal width; use the
+larger width. Preview animations enumerate stored frames, without interpreting
+scene scheduling. Actor colours come from the selected PIC palette.
+
+## 14.5 The Beverly Hillbillies — RES archives
+
+Header: u32 data start (16), u32 directory offset, u32 data length, u32 directory
+length. The footer repeats this header, followed by directory metadata and typed
+groups at footer +30. Group records use reversed FourCCs (`GAMI`, `LMRF`, `RTSC`,
+`NECS`, `XFSD`), last-index u16 and entry-size u16. Ordinary entries have 12-byte
+stride: id u16, sentinel u16, packed offset u32, unused u32. The low 24 bits of
+the packed offset are relative to data start; the high byte contains flags.
+MMAP nests references to map data and image resources.
+
+Each payload starts with u32 stored size. Compressed payloads also have a u32
+expanded size. Flag 1 selects PackBits; flag 0x80 selects byte-flag LZSS, LSB
+first. A set flag copies a literal; a clear flag reads `a,b`, distance
+`4*b + floor(a/64)`, length `(a % 64)+3`. Distance zero ends the stream.
+PackBits decoding stops at expanded size; some resources have trailing padding
+which is not another command.
+
+IMAG data starts with big-endian u16 height, width and plane count. Rows have
+word-padded bitplanes interleaved by row, with the low plane first. The two VGA
+palettes are stored in HB.EXE at DS:A09 and DS:D09; DS is supplied by the startup
+MOV DX instruction. The explorer unpacks LZEXE data without executing the game.
+STRC dialogue is DOS CP850. FRML/SCEN/DSFX and MMAP map bytecode are data previews.
+
+## 14.6 L.A. Law — DISK resources
+
+DISK*.RES consists of contiguous `LZSS` blocks with checksum u16, packed size u32,
+expanded size u32 and payload. Flags are u16 little endian, consumed MSB first.
+Set bits copy literals; clear bits read a u16 with distance `(v % 1024)+1`,
+length `floor(v/1024)+3`. A zero reference terminates the stream.
+
+The expanded image header is **14 bytes**, not 16: dimensions at +6/+8,
+row stride at +10 and palette colour count at +12. The palette starts at +14,
+followed by chunky pixels. Expanded blocks round up to 16-byte boundaries;
+assuming a 16-byte image header shifts both colours and pixels and rejects the
+169x173 image in DISK3. Standalone LBM files are standard ILBM (including
+ByteRun1 row/plane data). Case text is CP850 and XMI music uses the host decoder.
+ABT speech uses the game's sound driver encoding and remains metadata.
+
+## 14.7 Capstone validation (2026-10-15)
+
+Full scans through the application's LuaJ runtime loaded all 3,388 listed leaves
+with zero failures: AMTAIL 1,634 (80 pictures, 1,336 actor frames, 50 animation
+previews, 160 palettes and 8 scene-data previews); BHB 1,638 (including 1,364
+IMAGs, 2 palettes and 5 playable MIDI conversions); LALAW 116 (93 archived images,
+3 ILBMs, 3 MIDI conversions, 8 case texts and 9 speech-data previews).
+Representative Fievel sprites/logo, BHB forest background and LA Law photographs
+were visually checked. Existing Wayne's World and The Dark Half GXL detection
+and sample image loads still pass. `lua scripts/tests/capstone.lua` covers
+compression boundary cases; append the local Capstone data root to scan all
+three games, check resource-ID uniqueness and validate image/palette sizes.

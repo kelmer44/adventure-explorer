@@ -149,8 +149,29 @@ directory of 26-byte entries (`flag u8`, `name char[12]`, NUL, `u32 offset`,
 Each entry payload is a standard version-5 PCX (8bpp, single plane, RLE) with a
 256-colour palette in the trailing 768 bytes.
 
-Fievel / An American Tail (`ags/capstone/AMTAIL`) uses a different Manley &
-Associates engine whose `.PIC` containers are NOT yet supported.
+### CAPSTONE / Manley & Associates / Synergistic
+
+`scripts/engines/capstone/engine.lua` handles Fievel / An American Tail
+(`ags/capstone/AMTAIL`), The Beverly Hillbillies (`ags/capstone/BHB`) and
+L.A. Law (`ags/capstone/LALAW`). Formats were reverse engineered from the
+supplied game data and DOS executables; no ScummVM engine is used.
+
+- AMTAIL.EXE code segment 0x2a28: LH1 adaptive Huffman/LZ77 decoder (314 symbols,
+  4096-byte space-filled history), picture PackBits and actor masks. PIC streams
+  contain dimensions, two VGA palettes, a u16 encoded-length field, then pixels.
+  ACT streams contain 16-byte frame headers, row/skip/copy masks and literal pixels.
+- HB.EXE (LZEXE 0.91): resource directory and decompressor at code 0x97c0,
+  PackBits at 0x2a240. IMAG resources have big-endian height/width/plane count,
+  word-padded, row-interleaved planes. Startup selects DS:A09 / DS:D09 palettes;
+  the explorer reads these from the unpacked executable without running it.
+- LALAW.EXE (LZEXE 0.91): LZSS decoder at code 0x2e4f7. DISK*.RES consists of
+  consecutive 14-byte block headers and payloads. Image headers are 14 bytes;
+  palettes follow directly, with whole payloads padded to a 16-byte boundary.
+- BHB/LA Law XMIDI uses the existing host converter. BHB animation/scene/sound
+  records and Fievel scene bytecode are data previews; LA Law ABT speech remains
+  metadata. Lua boundary tests and an optional full-data scan live in
+  `scripts/tests/capstone.lua`.
+
 
 ### DRASCULA
 ScummVM source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
