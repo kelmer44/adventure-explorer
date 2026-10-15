@@ -362,7 +362,7 @@ Key references used:
   `insertSprite<Class>(0x...)`, `insertScreenMouse(0x...)`, `insertPuzzleMouse`,
   `createStaticScene(bg, cursor)`, `loadSprite(0x...)`, and the file-scope
   `kSceneNNNN*`/`kSsSceneNNNN*` hash tables) borrow that scene's palette. This map
-  is extracted offline from the sources into the `SCENE_PALETTE_DATA` table in
+  is extracted offline from the sources into `neverhood_palette.lua`, required by
   `engine.lua` (surface hash -> palette bitmap/palette hash). A surface without an
   embedded palette resolves to its scene palette; if unmapped it is rendered in
   neutral grayscale (the automatic/external palette override is not applied, so no
@@ -370,3 +370,58 @@ Key references used:
 
 Archives verified: HD (74), A (329), S (358 animations incl. 84 redirects),
 T (577), M (13), I (1316), C (83) -> 2706 tree nodes in 8 categories.
+
+### VIRTUAL THEATRE (Lure of the Temptress, Beneath a Steel Sky)
+Scummvm source code (`/scummvm-fork/engines/sky`, `/scummvm-fork/engines/lure`,
+`common/compression/rnc_deco.cpp`) and http://github.com/scummvm/scummvm.
+Games in `ags/sky` (SKY.DSK, SKY.DNR, SKY.CFG, SKY.RST) and `ags/lure`
+(DISK1-4.VGA/.EGA). Two separate engines in ScummVM.
+
+**Beneath a Steel Sky** (`engines/sky`):
+- `disk.cpp` / `disk.h` - SKY.DNR is the file table: `u32LE count`, then each
+  8-byte entry `u16LE fileNum, u16LE x, u32LE offRaw`; `offset = offRaw & 0xFFFFFF`
+  (`<<4` when bit 23 set). Flags come from bytes 5-7 (`READ_LE_UINT24`): `size =
+  ff & 0x3FFFFF`, `compressed = ((ff>>23)&1)==0`, `includeHeader = ((ff>>22)&1)==1`.
+  Payload lives in SKY.DSK at `offset`.
+- `screen.cpp` - a graphic file begins with a 22-byte `DataFileHeader` (11 x `u16LE`:
+  flag, x, y, w, h, spSize, totSize, nSprites, offX, offY, compSize). RNC magic
+  `52 4E 43 01` follows immediately. RNC `unpackM1` is applied when the header flag's
+  bit 7 (`flag>>7 & 1`) is set and the RNC signature is present. ScummVM gates this on
+  the DNR `compressed` flag alone, but sprite files 2134-2136 (whose DNR flag reads as
+  uncompressed) are nevertheless RNC streams, so the signature check is authoritative.
+  Decoded payload is the raw pixel data for both `includeHeader` values: `spSize==0` ->
+  one `w*h` image (screens), else `nSprites` frames of `w*h` bytes each at stride
+  `spSize`. Screens verified: file 64/92 -> 61440 (320x192), 65 -> 36480. Sprites
+  verified: 49 (28x24 x2), 60300 (22x22 x9). All 1022 Sky resources decode without
+  error.
+  Palette file 60111 is 768 raw bytes, 6-bit RGB expanded with `(v<<2)+(v>>4)`.
+- `common/compression/rnc_deco.cpp` - RNC "unpackM1". HEADER_LEN 18, TABLE_SIZE 128,
+  signature 0x524E4301, `unpackLen`/`packLen` big-endian at 4/8, `blocks` at byte 17.
+  Per block: three Huffman tables (raw/pos/len), `counts = inputBits(16)`, literal
+  run via `inputBits`/`inputValue(raw)`, back-reference `inputValue(pos)+1` and
+  `inputValue(len)+2`; bit reader re-syncs from the source after each literal run.
+
+**Lure of the Temptress** (`engines/lure`):
+- `disk.cpp` / `disk.h` - each DISK*.VGA: `"heywow"` ident, `u16BE` file number,
+  then 0xBF(191) 8-byte `FileEntry` records (`u16LE id, u8 unused, u8 sizeExtension,
+  u16LE size, u16LE offset`); real size `+= 0x10000` when `sizeExtension`, real
+  offset = `offset * 0x20`. Resource id top two bits pick the disk:
+  `((id>>14)&3)+1`; `0x3fxx` ids live in `lure.dat` (not shipped with the disks).
+- `decode.cpp` - `PictureDecoder::vgaDecode`: data-start offset at `u32LE(data+0x400)`,
+  secondary pointer starts at `0x404`; CH/CL bit counter, `BP = color << 2`, colour
+  table at 0x000-0x3FF. Decodes to a 320x192 playfield (or 320x200 full screen).
+  EGA variant is `egaDecode` (selected when `(u16BE(data) & 0xfffe) == 0x140`).
+- `surface.cpp` (`Surface::loadScreen`) / `room.cpp` (`RoomLayer`) - the 320x192
+  decoded image is placed at row `MENUBAR_Y_SIZE` (8) of the 320x200 surface; the
+  room palette is `(screenId & 0xffe0) - 1`, overridden to 0x45ff (room 6), 0xf1ff
+  (room 49) or 0x40ff for 5-bit screens.
+- `palette.cpp` - palettes are 660-byte RGB64 resources (220 x 3 bytes, 6-bit
+  components expanded with `(v<<2)+(v>>4)`); `PaletteCollection` splits them into
+  64-entry sub-palettes.
+
+Screens verified pixel-for-pixel against a Python `vgaDecode` reference (320x192);
+Sky backgrounds and sprites verified pixel-for-pixel against the Python RNC
+reference. Tree: Sky 1022 nodes (162 backgrounds, 853 sprites, 7 palettes); Lure
+151 nodes (102 screens, 49 palettes). Lure character sprites are nibble-packed
+animation streams whose dimensions come from `lure.dat` (absent from the disk
+images), so they are not exposed.

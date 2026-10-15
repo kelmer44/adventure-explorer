@@ -299,7 +299,7 @@ local function load_file(dsk, entry)
     if not hdr then return nil end
 
     local pixels
-    if entry.compressed and band(rshift(hdr.flag, 7), 1) == 1 then
+    if band(rshift(hdr.flag, 7), 1) == 1 and raw:sub(23, 26) == "RNC\1" then
         local dec, dlen = rnc_unpack(raw:sub(23))
         if dec then
             pixels = packbytes(dec, dlen)

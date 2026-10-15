@@ -317,6 +317,9 @@ local function classify(ctx)
                 -- Cheap pre-filter: the byte stream offset must point inside the file
                 if dp >= 0x408 and dp <= #bytes then
                     local ok, _, olen = pcall(vga_decode, bytes)
+                    -- Genuine screens are a 320x192 playfield (61440 bytes); accept the
+                    -- 61408 variant and 320x200 full screens (64000/64001), but reject
+                    -- animation fragments (e.g. 0x4051 -> 70166).
                     if ok and olen and ((olen >= 61408 and olen <= 61441) or (olen >= 63999 and olen <= 64001)) then
                         screens[#screens + 1] = { id = id, height = math.floor(olen / 320) }
                     end

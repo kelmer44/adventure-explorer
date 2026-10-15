@@ -2526,9 +2526,10 @@ borrow it. Signals used: `insertStaticSprite(0x...)`, `insertSprite<Class>(0x...
 `insertScreenMouse`/`insertPuzzleMouse`/`insertNavigationMouse(0x...)`,
 `createStaticScene(bg, cursor)`, `loadSprite(0x...)`, class names embedding a scene
 number (`SceneNNNN`, `AsSceneNNNN…`), and file-scope hash arrays named after the
-scene (`kSceneNNNN*`, `kSsSceneNNNN*`). The result is emitted as the
-`SCENE_PALETTE_DATA` table in `engine.lua` (surface hash -> palette hash, where the
-palette value is a bitmap with an embedded palette or a type-3 palette resource).
+scene (`kSceneNNNN*`, `kSsSceneNNNN*`). The result is emitted as
+`scripts/engines/neverhood/neverhood_palette.lua`, a sibling module `require`d by
+`engine.lua` (surface hash -> palette hash, where the palette value is a bitmap
+with an embedded palette or a type-3 palette resource).
 
 Coverage is partial by nature: 565 of the 1081 no-palette surfaces are mapped;
 many of the rest are not referenced by any scene (unused/left-over assets), and
@@ -2563,3 +2564,126 @@ Engine `scripts/engines/neverhood/engine.lua`; headless harness `devcli`
   palette of its mapped scene background `0x41983216`.
 - **Sweep:** `devcli scan` over every category (bmp_, anim_, pal_, snd_, txt_,
   dat_) decoded with 0 load failures.
+
+# Part 13: Virtual Theatre — Lure of the Temptress & Beneath a Steel Sky
+
+Source: ScummVM `engines/lure` (`disk.cpp`/`.h`, `decode.cpp`, `surface.cpp`,
+`room.cpp`, `palette.cpp`, `luredefs.h`), `engines/sky` (`disk.cpp`/`.h`,
+`screen.cpp`, `screen.h`, `skydefs.h`) and `common/compression/rnc_deco.cpp` at
+`/scummvm-fork`. Game data in `ags/lure` and `ags/sky`. Engine scripts:
+`scripts/engines/lure/engine.lua` and `scripts/engines/sky/engine.lua`.
+
+Revolution's Virtual Theatre shipped as two ScummVM engines; both games are
+implemented as separate scripts here.
+
+## 13.1 Beneath a Steel Sky — SKY.DNR table
+
+`SKY.DNR` is an index into the `SKY.DSK` payload:
+
+```
+0x00  u32le  count
+       count * 8-byte entries:
+         +0x00 u16le fileNum
+         +0x02 u16le x
+         +0x04 u32le offRaw
+```
+
+`offset = offRaw & 0xFFFFFF` (shifted `<<4` when bit 23 set). Flags are read from
+bytes 5-7 (`READ_LE_UINT24`): `size = ff & 0x3FFFFF`,
+`compressed = ((ff>>23)&1)==0`, `includeHeader = ((ff>>22)&1)==1`. In this data set
+1445 entries are present (`fileNum` up to 60663).
+
+## 13.2 Beneath a Steel Sky — DataFileHeader and RNC
+
+Each graphic begins with a 22-byte `DataFileHeader` (11 x `u16le`): `flag, s_x,
+s_y, s_width, s_height, s_sp_size, s_tot_size, s_n_sprites, s_offset_x,
+s_offset_y, s_compressed_size`. The RNC signature `52 4E 43 01` follows at byte 22.
+File compression is RNC `unpackM1`, applied when `((flag>>7)&1)` is set and the RNC
+signature is present. ScummVM gates this on the DNR `compressed` flag alone, but files
+2134-2136 (whose DNR flag reads as uncompressed) are nevertheless RNC streams, so the
+signature check is authoritative. The decoded payload is raw pixel data for both
+`includeHeader` values:
+
+- `s_sp_size == 0`: a single `width * height` image (screens/backgrounds).
+- otherwise: `n_sprites` frames of `width * height` bytes at stride `s_sp_size`.
+
+`decompSize = (flag & ~0xFF) << 8 | s_tot_size` is unreliable for backgrounds; the
+RNC-internal `unpackLen` is used instead. Classification (empirical): sprites satisfy
+`s_sp_size == width * height`; backgrounds are the raw screens (`(flag & 0xFF)` in
+`{0x80, 0x82}`, 320 wide, `s_sp_size == 0`). The main palette is file 60111 (768 raw
+bytes, 6-bit RGB expanded `(v<<2)+(v>>4)`).
+
+## 13.3 Beneath a Steel Sky — RNC unpackM1
+
+`common/compression/rnc_deco.cpp`: HEADER_LEN 18, TABLE_SIZE 128, signature
+`0x524E4301`, `unpackLen`/`packLen` big-endian at 4/8, `blocks` at byte 17, data
+starts at 18. The 16-bit bit reader is seeded from `LE16(src, 18)` then
+`inputBits(2)`. Each block builds three Huffman tables (raw/pos/len) via
+`makeHufftable`, reads `counts = inputBits(16)`, and loops: literal run length from
+`inputValue(raw)` (copy those bytes from the source, then re-sync the bit reader from
+the source position), and while `counts > 1` a back-reference with
+`inputValue(pos) + 1` (offset) and `inputValue(len) + 2` (length) copied from the
+already-produced output.
+
+## 13.4 Lure of the Temptress — Disk format
+
+Each `DISK*.VGA` (or `.EGA`) is a raw volume:
+
+```
+0x00  "heywow"               6-byte ident
+0x06  u16be                  disk/file number
+0x08  0xBF (191) * 8 bytes   FileEntry:
+         +0x00 u16le id
+         +0x02 u8    unused
+         +0x03 u8    sizeExtension
+         +0x04 u16le size
+         +0x06 u16le offset
+```
+
+Real size `+= 0x10000` when `sizeExtension` is set; real offset = `offset * 0x20`.
+The disk for an id is `((id >> 14) & 3) + 1`; ids in the `0x3fxx` range live in
+`lure.dat`, the engine support file embedded in the game executable and **not part of
+the disk images**.
+
+## 13.5 Lure of the Temptress — Pictures and palettes
+
+`PictureDecoder::vgaDecode` reads a colour table at `0x000-0x3FF`, a data-start
+offset at `u32LE(data + 0x400)` and a secondary pointer starting at `0x404`; it uses
+a CH/CL bit counter and `BP = color << 2` to index the table. Output is a 320x192
+playfield (some full screens are 320x200). An EGA variant `egaDecode` is selected
+when `(u16BE(data) & 0xfffe) == 0x140`. `Surface::loadScreen` places the 192-row
+image at row `MENUBAR_Y_SIZE` (8) of the 320x200 surface.
+
+Room palettes are `(screenId & 0xffe0) - 1`, overridden to `0x45ff` (room 6),
+`0xf1ff` (room 49) or `0x40ff` for 5-bit screens. Palette resources are 660-byte
+RGB64 (220 x 3 bytes, 6-bit components expanded `(v<<2)+(v>>4)`); `PaletteCollection`
+splits them into 64-entry sub-palettes. When the computed palette id is absent
+(disk-1 intro screens use `screenId + 1`), the loader falls back to `screenId +/- 1`.
+
+## 13.6 Not decoded
+
+Lure character sprites use `AnimationDecoder::decode_data` (nibble-packed streams
+whose width/height come from the hotspot data in `lure.dat`). Since `lure.dat` is not
+shipped with the disk images, sprites are not exposed. Cutscene `AnimationSequence`
+data is likewise out of scope.
+
+## 13.7 Verification
+
+Engine scripts `scripts/engines/sky/engine.lua` and `scripts/engines/lure/engine.lua`;
+headless harness `devcli` (`tree`/`scan`/`load`); Python reference decoders
+(`rnc_test.py`, `lure_test.py`, `pngcmp.py`).
+
+- **RNC (Sky):** outputs match the expected unpacked lengths — file 49 -> 1344,
+  60300 -> 4356, files 64/92 -> 61440.
+- **Sky backgrounds:** `sky_bg_64` renders 320x192 pixel-for-pixel identical to the
+  Python RNC decode through palette 60111 (0 mismatches).
+- **Sky sprites:** `sky_spr_49` frame 0 matches the Python decode (0 mismatches);
+  animation strips carry all frames. Files 2134-2136 (10x8) decode via the RNC
+  signature despite their DNR flag reading "uncompressed".
+- **Lure screens:** `lure_scr_4201` renders 320x192 pixel-for-pixel identical to the
+  Python `vgaDecode` through palette `0x41ff` (0 mismatches).
+- **Full scan:** all 1022 Sky resources (162 backgrounds, 853 sprites, 7 palettes) and
+  all 151 Lure resources (102 screens, 49 palettes) load with zero failures.
+- **Trees:** Sky 1022 nodes in 3 categories — Backgrounds 162, Sprites 853,
+  Palettes 7; Lure 151 nodes in 2 categories — Screens 102, Palettes 49. Detection
+  and enumeration run in ~3.5 s for Lure (candidate decode-and-confirm at scan time).

@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-38 game engines are currently supported via Lua scripts — no recompilation needed.
+41 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -62,6 +62,8 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
+| Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
+| Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 
 > \* Prisoner of Ice scene graphics (`scn_*` resources) are exposed as metadata only; the
 > scene picture/opcode stream is not decoded. `mus_ksound_*` entries are Miles
@@ -74,6 +76,11 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > \* TsAGE (Ringworld, Blue Force) sound resources are scored Adlib/MIDI tracker data
 > that require the game's own sound driver, so they are listed as metadata only and
 > cannot be played back in the explorer.
+
+> \* Lure of the Temptress character sprites are stored as nibble-packed animation
+> streams whose dimensions live in `lure.dat` (the engine support file in the game's
+> own executable). That data is not part of the `.VGA` disk images, so sprites are not
+> listed; screen backgrounds and their palettes decode fully.
 
 Igor's Spanish CD version exposes 74 catalog-backed room/scene backgrounds with
 available masks, walkbox areas and decoded text; the title image, four splash
@@ -287,7 +294,7 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 37 engine scripts (Lua)
+│   └── engines/                  # 41 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
@@ -306,6 +313,7 @@ adventure-explorer/
 │       ├── kyra1/engine.lua      # The Legend of Kyrandia
 │       ├── kyra2/engine.lua      # Hand of Fate
 │       ├── lastexpress/          # The Last Express
+│       ├── lure/engine.lua       # Lure of the Temptress
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
@@ -313,6 +321,7 @@ adventure-explorer/
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)
+│       ├── sky/engine.lua        # Beneath a Steel Sky
 │       ├── sword1/engine.lua     # Broken Sword 1
 │       ├── sword2/engine.lua     # Broken Sword 2
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
