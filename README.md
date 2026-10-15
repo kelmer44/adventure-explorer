@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-41 game engines are currently supported via Lua scripts — no recompilation needed.
+42 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -35,6 +35,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
+| Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
@@ -307,6 +308,7 @@ adventure-explorer/
 │       ├── darkseed2/engine.lua  # Dark Seed 2
 │       ├── drascula/engine.lua   # Drascula: The Vampire Strikes Back
 │       ├── gob/engine.lua        # Gobliiins series
+│       ├── gxl/engine.lua        # Capstone Genus GXL (Wayne's World, The Dark Half)
 │       ├── harvester/engine.lua  # Harvester
 │       ├── hollywoodmonsters/    # Hollywood Monsters
 │       ├── igor/engine.lua       # Igor: Objective Uikokahonia

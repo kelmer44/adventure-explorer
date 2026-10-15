@@ -2687,3 +2687,86 @@ headless harness `devcli` (`tree`/`scan`/`load`); Python reference decoders
 - **Trees:** Sky 1022 nodes in 3 categories — Backgrounds 162, Sprites 853,
   Palettes 7; Lure 151 nodes in 2 categories — Screens 102, Palettes 49. Detection
   and enumeration run in ~3.5 s for Lure (candidate decode-and-confirm at scan time).
+
+# Part 14: Capstone / Genus GXL (Wayne's World & The Dark Half)
+
+## 14.1 Scope
+
+Wayne's World (1993) and The Dark Half (1993) are Capstone games whose graphics
+are stored in **Genus Microprogramming GXL** containers. Both use the same
+container; only the file naming differs (`R00-R39`, `E00/E01`, `M00-M06`,
+`OA2/OA3/OAN`.GXL for Wayne's World; `K*.GXL` for The Dark Half). No ScummVM
+engine exists for them — the format was reverse engineered from the data.
+
+Fievel / An American Tail (Capstone, 1993) is a *different*, Manley &
+Associates engine and is covered separately in section 14.4 (not yet supported).
+
+## 14.2 GXL container
+
+```
++0x000  u8       0x01
++0x001  u8       0xCA
++0x002  ASCII    "Copyright (c) Genus Microprogramming, Inc. 1988-90"
++0x080  DIR      array of 26-byte directory entries
+        DATA     entry payloads (absolute file offsets from the directory)
+```
+
+Directory entry (26 bytes):
+
+| Offset | Type | Meaning |
+|--------|------|---------|
+| +0  | u8    | flag (0x00 for graphics entries) |
+| +1  | char[12] | name, space padded, NUL terminated (e.g. `BACKG   .PCX`) |
+| +13 | u8    | NUL terminator |
+| +14 | u32le | data offset (absolute) |
+| +18 | u32le | data size in bytes |
+| +22 | u32le | unknown / unused (not a checksum; varies) |
+
+The directory has no explicit count: it ends at the first data offset, so
+`entries = (firstDataOffset - 0x80) / 26`. Every payload is a standard
+**version-5 PCX** (8bpp, single plane, RLE) whose 256-colour palette sits in the
+trailing 768 bytes (after a `0x0C` marker). A handful of entries are not PCX and
+are surfaced as text metadata.
+
+Detection requires at least two `*.GXL` files carrying the `01 CA` +
+"Genus" signature.
+
+## 14.3 Verification
+
+`scripts/engines/gxl/engine.lua`. Cross-checked against PIL: Wayne's World
+`R00.GXL` (BACKG 320x150, SPEAKER 43x12, CAMERA 73x36 …), `E00.GXL`
+(BACKG 320x200, PHONE1 156x74 …), and The Dark Half `KEA00.GXL`
+(ARREST 320x133, GAMEOVER 213x36, DEADTHAD 320x133) all decode to matching
+dimensions. Each game exposes 52 GXL files.
+
+## 14.4 Fievel / An American Tail (AMTAIL) — `.PIC` format (not yet implemented)
+
+Reverse engineered from `AMTAIL.EXE`. Each `.PIC` is a container
+(`LZPX` = LZ-compressed, `UNCP` = stored):
+
+```
+magic[4]      "LZPX" or "UNCP"
+u32le P       offset of the first stream (= 8 + 4*numExtraStreams)
+(P-8)/4 x u32le   offsets of streams 2..N
+streams start at P, then at each table entry
+```
+
+Each stream is size-prefixed (`u32le payloadSize`). Uncompressed payload layout:
+
+```
+u16le width
+u16le height
+768 bytes   palette 1 (256 x RGB, 6-bit VGA)
+768 bytes   palette 2 (fade / dark variant)
+RLE pixel data
+```
+
+The pixel RLE is: read `c`; if `c & 0x80` -> run of `(257 - c)` copies of the
+next byte; else -> a literal run of `c + 1` bytes. Runs may overrun the final
+row slightly; the decoder stops at `width * height`.
+
+The `LZPX` decompressor (AMTAIL.EXE, code segment paragraph 0x2a28) is an
+**adaptive Huffman + LZ77** codec over 314 symbols (0-255 literals, 256-313
+match lengths) with a 4096-byte sliding window seeded with `0x20` bytes. It was
+fully emulated with Unicorn to validate the format; a pure-Lua port is still
+required before the engine can be shipped.

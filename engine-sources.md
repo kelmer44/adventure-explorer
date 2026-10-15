@@ -137,6 +137,21 @@ archive container and its LZ variant).
 
 game in ags/DARKSEED2
 
+### CAPSTONE (Genus GXL)
+No ScummVM engine exists for these games; the GXL container and its embedded
+PCX images were reverse engineered from the data itself.
+games in ags/capstone/WAYNE (Wayne's World) and ags/capstone/DARKHALF (The Dark Half)
+
+GXL container: `01 CA` then the ASCII copyright
+"Copyright (c) Genus Microprogramming, Inc. 1988-90", a 0x80-byte header, then a
+directory of 26-byte entries (`flag u8`, `name char[12]`, NUL, `u32 offset`,
+`u32 size`, `u32 unknown`). Number of entries = `(firstDataOffset - 0x80) / 26`.
+Each entry payload is a standard version-5 PCX (8bpp, single plane, RLE) with a
+256-colour palette in the trailing 768 bytes.
+
+Fievel / An American Tail (`ags/capstone/AMTAIL`) uses a different Manley &
+Associates engine whose `.PIC` containers are NOT yet supported.
+
 ### DRASCULA
 ScummVM source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 game in ags/DRASCULA
