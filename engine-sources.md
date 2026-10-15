@@ -461,3 +461,29 @@ reference. Tree: Sky 1022 nodes (162 backgrounds, 853 sprites, 7 palettes); Lure
 151 nodes (102 screens, 49 palettes). Lure character sprites are nibble-packed
 animation streams whose dimensions come from `lure.dat` (absent from the disk
 images), so they are not exposed.
+
+### RUNAWAY: A ROAD ADVENTURE
+
+`scripts/engines/runaway/engine.lua`, reverse engineered from the supplied
+Spanish Windows release in `ags/runaway`. Sources are the loose `RESOURCE/`
+and `DATAA/` files, plus `Runaway.exe` extracted for analysis from `Cab25.cab`.
+No ScummVM Runaway engine was used. The resource directory resembles Hollywood
+Monsters, but its scene pixels are RGB565, not indexed graphics.
+
+- Scene tables: 40 or 50 offsets followed by the same number of sizes; total
+  320 or 400 bytes. Backgrounds are little-endian RGB565. Most are 600 rows;
+  ten scrolling scene exceptions have size-checked, visually verified dimensions.
+- Sprite banks: 14-byte frame descriptors and spans with x/y i16, length u8,
+  then `length` RGB565 pixels. Standalone overlays use a u16 span count,
+  x/y/length u16 records and RGB565 data. Mask strips omit the pixel data.
+  Depth/walk masks use `(value u8, run length u16)` records.
+- Audio confirmed from the executable's DirectSound WAVEFORMATEX initialization:
+  VA 0x408294-0x4082af: stereo 16-bit / 16000 Hz; VA 0x408436-0x40845f:
+  mono 8-bit / 16000 Hz; VA 0x4086d8-0x4086e7: mono 16-bit / 16000 Hz.
+  Mxx, Sxx and DATAACA*.000 cue tables contain 100, 1000 and 12000 u32 offsets.
+- `scripts/prepare-runaway.py` prepares the installation layout using cabextract;
+  it links loose resources and extracts only game data and the executable to a
+  separate output folder. The runtime does not depend on cabextract. Shared
+  RESOURCE.000-.004 data and Bink cutscenes are not interpreted.
+- `scripts/tests/runaway.lua` contains synthetic format/bounds regressions and
+  optional real-data validation of every sprite bank and both ends of each bank.

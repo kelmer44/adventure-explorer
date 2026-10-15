@@ -50,6 +50,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
 | Ringworld: Revenge of the Patriarch / Blue Force | 1992-94 | `tsage` | Backgrounds, Palettes, Sprites & Animations, Messages, Sound metadata | ✅ Working* |
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
+| Runaway: A Road Adventure | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
 | SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object Sprites, Actor Costumes (animated), Fonts (NUT), Music (MIDI + iMUSE), Sound Effects, Speech | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
@@ -68,6 +69,22 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Runaway reads loose files from the game root or its `RESOURCE` directory.
+> The supplied media folder exposes 70 backgrounds, 33,407 scene sprite frames,
+> overlays/masks and 16 kHz PCM music, speech and effects. Animation previews use
+> batches of up to 32 stored frames at 100 ms; scripted timing/compositing, Bink
+> cutscenes and the shared `RESOURCE.000`-`.004` formats are not interpreted.
+> Files still inside installer cabinets require extraction or an installed copy.
+
+To prepare Runaway installation media without modifying it (requires `cabextract`):
+
+```sh
+python3 scripts/prepare-runaway.py /path/to/media /path/to/runaway-data
+```
+
+Open the resulting folder in Adventure Explorer. Loose files are linked from
+that folder, so keep the original media available; cabinet members are extracted.
 
 > \* Capstone / Manley support covers the supplied AMTAIL, BHB and LALAW releases.
 > Fievel actor previews play stored frames in order at 100 ms; choose a scene palette
@@ -328,6 +345,7 @@ adventure-explorer/
 │       ├── lure/engine.lua       # Lure of the Temptress
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
 │       ├── pelrock/engine.lua    # Alfred Pelrock
+│       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
 │       ├── scumm/engine.lua      # SCUMM V5-V8 (+ scumm_cost/snd/nut/util.lua modules)
 │       ├── scummv2/engine.lua    # SCUMM V2

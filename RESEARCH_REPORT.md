@@ -2834,3 +2834,94 @@ were visually checked. Existing Wayne's World and The Dark Half GXL detection
 and sample image loads still pass. `lua scripts/tests/capstone.lua` covers
 compression boundary cases; append the local Capstone data root to scan all
 three games, check resource-ID uniqueness and validate image/palette sizes.
+
+
+# Part 15: Runaway: A Road Adventure
+
+## 15.1 Scope and installation layout
+
+The supplied Spanish Windows media (`ags/runaway`) has 80 RESOURCE files and
+five DATAA speech archives loose on disc; additional shared resources, opening
+animations, two speech archives and two SFX archives remain in Microsoft LZX
+cabinets. The `runaway` engine detects the media root, an installed game root,
+or a RESOURCE directory directly. It requires two valid scene archives with
+size-consistent RGB565 backgrounds and a 1536-byte block 2, avoiding the indexed
+Hollywood Monsters format. It does not execute the game.
+
+`scripts/prepare-runaway.py` uses cabextract to build a separate data folder:
+85 original loose files are linked and 14 cabinet members are extracted in this
+copy. Original media remain untouched. This is a preparation-time dependency;
+the engine itself reads ordinary files. Shared RESOURCE.000-.004 archives remain
+metadata previews. Bink cutscenes and encrypted game logic are not decoded.
+
+## 15.2 Scene archive, RGB565 and geometry
+
+Each RESOURCE.[A-I]nn starts with an offset array followed by a size array.
+The first data offset is 320 (40 entries) or 400 (50 entries, including E03).
+Offsets/sizes are u32 little endian. Zero pairs mark unused slots; entries are
+bounds-checked against the file length. Block zero is usually an RGB565 image;
+opening-animation archives may instead have sprite banks in block zero.
+
+RGB565 words have red in bits 11-15, green in 5-10, blue in 0-4. Components expand
+using floor(value*255/maximum). Pixels run left to right, top to bottom. Raw
+backgrounds lack dimensions; most use 600 rows. Scrolling exceptions were
+identified using independent row-correlation analysis and visually verified:
+D03 1200x670, D06 1760x1200, E10 1880x700, F37/H37 1444x800, G01 1400x760,
+G02 1640x800, G03 1520x900, I01 2048x900, I03 1024x2062. These dimensions apply
+only when the block size matches exactly. Assuming all images have 600 rows can
+produce plausible repeated rows in D06, so dimensions require visual checking.
+
+## 15.3 Sprite banks and masks
+
+Frame descriptors are 14 bytes: relative span offset u32, x i16, width i16,
+first/last y i16, span count u16. All descriptors precede span data; each relative
+offset is measured from the end of that descriptor table. Spans carry x/y i16,
+length u8, then twice that length in RGB565 bytes. Boundaries must meet the next
+frame's offset exactly; the final frame consumes the block. First/last frames
+are checked when indexing; each selected frame is checked when rendered. The
+optional regression scanner validates every span of every frame.
+
+Standalone overlays start with u16 span count, followed by x/y/length u16 and
+RGB565 pixels. Standalone masks carry the same span coordinates without pixel
+data. Depth/walk masks instead contain `(value u8, count u16)` runs expanding
+to the background's pixel count. Overlays are cropped to their bounds, with the
+original position included in the description. Unknown blocks remain metadata.
+
+Preview animations use consecutive batches of at most 32 frames at 100 ms.
+Every individual frame remains selectable. This bounds preview memory for banks
+with over 1000 frames; it does not reproduce game-script scheduling or compositing.
+
+## 15.4 PCM audio
+
+Mxx (100 offsets), Sxx (1000 offsets), and DATAACA*.000 (12000 offsets) use cue N
+spans `[offset[N], offset[N+1])`. Zero/repeated pointers, references into the
+header and out-of-file ranges are skipped. Speech tables contain repeated/aliased
+spans, so total cue bytes can exceed archive length without invalid references.
+
+The extracted executable confirms **16000 Hz**, rather than assuming Hollywood
+Monsters' rates: stereo signed 16-bit music at VA 0x408294-0x4082af, mono unsigned
+8-bit speech at 0x408436-0x40845f, mono signed 16-bit effects at 0x4086d8-0x4086e7.
+Each clip must align to its PCM frame size. Sample exports were parsed as WAV
+and checked against these formats.
+
+## 15.5 Verification
+
+The supplied media tree exposes 45,638 leaves. Full bank validation covers
+408 banks and 33,407 frame layouts. The real-data regression rendered 1308
+images (backgrounds, masks, overlays, both ends of each bank and sample previews)
+and loaded all 10,362 listed PCM cues. All 70 backgrounds also loaded through
+the application's LuaJ runtime; exceptional dimensions were visually checked.
+Additional LuaJ checks cover sprite frames, a 32-frame animation, a cabinet-only
+opening animation, and speech/music exports. Independent Python RGB565 decoding
+is compared to the LuaJ output. Synthetic regressions exercise RGB565 extrema,
+truncated spans, frame bounds, exact block consumption and scrolling dimensions.
+
+
+The prepared folder exposes 49,193 leaves: 34,541 images, 1,287 animation
+previews, 13,133 PCM cues and 232 metadata entries. Its full regression validates
+425 banks / 34,131 frame layouts, renders 1,357 images and loads every listed
+PCM cue. Original and prepared-folder scans complete without failed loads in
+these checks. Background E01 and frame B02/4/1 match the independent Python
+RGB565 decoder pixel for pixel; exported WAV headers confirm 16000 Hz stereo
+16-bit music and mono 8-bit speech. Opening the existing Hollywood Monsters
+folder still selects its own engine.
