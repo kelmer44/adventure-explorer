@@ -121,8 +121,13 @@ local function decode_cel(s,first,last)
             pixels={};for i=1,w*h do pixels[i]=0 end
         end
         local cp=pos+16
-        for _=1,chunks do
+        for chunkIndex=1,chunks do
             local cs=u32(s,cp);local kind=u16(s,cp+4)
+            -- Some COPY chunks undercount pixels/padding by two bytes. Recover
+            -- only when dimensions and the enclosing frame agree exactly.
+            local copySize=w*h+6+(w*h)%2
+            if kind==16 and chunkIndex==chunks and cs==copySize-2
+                and cp+copySize==pos+frameSize then cs=copySize end
             assert(cs>=6 and cp+cs<=#s+1,'Invalid CEL chunk')
             local data=s:sub(cp+6,cp+cs-1);local p=1
             local function byte() assert(p<=#data,'Truncated CEL chunk');local v=data:byte(p);p=p+1;return v end
