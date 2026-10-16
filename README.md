@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-42 game engines are currently supported via Lua scripts — no recompilation needed.
+45 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -47,6 +47,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
 | MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
+| Noctropolis | 1994 | `noctropolis` | Backgrounds, Screens, Sprites | ✅ Working* |
 | Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
 | Ringworld: Revenge of the Patriarch / Blue Force | 1992-94 | `tsage` | Backgrounds, Palettes, Sprites & Animations, Messages, Sound metadata | ✅ Working* |
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
@@ -103,6 +104,14 @@ that folder, so keep the original media available; cabinet members are extracted
 > \* TsAGE (Ringworld, Blue Force) sound resources are scored Adlib/MIDI tracker data
 > that require the game's own sound driver, so they are listed as metadata only and
 > cannot be played back in the explorer.
+
+> \* Noctropolis scene backgrounds decode from the DBE-compressed playfield tiles plus
+> their 256-colour palette; `.SCN` full screens (title, deaths, comic pages) decode
+> with their embedded palette. Character/interface sprite sets are exposed as frame
+> animations; character sprites use the character palette stored in the same `.AP`
+> and interface icons use the icon palette built into the executable. Sprite colours
+> in-game also depend on the active room palette, and cell objects/sounds/music are
+> not decoded yet.
 
 > \* Lure of the Temptress character sprites are stored as nibble-packed animation
 > streams whose dimensions live in `lure.dat` (the engine support file in the game's
@@ -344,6 +353,7 @@ adventure-explorer/
 │       ├── lastexpress/          # The Last Express
 │       ├── lure/engine.lua       # Lure of the Temptress
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
+│       ├── noctropolis/engine.lua # Noctropolis
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
@@ -395,7 +405,7 @@ adventure-explorer/
 - [ ] Support for Sanitarium
 - [x] Support for Microprose adventures
 - [x] Support for Tsunami games
-- [ ] Support for Noctropolis
+- [x] Support for Noctropolis
 
 
 ## License

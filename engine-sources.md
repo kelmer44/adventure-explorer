@@ -487,3 +487,27 @@ Monsters, but its scene pixels are RGB565, not indexed graphics.
   RESOURCE.000-.004 data and Bink cutscenes are not interpreted.
 - `scripts/tests/runaway.lua` contains synthetic format/bounds regressions and
   optional real-data validation of every sprite bank and both ends of each bank.
+
+### NOCTROPOLIS
+
+`scripts/engines/noctropolis/engine.lua`, ported from the ScummVM Access engine.
+Data extracted from a Spanish CD release into `ags/NOCTROP` (`DARK/`, `COMDATA/`).
+
+Key references in `scummvm-fork/engines/access`:
+- `room.cpp` (`loadPlayField`, `loadHeader`) - 19-byte Noctropolis playfield header,
+  768-byte 6-bit palette, `TILE_WIDTH*TILE_HEIGHT` byte tiles, `tilesWidth *
+  tilesHeight` u16 tile indices, then wall/block rectangles.
+- `files.cpp` (`handleFile`, `loadRawFile`, `handleScreen`) - DBE container handling;
+  `loadScreen` reads a 768-byte palette then a DBE-compressed 640x400 buffer.
+- `asurface.cpp` (`SpriteResource`, `SpriteFrame`) - u16le count + u32le offsets
+  container; each frame is u16le w/h then per row `u8 xOffset, u8 length, bytes`.
+- `decompress.cpp` (`decompressDBE`) - LZW variant, "DBE\x01" magic, u32le unpacked
+  size at offset 4, stream from offset 16, 9..12 bit codes, 256 clear, 257 end.
+- `noctropolis/noctropolis_resources.cpp` - `NOCT_FILES_1/2` FILENAMES, `ICON_PALETTE`.
+- `screen.cpp` (`setManPalette`, `setIconPalette`) - player palette at colours
+  192..235, icon palette (no 6-bit conversion) at colours 236..255.
+- `detection_tables.h` - detection files `dark/scene01.ap` + `dark/scene13.ap`.
+
+Container parsing was verified against every scene (73 playfields), screen (27)
+and sprite resource (17) in the release; all decode without error, with playfield
+sizes matching the header arithmetic exactly.
