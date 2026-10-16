@@ -219,19 +219,27 @@ tools in ags/tools/igor
 
 game in ags/igor and ags/igor-cd
 
-Spanish CD support refreshed against the local `scummvm-fork/engines/igor`
-checkout at `bd1bb3dfb81` (2026-10-11) and the matching catalog in
-`igor-stuff/reference/scummvm-create-igortbl/resource_sp_cdrom.h`.
-Room/resource pairing follows `resource_ids.h`, `room.cpp` and each part's
-load calls; sparse frame addressing follows `graphics.cpp::getAnimFrame` and
-parts 69, 74–79, 85; raw frame dimensions/strides follow parts 7, 70, 73, 76.
-Text transforms and table layouts follow `room.cpp` / `resource.cpp`;
-outfit palettes follow `static_cursor.cpp` / `resource.cpp`; intertitle colours
-follow `part_main.cpp::PART_meanwhile`. CD music is separate audio tracks
-(`sound.cpp::playMusic`), while floppy music is CMF.
-Coverage: 74 verified room/scene backgrounds, 12 title/splash/credit images,
-five intertitles, 31 frame groups (19 indexed/raw, 12 scanned), both Igor
-outfits, decoded room/main text, 68 effects and 1,292 speech clips.
+Spanish floppy and CD screen support refreshed on 2026-10-16 against the local
+`igor-stuff/reference/scummvm-create-igortbl/resource_sp_floppy.h` and
+`resource_sp_cdrom.h`. Game data used for validation is in `igor-stuff/IGOR`
+and `igor-stuff/IGOR-CD`. The explorer embeds the verified offsets and does not
+require the catalogs or IGOR.TBL at runtime.
+
+Coverage: 76 floppy / 75 CD raw room backgrounds (including the beach ending),
+three telescope views per version, 10 floppy / 12 CD startup and credit images,
+five intertitles and four interface panels per version. The floppy has its own
+math corridor and different room artwork, palettes and text. Telescope views
+follow `part_32.cpp`: sparse frames 1 / 2 / 2+3, table 0x851e, bank loaded at +1.
+The beach ending shares PAL_Part79. IMG_Part78Layer2 and IMG_Part79Layer2 are
+animation banks, not raw screen pictures; IMG_Part81Strip is a 285x72 moving strip.
+Floppy title resources are IMG_TitleScreen and IMG_FloppyTitleBackdrop with
+PAL_TitleScreen; the old supposed shareware screens were invalid scan results.
+
+Existing animation/audio coverage: 31 CD / 10 floppy frame groups, both Igor
+outfits, 68 CD effects, 1,292 speech clips and floppy CMF music. Sparse frame
+addressing follows `graphics.cpp::getAnimFrame`; intertitle colours follow
+`part_main.cpp::partMainMeanwhile`. Validate screens with `scripts/tests/igor.lua`
+and export the gallery with `scripts/igor-gallery.py`.
 
 ### STAR TREK
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -656,3 +664,18 @@ every animation through its last declared frame.
 - Implementation: `scripts/engines/toltecs/engine.lua`.
 - Validation: `lua scripts/tests/toltecs.lua ~/Desktop/ags/3SKULLS` plus Gradle
   `compileKotlin` and the LuaJ `devcli` resource/export checks.
+
+### AMAZON: GUARDIANS OF EDEN
+
+- Supplied Spanish floppy data: `/Users/gabriel/Desktop/ags/AMAZON`.
+- Local format reference: `/Users/gabriel/Desktop/source/scummvm-fork/engines/access/`.
+- `files.cpp`: AP count/offset directory, DBE detection and palette-prefixed screens.
+- `decompress.cpp`: DBE LZW, LSB-first codes, clear/end codes and early width growth.
+- `room.cpp` (`loadHeader`, `loadPlayField`): 16-byte Amazon header, 256-byte
+  tiles, one-byte tile indices, embedded VGA palette and trailing navigation data.
+- `asurface.cpp`: sprite bank offsets, per-row crop and raw pixels.
+- `video.cpp` (`VideoPlayer_v1`): dimensions/flags, u16 packet lengths,
+  skip/literal deltas and optional initial raw background.
+- `sound.cpp`: STEVE signed PCM rates and MIDI loading; `screen.cpp`: palette expansion.
+- Implementation: `scripts/engines/amazon/engine.lua`; regression/full-data scan:
+  `lua scripts/tests/amazon.lua ~/Desktop/ags/AMAZON`.

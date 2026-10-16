@@ -3050,3 +3050,83 @@ still get structural image/music classification and metadata for unknown data.
 Indices 4801-4818 alternate nine XMIDI and nine standard MIDI resources.
 The remaining 172 resources (including one empty audio entry) include scripts, fonts, cursor masks and 16
 movie streams; these receive bounded hex/ASCII previews, not guessed decoders.
+
+
+## Amazon: Guardians of Eden (Spanish floppy, 2026-10-16)
+
+The supplied `AMAZON` directory uses AP archives with a u16 little-endian
+count and u32 offset table; EOF ends the last member. DBE compression may
+wrap a member or follow a screen palette. DBE has a 16-byte header, decoded
+length at offset 4, and LSB-first LZW codes (256 clear, 257 end, dictionary
+from 258). Width starts at 9 bits and grows when the next dictionary code
+reaches a power of two, up to the source's 13-bit limit. The implementation
+checks input bounds, dictionary references and exact output length.
+
+Amazon playfields have a 16-byte header: u8 tile width/height/count,
+u8 display width/height/unused, u16 wall/block counts, six unused bytes.
+A 768-byte VGA palette follows, then count*256 bytes of 16x16 tiles and a
+width*height byte matrix. This differs from Noctropolis's 19-byte header,
+u16 tile count and u16 matrix entries. The supplied data has 41 playfields,
+including the 2560x96 panorama in S45.AP. Another 40 screens contain a VGA
+palette followed by raw or DBE pixels; recognized sizes are 320x200,
+640x400 and 640x480. VGA components expand by floor(value*255/63).
+
+Sprite banks use the AP offset structure. Frames have u16 width/height,
+then each row is u8 x offset, u8 byte count, and raw pixels. Frames may have
+up to 15 arbitrary padding bytes, normally aligning to 16 bytes; treating
+padding as pixels rejects valid banks. There are 122 banks and 11 loose
+BLK images. Index zero is shown as the stored background color.
+
+There are 104 v1 videos: u16 declared count, width, height, a reserved byte
+and flags byte, followed by u16 packet sizes. Flag 1 supplies an initial
+raw background; other packets use byte commands (high bit means skip the
+low-seven-bit count, otherwise copy that many literals). The supplied files
+store declaredCount-1 packets. The game normally plays declaredCount-2
+deltas; the browser deliberately exposes every stored packet, including
+trailing packets, at uniform 100 ms. Earlier deltas are reconstructed for
+each batch. A missing initial background begins black/index zero.
+
+Palettes for actors and video depend on runtime state. The browser suggests
+the only picture palette in the same archive; this is a suggestion, not
+reconstructed game state. Character Cxx and scene Sxx numbers do not establish
+a palette relationship, so no match is inferred between them.
+Unassigned resources use grayscale and allow manual palette selection.
+
+151 STEVE sound resources have a 32-byte header: rate selector at offset 5,
+u16 sample count at offset 7, and signed 8-bit mono PCM at offset 32.
+Selectors 1-4 map to 16666, 8334, 5525 and 4150 Hz, matching Access's
+sound.cpp (Audio::makeRawStream flags=0). All 64 MIDI.AP members are offered
+through the existing MIDI converter. MIDIDRV.AP remains driver metadata;
+custom instrument patches, script execution and animation command streams
+are not interpreted. Alternate/CD releases are not validated.
+
+
+## Igor screen coverage refresh (2026-10-16)
+
+The current Spanish floppy catalog identifies the room resources directly in
+IGOR.DAT (11,199,335 bytes). The previous byte matching against CD resources
+omitted different floppy artwork and reused incorrect palettes. The supposed
+15 floppy shareware/splash screens were scan artifacts, not authored screens.
+The catalog supplies the real Pendulo logo, title, title backdrop, seven credits,
+five intertitles and 76 room/close-up backgrounds. The CD now has 75 backgrounds,
+including IMG_Part79b (beach ending) with PAL_Part79. The extra floppy background
+is IMG_CollegeCorridorMathClass. Floppy BOX_PhilipRoom is at 0x1c5416, not the
+previous unrelated byte match at 0x16ddf0. Each maze uses its own catalog palette.
+
+Telescope views are sparse pictures in ANM_Part32Tower, not raw IMG assets.
+part_32.cpp loads the bank at buffer+1; the offset table is at buffer+0x851e.
+For zero-based frame N the word is at data[0x851d+2*N], and the word points one
+byte past the corresponding zero-based data position. Empty view draws frame 1,
+tower draws frame 2, and conversation draws frames 2 then 3 onto a cleared
+320x144 canvas. These previews use PAL_Part32Tower. Layer2 IMG resources in parts
+78 and 79 are compressed animation banks and must not be shown as raw pictures.
+
+Validation: the Lua harness decoded 301 floppy and 299 CD screen-related
+resources, covering backgrounds, masks, boxes, text, telescope views, startup,
+credits and UI. Every image had the expected pixel count and palette range;
+all room palettes passed the VGA range check. The application’s LuaJ runtime
+also loaded both versions’ complete room lists and startup/credit resources,
+as well as telescope views and floppy UI. Exported contact sheets were visually
+inspected. The gallery contains 98 floppy / 99 CD images; four per version are
+stored interface panels without dynamically drawn labels. This is an artwork
+catalog, not an exhaustive replay of gameplay states or cutscene compositions.

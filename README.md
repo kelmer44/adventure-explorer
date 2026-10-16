@@ -19,12 +19,13 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-50 game engines are currently supported via Lua scripts — no recompilation needed.
+51 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
 | 3 Skulls of the Toltecs | 1996 | `toltecs` | Backgrounds, Sprites, Palettes, Animations, Speech/Sound, Music, Data | ✅ Working* |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
+| Amazon: Guardians of Eden | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
 | Alone in the Dark series | 1992-95 | `aitd` | Backgrounds | ✅ Working |
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
@@ -75,6 +76,21 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Amazon: Guardians of Eden opens the supplied `AMAZON` directory, detected
+> by `AMAZON.EXE`, `S00.AP` and `C00.AP`. AP archives and DBE compression are read
+> directly. The supplied Spanish floppy release exposes 41 tiled backgrounds,
+> 40 full-screen pictures, 122 sprite banks, 11 loose images, 104 video sequences,
+> 151 STEVE sound clips and 64 MIDI tracks. Wide backgrounds retain their full
+> dimensions, including the 2560-pixel panorama. Image palettes are embedded;
+> sprite/video palettes are suggested when their archive contains a single
+> picture palette, with manual override and grayscale fallback. Video previews
+> show all stored delta packets (including trailing packets), with a blank initial
+> canvas unless a background packet is supplied, at uniform 100 ms timing.
+> Previews are batched to at most 100 frames / eight million pixels. Scripted
+> animation timing, scene compositing, MIDI driver patches and script execution
+> are not interpreted; remaining data has hex/ASCII previews. Tested with the
+> supplied floppy data; CD speech and alternate release layouts are unverified.
 
 > \* 3 Skulls of the Toltecs opens `3SKULLS`, a language `.PDI` directory,
 > or an installed directory containing `WESTERN`. The supplied Spanish CD has
@@ -173,15 +189,32 @@ that folder, so keep the original media available; cabinet members are extracted
 > own executable). That data is not part of the `.VGA` disk images, so sprites are not
 > listed; screen backgrounds and their palettes decode fully.
 
-Igor's Spanish CD version exposes 74 catalog-backed room/scene backgrounds with
-available masks, walkbox areas and decoded text; the title image, four splash
-screens, seven credit backgrounds and five intertitles; both Igor outfits; and
-31 sprite/animation groups. Nineteen groups use verified frame tables or raw
-frame geometry; twelve retain sparse-frame scanning. Animation previews show
-frame banks at a uniform speed, rather than replaying room scripts. CD audio
-includes 68 effects and 1,292 speech clips with dialogue labels where known.
-Music preview is available for the floppy version; CD music uses separate audio
-tracks and is not extracted from `IGOR.EXE` or `IGOR.DAT`.
+Igor supports the verified Spanish floppy and CD releases. The explorer exposes
+76 floppy and 75 CD room/scene backgrounds, including the beach ending and the
+floppy-only math corridor, with available masks, walkbox areas and decoded text.
+Both versions include three decoded telescope views, seven credit backgrounds
+and five intertitles. Startup art uses each version's own resources: the floppy
+Pendulo logo, title and title backdrop; the CD's four splashes and intro logo.
+The floppy screen and palette offsets come from the current resource catalog,
+rather than image scans or matches against CD artwork.
+
+Both Igor outfits and the existing animation banks remain available (31 CD
+and 10 floppy groups). Animation previews show frame banks at a uniform speed,
+rather than replaying room scripts. Interface previews show the stored panels;
+menu labels and other script-drawn content are not composited. CD audio includes
+68 effects and 1,292 speech clips. Music preview is available for the floppy;
+CD music uses separate audio tracks.
+
+Generate a searchable local gallery of all 197 image previews (98 floppy,
+99 CD, including interface panels) with:
+
+```sh
+python3 scripts/igor-gallery.py --floppy /path/to/IGOR --cd /path/to/IGOR-CD
+```
+
+Open `build/igor-gallery/index.html`. The generator requires Lua and Pillow and
+also writes a contact sheet for each version. Validate without exporting with
+`lua scripts/tests/igor.lua /path/to/game`.
 
 ## Building & Running
 
@@ -387,6 +420,7 @@ adventure-explorer/
 ├── scripts/
 │   └── engines/                  # 41 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
+│       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
 │       ├── cobramission/         # Cobra Mission

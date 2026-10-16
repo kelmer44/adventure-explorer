@@ -31,7 +31,7 @@ local engine = {}
 engine.name        = "Igor: Objective Uikokahonia"
 engine.id          = "igor"
 engine.description = "Pendulo Studios (1994) - DOS floppy & CD"
-engine.version     = "8.0"
+engine.version     = "9.0"
 
 -- ============================================================================
 -- Binary helpers (no bit32 in LuaJ 3.0.1)
@@ -100,13 +100,7 @@ local function find_data_file(game_path)
         end
     end
 
-    -- Fallback: any IGOR.DAT or IGOR.EXE
-    for _, p in ipairs(dat_candidates) do
-        if file_exists(p) then return p, VER_FLOPPY end
-    end
-    for _, p in ipairs(exe_candidates) do
-        if file_exists(p) then return p, VER_CD end
-    end
+    -- Fixed catalogs apply only to these verified Spanish releases.
     return nil, nil
 end
 
@@ -117,15 +111,13 @@ end
 -- CD rooms: { name, img_off, img_size, pal_off, pal_size,
 --             msk_off, msk_size, box_off, box_size, txt_off, txt_size }
 --
--- Floppy rooms: { name, img_off, img_size, pal_off, pal_size,
---                 0, 0, 0, 0, 0, 0 }
---   (no mask/box/text data available for the Spanish floppy version)
+-- Floppy rooms use the same layout, with offsets into IGOR.DAT.
 --
 -- Fullscreen images: { name, img_off, img_size, pal_off, pal_size }
 -- ============================================================================
 
 -- ===== CD version (Spanish) - offsets into IGOR.EXE 9,115,648 bytes =====
--- Verified IMG/PAL/MSK/BOX/TXT pairs from the current resource_sp_cdrom.h.
+-- Verified IMG/PAL/MSK/BOX/TXT pairs from resource_sp_cdrom.h (2026-10-16).
 -- Generic scan hits can overlap code or partial credit pictures; use catalog rows only.
 local CD_ROOMS = {
     {"Part 79", 0xcd17e, 46080, 0xd857e, 768, 0x0, 0, 0x0, 0, 0xccf93, 491},
@@ -202,6 +194,7 @@ local CD_ROOMS = {
     {"Roman Numbers Paper", 0x866eea, 46080, 0x8722ea, 624, 0x0, 0, 0x0, 0, 0x0, 0},
     {"News Paper", 0x87f2f8, 46080, 0x88a6f8, 624, 0x0, 0, 0x0, 0, 0x0, 0},
     {"Photo Harrison Margaret", 0x88ac06, 46080, 0x896006, 624, 0x0, 0, 0x0, 0, 0x0, 0},
+    {"Beach Ending (Part 79)", 0x9ef44, 0xb400, 0xd857e, 0x300, 0x0, 0x0, 0x0, 0x0, 0x9eb65, 0x3df},
 }
 
 -- CD: splash / credit backgrounds (320x200), plus the 320x122 title image.
@@ -210,26 +203,27 @@ local CD_FULLSCREEN = {
     {"Graphic Adventure",  0x7ff86e, 64000, 0x7ff56e, 768},
     {"Presents",           0x80f66e, 64000, 0x80f36e, 768},
     {"Optik Software",     0x81f46e, 64000, 0x81f16e, 768},
-    {"Igor Title (320x122)", 0x7c1434, 39040, 0x7cacb4, 768},
-    {"Credits Background 1", 0x6596e, 64000, 0x7536e, 768},
-    {"Credits Background 2", 0x55b6e, 64000, 0x6556e, 768},
-    {"Credits Background 3", 0x45d6e, 64000, 0x5576e, 768},
-    {"Credits Background 4", 0x35f6e, 64000, 0x4596e, 768},
-    {"Credits Background 5", 0x2616e, 64000, 0x35b6e, 768},
-    {"Credits Background 6", 0x1636e, 64000, 0x25d6e, 768},
-    {"Credits Background 7", 0x656e, 64000, 0x15f6e, 768},
+    {"Igor Intro Logo", 0x7c1434, 0x9880, 0x7cacb4, 0x300},
+    {"Credits 1", 0x6596e, 0xfa00, 0x7536e, 0x300},
+    {"Credits 2", 0x55b6e, 0xfa00, 0x6556e, 0x300},
+    {"Credits 3", 0x45d6e, 0xfa00, 0x5576e, 0x300},
+    {"Credits 4", 0x35f6e, 0xfa00, 0x4596e, 0x300},
+    {"Credits 5", 0x2616e, 0xfa00, 0x35b6e, 0x300},
+    {"Credits 6", 0x1636e, 0xfa00, 0x25d6e, 0x300},
+    {"Credits 7", 0x656e, 0xfa00, 0x15f6e, 0x300},
 }
 
 -- CD: UI and sprite resources
 local CD_UI = {
-    {"Verbs Panel (320x12)",     0x848ae0, 3840},
-    {"Inventory Panel (320x30)", 0x89a298, 9600},
-    {"Objects Sheet (320x150)",  0x89c818, 48000},
-    {"Meanwhile (320x144)",      0x56aeb7, 46080, "card"},
-    {"Minutes Later (Part 78)",  0x13ffb7, 46080, "card"},
-    {"Next Day (Part 78)",       0x14b4b7, 46080, "card"},
-    {"Time Card (Part 73)",      0x1deab7, 46080, "card"},
-    {"Time Card (Part 76)",      0x179db7, 46080, "card"},
+    {"Verbs Panel", 0x848ae0, 0xf00},
+    {"Inventory Panel", 0x89a298, 0x2580},
+    {"Objects", 0x89c818, 0xbb80},
+    {"Options Menu", 0x853868, 0x8fc0},
+    {"Meanwhile", 0x56aeb7, 0xb400, "card"},
+    {"Minutes Later (Part 78)", 0x13ffb7, 0xb400, "card"},
+    {"Next Day (Part 78)", 0x14b4b7, 0xb400, "card"},
+    {"Time Card (Part 73)", 0x1deab7, 0xb400, "card"},
+    {"Time Card (Part 76)", 0x179db7, 0xb400, "card"},
 }
 
 -- CD: Igor walking sprites
@@ -283,6 +277,12 @@ local CD_ANIM_GROUPS = {
     {"Policeman (Part 73)", 0x1dde9f, 624, {{0x1ce53d, 6890}}, raw = {{0x1a, 0x1a, 0x34, 0x5, 0x562}}},
     {"Plane Door States (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, raw = {{0x54, 0x44, 0x36, 0x2}}, outfit = 2},
     {"Take Parachute (Part 76)", 0x1991ea, 624, {{0x18539f, 31576}}, raw = {{0x1d04, 0x11, 0x10, 0x3}}, outfit = 2},
+}
+
+local CD_SCENES = {
+    {"Telescope - Empty View", 0x5ec04e, 0x8539, 0x5f4587, 0x270, 0x1},
+    {"Telescope - Bell Tower", 0x5ec04e, 0x8539, 0x5f4587, 0x270, 0x2},
+    {"Telescope - Tower Conversation", 0x5ec04e, 0x8539, 0x5f4587, 0x270, 0x3},
 }
 
 -- CD: Text resources
@@ -622,82 +622,113 @@ end
 
 -- ============================================================================
 -- Floppy version (Spanish) - offsets into IGOR.DAT 11,199,335 bytes
--- Room backgrounds are NOT listed here as a static table: the floppy game is a
--- Borland Pascal overlay executable and its room images only exist inside
--- per-room overlay segments (see get_floppy_rooms() / parse_floppy_stubs()
--- below), not at fixed flat offsets. Only the fullscreen splash images and CMF
--- music below were reliably found via flat-file signature scanning.
+-- Verified resource_sp_floppy.h offsets into the original overlay container.
 -- ============================================================================
 
--- Floppy: splash / shareware / title screens
+-- Floppy: authored startup, title and credit backgrounds
 local FLOPPY_FULLSCREEN = {
-    {"Shareware Screen 1",                2795200, 49920, 2789650, 768},
-    {"Shareware Screen 2",                2864960, 51200, 2860589, 768},
-    {"Shareware Screen 3",                2935360, 51200, 2931035, 768},
-    {"Shareware Screen 4",                3008320, 49600, 3003737, 768},
-    {"Shareware Screen 5",                3080000, 49600, 3075377, 768},
-    {"Shareware Screen 6",                3151360, 49920, 3146967, 768},
-    {"Shareware Screen 7",                3222720, 48960, 3218251, 768},
-    {"Title Screen",                      3292800, 49600, 3288446, 768},
-    {"Pendulo Studios",                   3363840, 48960, 3359454, 768},
-    {"Graphic Adventure",                 3433280, 49920, 3428887, 768},
-    {"Presents",                          3504640, 48320, 3499983, 768},
-    {"Optik Software",                    3573440, 49600, 3569032, 768},
-    {"Roman Numbers Paper",               3642880, 48960, 3638564, 768},
-    {"Newspaper",                         3712320, 48000, 3707857, 768},
-    {"Photo (Harrison & Margaret)",       3780480, 48640, 3775875, 768},
+    {"Pendulo Studios", 0xd7319, 0xfa00, 0xe6d19, 0x300},
+    {"Title Screen", 0xebfb8, 0xfa00, 0x10b42c, 0x300},
+    {"Floppy Title Backdrop", 0xfba2c, 0xfa00, 0x10b42c, 0x300},
+    {"Credits 1", 0xc710d, 0xfa00, 0xd6b0d, 0x300},
+    {"Credits 2", 0xb714e, 0xfa00, 0xc6b4e, 0x300},
+    {"Credits 3", 0xa718f, 0xfa00, 0xb6b8f, 0x300},
+    {"Credits 4", 0x971d0, 0xfa00, 0xa6bd0, 0x300},
+    {"Credits 5", 0x87211, 0xfa00, 0x96c11, 0x300},
+    {"Credits 6", 0x77252, 0xfa00, 0x86c52, 0x300},
+    {"Credits 7", 0x6728f, 0xfa00, 0x76c8f, 0x300},
 }
 
--- Floppy: no verified UI or sprite offsets available for the 11.2 MB version
-local FLOPPY_UI = {}
--- Floppy: rooms located by matching the CD catalog's resources byte-for-byte
--- inside the floppy IGOR.DAT (same 11-field layout as CD_ROOMS; offsets into IGOR.DAT)
+-- Floppy: interface panels and intertitles from the resource catalog
+local FLOPPY_UI = {
+    {"Verbs Panel", 0xa27d1c, 0xdc0},
+    {"Inventory Panel", 0xaa01ef, 0x2580},
+    {"Objects", 0xaa276f, 0xbb80},
+    {"Options Menu", 0xa1c810, 0x8480},
+    {"Meanwhile", 0xa0fd58, 0xb400, "card"},
+    {"Minutes Later (Part 78)", 0x9e28a4, 0xb400, "card"},
+    {"Next Day (Part 78)", 0xa0482b, 0xb400, "card"},
+    {"Time Card (Part 73)", 0x9f92fe, 0xb400, "card"},
+    {"Time Card (Part 76)", 0x9eddd1, 0xb400, "card"},
+}
+-- Floppy: resource_sp_floppy.h (2026-10-16), with version-specific palettes and text.
 local FLOPPY_ROOMS = {
-    {"Philip's Room", 0x1b9d13, 46080, 0x1c5113, 768, 0, 0, 0x16ddf0, 1280, 0, 0},
-    {"Maze 66", 0x2aa952, 46080, 0x2b5d52, 576, 0x2b5fc2, 2364, 0x2b68fe, 1280, 0, 0},
-    {"Maze 65", 0x2bba81, 46080, 0x2b5d52, 576, 0x2c70f1, 3366, 0x2c7e17, 1280, 0, 0},
-    {"Maze 64", 0x2ccda5, 46080, 0x2b5d52, 576, 0x2d8415, 3273, 0x2d90de, 1280, 0, 0},
-    {"Maze 63", 0x2de9c3, 46080, 0x2b5d52, 576, 0x2ea033, 2034, 0x2ea825, 1280, 0, 0},
-    {"Maze 62", 0x2f01a3, 46080, 0x2fb5a3, 576, 0x2fb813, 2139, 0x2fc06e, 1280, 0, 0},
-    {"Maze 61", 0x301941, 46080, 0x2fb5a3, 576, 0x30cfb1, 2256, 0x30d881, 1280, 0, 0},
-    {"Maze 60", 0x312faf, 46080, 0x2fb5a3, 576, 0x31e61f, 1404, 0x31eb9b, 1280, 0, 0},
-    {"Maze 59", 0x3241ce, 46080, 0x2fb5a3, 576, 0x32f83e, 1992, 0x330006, 1280, 0, 0},
-    {"Maze 58", 0x335742, 46080, 0x2b5d52, 576, 0x340db2, 1254, 0x341298, 1280, 0, 0},
-    {"Maze 57", 0x34666b, 46080, 0x2fb5a3, 576, 0x351cdb, 2058, 0x3524e5, 1280, 0, 0},
-    {"Maze 56", 0x357c33, 46080, 0x2b5d52, 576, 0x3632a3, 1017, 0x36369c, 1280, 0, 0},
-    {"Maze Entrance", 0x3689d8, 46080, 0x2b5d52, 576, 0x374048, 1884, 0x3747a4, 1280, 0, 0},
-    {"Maze 54", 0x37996e, 46080, 0x2fb5a3, 576, 0x384fde, 1278, 0x3854dc, 1280, 0, 0},
-    {"Maze 53", 0x38a823, 46080, 0x2b5d52, 576, 0x395e93, 267, 0x395f9e, 1280, 0, 0},
-    {"Maze 52", 0x39b1d1, 46080, 0x2b5d52, 576, 0x3a6841, 1128, 0x3a6ca9, 1280, 0, 0},
-    {"Maze 51", 0x3ad700, 46080, 0x2b5d52, 576, 0x3b8d70, 873, 0x3b90d9, 1280, 0, 0},
-    {"Physics Classroom", 0x59c8b8, 46080, 0x5a7cb8, 624, 0x5a7f28, 1557, 0x5a853d, 1280, 0, 0},
-    {"Chemistry Classroom", 0x5af5d5, 46080, 0x5a7cb8, 624, 0x5bac45, 1980, 0x5bb401, 1280, 0, 0},
-    {"Park Right", 0x5d3684, 46080, 0x5dea84, 624, 0x5decf4, 3972, 0x5dfc78, 1280, 0, 0},
-    {"Park", 0x5ea2c0, 46080, 0x5f56c0, 624, 0x5f5930, 4728, 0x5f6ba8, 1280, 0, 0},
-    {"Women's Toilets", 0x6e0e1c, 46080, 0x6ec21c, 624, 0x6ec48c, 2022, 0x6ecc72, 1280, 0, 0},
-    {"Men's Toilets", 0x6f8847, 46080, 0x703c47, 624, 0x703eb7, 1980, 0x704673, 1280, 0, 0},
-    {"Outside College", 0x718d16, 46080, 0x724116, 624, 0x724386, 4974, 0x7256f4, 1280, 0, 0},
-    {"Laboratory", 0x740dee, 46080, 0x74c1ee, 624, 0x74c45e, 2130, 0x74ccb0, 1280, 0, 0},
-    {"Map", 0x76cc74, 46080, 0x778074, 624, 0x7782e4, 1809, 0x7789f5, 1280, 0, 0},
-    {"Bell Church", 0x79c4c5, 46080, 0x7a78c5, 624, 0x7a7b35, 861, 0x7a7e92, 1280, 0, 0},
+    {"Part 79", 0x5b89f, 0xb400, 0x66c9f, 0x300, 0x0, 0x0, 0x0, 0x0, 0x5b6a2, 0x1fd},
+    {"Part 81", 0x133c74, 0xb400, 0x13f074, 0x270, 0x13f2e4, 0xa9e, 0x13fd82, 0x500, 0x133432, 0x842},
+    {"Lecture Hall (Part 78)", 0x1626ed, 0xb400, 0x16daed, 0x300, 0x0, 0x0, 0x16ddf0, 0x500, 0x161fbe, 0x72f},
+    {"Part 77", 0x17b8ee, 0xb400, 0x186cee, 0x270, 0x186f5e, 0x136e, 0x1882cc, 0x500, 0x17b337, 0x5b7},
+    {"Plane (Part 76)", 0x1a67f6, 0xb400, 0x1b1bf6, 0x270, 0x1b1e66, 0xac8, 0x1b292e, 0x500, 0x1a607e, 0x778},
+    {"Philip's Room", 0x1b9d13, 0xb400, 0x1c5113, 0x300, 0x1c5413, 0x3, 0x1c5416, 0x500, 0x1b985b, 0x4b8},
+    {"Sailor (Part 74)", 0x1c81be, 0xb400, 0x1d35be, 0x270, 0x0, 0x0, 0x0, 0x0, 0x1c7ce0, 0x4de},
+    {"Part 80", 0x1d7c9d, 0xb400, 0x1e309d, 0x300, 0x1e339d, 0x3, 0x1e33a0, 0x500, 0x1d76d8, 0x5c5},
+    {"Policeman (Part 73)", 0x1e5fea, 0xb400, 0x1f13ea, 0x270, 0x1f165a, 0x27c, 0x1f18d6, 0x500, 0x1e5ac3, 0x527},
+    {"Island Map (Part 70)", 0x1f74e9, 0xb400, 0x2028e9, 0x270, 0x202b59, 0x4bc, 0x203015, 0x500, 0x1f7113, 0x3d6},
+    {"Flower (Part 72)", 0x20df47, 0xb400, 0x219347, 0x270, 0x2195b7, 0x14cd, 0x21aa84, 0x500, 0x20daf8, 0x44f},
+    {"Fireflies (Part 69)", 0x2352f5, 0xb400, 0x2406f5, 0x270, 0x240965, 0xdda, 0x24173f, 0x500, 0x234d71, 0x584},
+    {"Outside Maze", 0x251bc2, 0xb400, 0x25cfc2, 0x240, 0x25d232, 0x9cf, 0x25dc01, 0x500, 0x2517ca, 0x3f8},
+    {"Part 68", 0x275bc9, 0xb400, 0x280fc9, 0x270, 0x281239, 0x157b, 0x2827b4, 0x500, 0x275585, 0x644},
+    {"Part 71", 0x294f4a, 0xb400, 0x2a034a, 0x270, 0x2a05ba, 0xa1a, 0x2a0fd4, 0x500, 0x2949a8, 0x5a2},
+    {"Maze 66", 0x2aa952, 0xb400, 0x2b5d52, 0x270, 0x2b5fc2, 0x93c, 0x2b68fe, 0x500, 0x2aa42f, 0x523},
+    {"Maze 65", 0x2bba81, 0xb400, 0x2c6e81, 0x270, 0x2c70f1, 0xd26, 0x2c7e17, 0x500, 0x2bb55e, 0x523},
+    {"Maze 64", 0x2ccda5, 0xb400, 0x2d81a5, 0x270, 0x2d8415, 0xcc9, 0x2d90de, 0x500, 0x2cc882, 0x523},
+    {"Maze 63", 0x2de9c3, 0xb400, 0x2e9dc3, 0x270, 0x2ea033, 0x7f2, 0x2ea825, 0x500, 0x2de4a0, 0x523},
+    {"Maze 62", 0x2f01a3, 0xb400, 0x2fb5a3, 0x270, 0x2fb813, 0x85b, 0x2fc06e, 0x500, 0x2efc80, 0x523},
+    {"Maze 61", 0x301941, 0xb400, 0x30cd41, 0x270, 0x30cfb1, 0x8d0, 0x30d881, 0x500, 0x30141e, 0x523},
+    {"Maze 60", 0x312faf, 0xb400, 0x31e3af, 0x270, 0x31e61f, 0x57c, 0x31eb9b, 0x500, 0x312a8c, 0x523},
+    {"Maze 59", 0x3241ce, 0xb400, 0x32f5ce, 0x270, 0x32f83e, 0x7c8, 0x330006, 0x500, 0x323cab, 0x523},
+    {"Maze 58", 0x335742, 0xb400, 0x340b42, 0x270, 0x340db2, 0x4e6, 0x341298, 0x500, 0x33521f, 0x523},
+    {"Maze 57", 0x34666b, 0xb400, 0x351a6b, 0x270, 0x351cdb, 0x80a, 0x3524e5, 0x500, 0x346148, 0x523},
+    {"Maze 56", 0x357c33, 0xb400, 0x363033, 0x270, 0x3632a3, 0x3f9, 0x36369c, 0x500, 0x357710, 0x523},
+    {"Maze Entrance", 0x3689d8, 0xb400, 0x373dd8, 0x270, 0x374048, 0x75c, 0x3747a4, 0x500, 0x3684b5, 0x523},
+    {"Maze 54", 0x37996e, 0xb400, 0x384d6e, 0x270, 0x384fde, 0x4fe, 0x3854dc, 0x500, 0x37944b, 0x523},
+    {"Maze 53", 0x38a823, 0xb400, 0x395c23, 0x270, 0x395e93, 0x10b, 0x395f9e, 0x500, 0x38a300, 0x523},
+    {"Maze 52", 0x39b1d1, 0xb400, 0x3a65d1, 0x270, 0x3a6841, 0x468, 0x3a6ca9, 0x500, 0x39acae, 0x523},
+    {"Maze 51", 0x3ad700, 0xb400, 0x3b8b00, 0x270, 0x3b8d70, 0x369, 0x3b90d9, 0x500, 0x3ad1dd, 0x523},
+    {"Physics Classroom", 0x59c8b8, 0xb400, 0x5a7cb8, 0x270, 0x5a7f28, 0x615, 0x5a853d, 0x500, 0x59c43b, 0x47d},
+    {"Chemistry Classroom", 0x5af5d5, 0xb400, 0x5ba9d5, 0x270, 0x5bac45, 0x7bc, 0x5bb401, 0x500, 0x5af110, 0x4c5},
+    {"Park Right", 0x5d3684, 0xb400, 0x5dea84, 0x270, 0x5decf4, 0xf84, 0x5dfc78, 0x500, 0x5d320b, 0x479},
+    {"Park", 0x5ea2c0, 0xb400, 0x5f56c0, 0x270, 0x5f5930, 0x1278, 0x5f6ba8, 0x500, 0x5e9bff, 0x6c1},
+    {"College Stairs (2nd Floor)", 0x5ffe1a, 0xb400, 0x60b21a, 0x270, 0x60b48a, 0x9a5, 0x60be2f, 0x500, 0x5ff9b8, 0x462},
+    {"College Stairs (1st Floor)", 0x61cf9d, 0xb400, 0x62839d, 0x270, 0x62860d, 0x9e4, 0x628ff1, 0x500, 0x61cad4, 0x4c9},
+    {"Corridor (Miss Barrymore)", 0x62fe94, 0xb400, 0x63b294, 0x270, 0x63b504, 0x6c9, 0x63bbcd, 0x500, 0x62f94d, 0x547},
+    {"Corridor (Announcement Bd)", 0x643868, 0xb400, 0x64ec68, 0x270, 0x64eed8, 0x7ec, 0x64f6c4, 0x500, 0x643422, 0x446},
+    {"Corridor (Sharon & Michael)", 0x667f7a, 0xb400, 0x67337a, 0x270, 0x6735ea, 0x6bd, 0x673ca7, 0x500, 0x667b79, 0x401},
+    {"Corridor (Caroline)", 0x67f67a, 0xb400, 0x68aa7a, 0x270, 0x68acea, 0x756, 0x68b440, 0x500, 0x67ee78, 0x802},
+    {"Corridor (Lucas)", 0x692c8e, 0xb400, 0x69e08e, 0x270, 0x69e2fe, 0x7ec, 0x69eaea, 0x500, 0x6927ff, 0x48f},
+    {"Corridor (Margaret)", 0x6b0cb5, 0xb400, 0x6bc0b5, 0x270, 0x6bc325, 0x7aa, 0x6bcacf, 0x500, 0x6b066a, 0x64b},
+    {"College Lockers", 0x6c4e71, 0xb400, 0x6d0271, 0x270, 0x6d04e1, 0x642, 0x6d0b23, 0x500, 0x6c48cc, 0x5a5},
+    {"Women's Toilets", 0x6e0e1c, 0xb400, 0x6ec21c, 0x270, 0x6ec48c, 0x7e6, 0x6ecc72, 0x500, 0x6e07ac, 0x670},
+    {"Men's Toilets", 0x6f8847, 0xb400, 0x703c47, 0x270, 0x703eb7, 0x7bc, 0x704673, 0x500, 0x6f82d7, 0x570},
+    {"Outside College", 0x718d16, 0xb400, 0x724116, 0x270, 0x724386, 0x136e, 0x7256f4, 0x500, 0x7185fc, 0x71a},
+    {"Margaret's Room", 0x75c7ea, 0xb400, 0x767bea, 0x300, 0x767eea, 0x3, 0x767eed, 0x500, 0x75c0ff, 0x6eb},
+    {"Laboratory", 0x740dee, 0xb400, 0x74c1ee, 0x270, 0x74c45e, 0x852, 0x74ccb0, 0x500, 0x74080e, 0x5e0},
+    {"Map", 0x76cc74, 0xb400, 0x778074, 0x270, 0x7782e4, 0x711, 0x7789f5, 0x500, 0x76c87b, 0x3f9},
+    {"Tobias' Office", 0x781388, 0xb400, 0x78c788, 0x270, 0x78c9f8, 0x3ea, 0x78cde2, 0x500, 0x780c29, 0x75f},
+    {"Bell Church", 0x79c4c5, 0xb400, 0x7a78c5, 0x270, 0x7a7b35, 0x35d, 0x7a7e92, 0x500, 0x79c043, 0x482},
+    {"Church Final Scene (Part 32)", 0x7b2e9b, 0xb400, 0x7be29b, 0x300, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+    {"Church Lock (Part 32)", 0x7c8bc5, 0xb400, 0x7d3fc5, 0x270, 0x7d4235, 0x579, 0x0, 0x0, 0x0, 0x0},
+    {"Church Control Room", 0x7d531e, 0xb400, 0x7e071e, 0x270, 0x7e098e, 0xca5, 0x7e1633, 0x500, 0x7d4dfb, 0x523},
     {"Church Mosaic", 0x7e8a59, 46080, 0x7f3e59, 720, 0x7f4129, 2445, 0, 0, 0, 0},
-    {"Church Puzzle", 0x80ee98, 46080, 0x81a298, 624, 0x81a508, 1992, 0x81acd0, 1280, 0, 0},
-    {"Inside Church", 0x820fcf, 46080, 0x82c3cf, 624, 0x82c63f, 2352, 0x82cf6f, 1280, 0, 0},
-    {"Outside Church", 0x846dbc, 46080, 0x8521bc, 624, 0x85242c, 3264, 0x8530ec, 1280, 0, 0},
-    {"Outside Administration Building B", 0x862535, 46080, 0x86d935, 624, 0x86dba5, 3858, 0x86eab7, 1280, 0, 0},
-    {"Outside Administration Building A", 0x86fc49, 46080, 0x86d935, 624, 0x87b2b9, 5766, 0x87c93f, 1280, 0, 0},
-    {"Spring Bridge", 0x89d588, 46080, 0x8a8988, 624, 0x8a8c58, 3936, 0x8a9bb8, 1280, 0, 0},
-    {"Library", 0x8bc89c, 46080, 0x8c7c9c, 624, 0x8c7f0c, 2217, 0x8c87b5, 1280, 0, 0},
-    {"Admin (Secretary Room)", 0x8e7bb9, 46080, 0x8f2fb9, 624, 0x8f3229, 2400, 0x8f3b89, 1280, 0, 0},
-    {"Dean Pepper's Office", 0x90eb40, 46080, 0x919f40, 624, 0x91a1b0, 2745, 0x91ac69, 1280, 0, 0},
-    {"Administration Corridor", 0x924700, 46080, 0x92fb00, 624, 0x92fd70, 2388, 0x9306c4, 1280, 0, 0},
-    {"Outside Student Dormitory", 0x948bcc, 46080, 0x953fcc, 624, 0x95423c, 1524, 0x954830, 1280, 0, 0},
-    {"Student Dormitory", 0x9a0792, 46080, 0x9abb92, 624, 0x9abe92, 6699, 0x9ad8bd, 1280, 0, 0},
-    {"Spring Bridge (Intro)", 0x89d588, 46080, 0x8a8988, 720, 0, 0, 0, 0, 0, 0},
-    {"Spring Rock", 0x9c63e4, 46080, 0x8a8988, 720, 0x9d1ab4, 3117, 0x9d26e1, 1280, 0, 0},
-    {"Student Dormitory Attic", 0x9776ff, 46080, 0x982aff, 624, 0x982d6f, 4545, 0x983f30, 1280, 0, 0},
+    {"Church Puzzle", 0x80ee98, 0xb400, 0x81a298, 0x270, 0x81a508, 0x7c8, 0x81acd0, 0x500, 0x80e813, 0x685},
+    {"Inside Church", 0x820fcf, 0xb400, 0x82c3cf, 0x270, 0x82c63f, 0x930, 0x82cf6f, 0x500, 0x820b7b, 0x454},
+    {"Outside Church", 0x846dbc, 0xb400, 0x8521bc, 0x270, 0x85242c, 0xcc0, 0x8530ec, 0x500, 0x84682c, 0x590},
+    {"Outside Administration Building B", 0x862535, 0xb400, 0x86d935, 0x270, 0x86dba5, 0xf12, 0x86eab7, 0x500, 0x861fd4, 0x561},
+    {"Outside Administration Building A", 0x86fc49, 0xb400, 0x87b049, 0x270, 0x87b2b9, 0x1686, 0x87c93f, 0x500, 0x86f69b, 0x5ae},
+    {"Spring Bridge", 0x89d588, 0xb400, 0x8a8988, 0x2d0, 0x8a8c58, 0xf60, 0x8a9bb8, 0x500, 0x89d14e, 0x43a},
+    {"Library", 0x8bc89c, 0xb400, 0x8c7c9c, 0x270, 0x8c7f0c, 0x8a9, 0x8c87b5, 0x500, 0x8bc0ad, 0x7ef},
+    {"Admin (Secretary Room)", 0x8e7bb9, 0xb400, 0x8f2fb9, 0x270, 0x8f3229, 0x960, 0x8f3b89, 0x500, 0x8e742b, 0x78e},
+    {"Dean Pepper's Office", 0x90eb40, 0xb400, 0x919f40, 0x270, 0x91a1b0, 0xab9, 0x91ac69, 0x500, 0x90e297, 0x8a9},
+    {"Administration Corridor", 0x924700, 0xb400, 0x92fb00, 0x270, 0x92fd70, 0x954, 0x9306c4, 0x500, 0x923f2f, 0x7d1},
+    {"Outside Student Dormitory", 0x948bcc, 0xb400, 0x953fcc, 0x270, 0x95423c, 0x5f4, 0x954830, 0x500, 0x948528, 0x6a4},
+    {"Student Dormitory Attic", 0x9776ff, 0xb400, 0x982aff, 0x270, 0x982d6f, 0x11c1, 0x983f30, 0x500, 0x976c3f, 0xac0},
+    {"Student Dormitory", 0x9a0792, 0xb400, 0x9abb92, 0x270, 0x9abe92, 0x1a2b, 0x9ad8bd, 0x500, 0x99ffc5, 0x7cd},
+    {"Spring Bridge (Intro)", 0x9ba0ea, 0xb400, 0x9c54ea, 0x2d0, 0x0, 0x0, 0x0, 0x0, 0x9b99f2, 0x6f8},
+    {"Spring Rock", 0x9c63e4, 0xb400, 0x9d17e4, 0x2d0, 0x9d1ab4, 0xc2d, 0x9d26e1, 0x500, 0x9c5e92, 0x552},
     {"Roman Numbers Paper", 0xa70a39, 46080, 0xa7be39, 624, 0, 0, 0, 0, 0, 0},
+    {"News Paper", 0xa88d73, 0xb400, 0xa94173, 0x270, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
     {"Photo Harrison Margaret", 0xa948d8, 46080, 0xa9fcd8, 624, 0, 0, 0, 0, 0, 0},
+    {"Beach Ending (Part 79)", 0x2d982, 0xb400, 0x66c9f, 0x300, 0x0, 0x0, 0x0, 0x0, 0x2d53d, 0x445},
+    {"Corridor (Math Classroom)", 0x6544f0, 0xb400, 0x65f8f0, 0x270, 0x65fb60, 0x762, 0x6602c2, 0x500, 0x65402e, 0x4c2},
 }
 
 -- Floppy: Igor sprites (same data as the CD versions)
@@ -728,6 +759,12 @@ local FLOPPY_ANIM_GROUPS = {
     {"Numbers Paper (FRM)", 0x1c5113, 768, {{0xa7c2b5, 51163}, {0xa88a90, 40}}},
 }
 
+local FLOPPY_SCENES = {
+    {"Telescope - Empty View", 0x7bf751, 0x8539, 0x7c7c8a, 0x270, 0x1},
+    {"Telescope - Bell Tower", 0x7bf751, 0x8539, 0x7c7c8a, 0x270, 0x2},
+    {"Telescope - Tower Conversation", 0x7bf751, 0x8539, 0x7c7c8a, 0x270, 0x3},
+}
+
 -- Floppy: palette used as the base for sprites/UI (Philip's Room)
 local FLOPPY_UI_PAL = {0x1c5113, 768}
 local FLOPPY_TEXTS = {}
@@ -751,153 +788,7 @@ local FLOPPY_MUSIC = {
     {"CMF 15",  10832737,  4000},
 }
 
--- ============================================================================
--- Floppy room backgrounds: real Borland Pascal overlay parsing
--- ============================================================================
--- The floppy IGOR.EXE (~95KB) is a Borland Pascal "overlay" stub file: each
--- room is compiled to its own overlay segment stored in IGOR.DAT, indexed by a
--- table of 32-byte stub headers embedded in IGOR.EXE (starting at a fixed file
--- offset). A previous version of this engine guessed room image offsets by
--- scanning IGOR.DAT for pixel-like byte runs, which does not reflect the real
--- file layout and never produced correct backgrounds. This replaces that with
--- the actual overlay format, reverse engineered by the cyxx/igor project
--- (docs/RE.md, overlay_exe.cpp, room.cpp - see engine-sources.md).
---
--- Stub header (32 bytes, little-endian):
---   u16 int_code   (0x3FCD magic = "INT 3Fh" opcode used as an overlay marker)
---   u16 memswap    (always 0 for a valid header)
---   u32 fileoff    offset of this segment's code+data in IGOR.DAT
---   u16 codesize   size of this segment in IGOR.DAT
---   u16 relsize
---   u16 nentries   number of far-jump trampoline entries following the header
---   u16 prevstub
---   ...16 bytes workarea, then `nentries` x 5-byte far jumps (padded to 16)
---
--- Many room segments end with a trailing [768-byte VGA palette][320x200 8bpp
--- image] blob immediately after the last "pop bp; retf" (bytes 5D CB) in the
--- segment's compiled code. That marker + exact trailing size is how the
--- reference tool (and this engine) locates the image within each segment.
--- ============================================================================
-
-local STUB_HEADER_SIZE     = 32
-local STUB_SCAN_START      = 0x19F0
-local FULLSCREEN_BLOB_SIZE = 768 + 320 * 200 -- palette + 320x200 8bpp image
-
-local function find_exe_file(game_path)
-    local candidates = {
-        game_path .. "/IGOR.EXE",
-        game_path .. "/igor.exe",
-    }
-    for _, p in ipairs(candidates) do
-        if file_exists(p) then return p end
-    end
-    return nil
-end
-
--- Parse the Pascal overlay stub table embedded in the floppy IGOR.EXE.
--- Mirrors OverlayExecutable::parse(): scan 32-byte-aligned blocks from a fixed
--- start offset, recording valid stub headers and skipping their jump tables.
-local function parse_floppy_stubs(exe_path)
-    local fh = file_open(exe_path)
-    if not fh then return {} end
-    local exe_size = file_size(fh)
-
-    local stubs = {}
-    local pos = STUB_SCAN_START
-    while pos + STUB_HEADER_SIZE <= exe_size do
-        local hdr = file_read(fh, pos, STUB_HEADER_SIZE)
-        if not hdr or #hdr < STUB_HEADER_SIZE then break end
-
-        -- isPascalStub(): u16le(hdr,0)==0x3FCD (bytes CD,3F) and u16le(hdr,2)==0
-        if hdr:byte(1) == 0xCD and hdr:byte(2) == 0x3F and hdr:byte(3) == 0 and hdr:byte(4) == 0 then
-            local seg_offset = u32le(hdr, 5)
-            local seg_size   = u16le(hdr, 9)
-            local count      = u16le(hdr, 13)
-            if seg_size ~= 0 then
-                stubs[#stubs + 1] = { offset = seg_offset, size = seg_size }
-                local jmp_size = math.floor((count * 5 + 15) / 16) * 16
-                pos = pos + STUB_HEADER_SIZE + jmp_size
-            else
-                pos = pos + STUB_HEADER_SIZE
-            end
-        else
-            pos = pos + STUB_HEADER_SIZE
-        end
-    end
-    file_close(fh)
-    return stubs
-end
-
--- Scan one overlay segment (read from IGOR.DAT) for a trailing
--- [768-byte palette][320x200 image] blob, validating the palette is in the
--- legal 6-bit VGA range (0-63) before trusting the match.
-local function scan_floppy_room_blob(dat_path, stub)
-    local fh = file_open(dat_path)
-    if not fh then return nil end
-    local seg = file_read(fh, stub.offset, stub.size)
-    file_close(fh)
-    if not seg then return nil end
-
-    local size = #seg
-    local pos = size - 1
-    while pos >= 1 do
-        if seg:byte(pos) == 0x5D and seg:byte(pos + 1) == 0xCB then -- pop bp; retf
-            local blob_start = pos + 2
-            local blob_size = size - blob_start + 1
-            if blob_size == FULLSCREEN_BLOB_SIZE then
-                local pal_raw = seg:sub(blob_start, blob_start + 767)
-                local pal_ok = #pal_raw == 768
-                if pal_ok then
-                    for i = 1, 768 do
-                        if pal_raw:byte(i) > 63 then pal_ok = false; break end
-                    end
-                end
-                if pal_ok then
-                    local img_raw = seg:sub(blob_start + 768, blob_start + 768 + 320 * 200 - 1)
-                    if #img_raw == 320 * 200 then
-                        return pal_raw, img_raw
-                    end
-                end
-            end
-            break -- only the first marker found scanning backward is considered
-        end
-        pos = pos - 1
-    end
-    return nil
-end
-
--- Cached per game_path: dynamically-discovered floppy rooms (name, stub info).
-local _floppy_rooms_cache = nil
-local _floppy_rooms_cache_path = nil
-
-local function get_floppy_rooms(game_path, dat_path)
-    if _floppy_rooms_cache and _floppy_rooms_cache_path == game_path then
-        return _floppy_rooms_cache
-    end
-    if #FLOPPY_ROOMS > 0 then
-        _floppy_rooms_cache = FLOPPY_ROOMS
-        _floppy_rooms_cache_path = game_path
-        return FLOPPY_ROOMS
-    end
-    local rooms = {}
-    local exe_path = find_exe_file(game_path)
-    if exe_path then
-        local stubs = parse_floppy_stubs(exe_path)
-        for i, stub in ipairs(stubs) do
-            local pal_raw, img_raw = scan_floppy_room_blob(dat_path, stub)
-            if pal_raw and img_raw then
-                rooms[#rooms + 1] = {
-                    string.format("Floppy Room %d", i),
-                    stub.offset, stub.size, 0, 0, 0, 0, 0, 0, 0, 0,
-                }
-            end
-        end
-    end
-    _floppy_rooms_cache = rooms
-    _floppy_rooms_cache_path = game_path
-    return rooms
-end
-
+-- Both versions use the verified resource catalogs; no heuristic room scans.
 -- ============================================================================
 -- Palette loading
 -- ============================================================================
@@ -1841,7 +1732,7 @@ function engine.get_resources(game_path)
         texts = CD_TEXTS
         music = nil
     else
-        rooms = get_floppy_rooms(game_path, data_path)
+        rooms = FLOPPY_ROOMS
         fullscreen = FLOPPY_FULLSCREEN
         ui = FLOPPY_UI
         igor_sprites = FLOPPY_IGOR_SPRITES
@@ -1967,6 +1858,11 @@ function engine.get_resources(game_path)
         end
     end
 
+    local scene_children = {}
+    for i, scene in ipairs(version == VER_CD and CD_SCENES or FLOPPY_SCENES) do
+        scene_children[#scene_children + 1] = {id = "scene_" .. i, name = scene[1], type = "image"}
+    end
+
     local root = {}
     root[#root + 1] = {
         id = "cat_rooms",
@@ -1975,10 +1871,15 @@ function engine.get_resources(game_path)
         children = room_children,
     }
 
+    root[#root + 1] = {
+        id = "cat_scenes", name = "Telescope Scenes (" .. #scene_children .. ")",
+        type = "category", children = scene_children,
+    }
+
     if #fs_children > 0 then
         root[#root + 1] = {
             id = "cat_fullscreen",
-            name = "Title / Splash Screens (" .. #fullscreen .. ")",
+            name = "Title / Splash / Credits (" .. #fullscreen .. ")",
             type = "category",
             children = fs_children,
         }
@@ -2078,7 +1979,7 @@ function engine.load_resource(game_path, resource_id)
         texts = CD_TEXTS
         music = nil
     else
-        rooms = get_floppy_rooms(game_path, data_path)
+        rooms = FLOPPY_ROOMS
         fullscreen = FLOPPY_FULLSCREEN
         ui = FLOPPY_UI
         igor_sprites = FLOPPY_IGOR_SPRITES
@@ -2110,69 +2011,36 @@ function engine.load_resource(game_path, resource_id)
         if not fh then return {type = "text", text = "Cannot open data file"} end
 
         if room_type == "bg" then
-            -- Direct (offset, size) rooms: CD, and the floppy rooms matched against the CD catalog
-            if version == VER_CD or #FLOPPY_ROOMS > 0 then
-                local palette, bad_colors = read_palette(fh, pal_off, pal_size)
-                if not palette then
-                    file_close(fh)
-                    return {type = "text", text = "Failed to read palette for " .. name}
-                end
-                local img_raw = file_read(fh, img_off, img_size)
+            local palette, bad_colors = read_palette(fh, pal_off, pal_size)
+            if not palette then
                 file_close(fh)
-                if not img_raw or #img_raw < img_size then
-                    return {type = "text", text = "Failed to read image for " .. name}
-                end
-
-                local img_h = math.floor(img_size / IMG_W)
-                local pixels = {}
-                for i = 1, img_size do
-                    pixels[i] = img_raw:byte(i)
-                end
-
-                local img = image_create_indexed(IMG_W, img_h, pixels, palette)
-                local warning = ""
-                if bad_colors and bad_colors > 0 then
-                    warning = string.format(
-                        "  |  WARNING: %d palette entries outside valid 6-bit VGA range - offsets are likely wrong for this room",
-                        bad_colors)
-                end
-                return {
-                    type = "image",
-                    image = img,
-                    description = string.format(
-                        "%s  |  %dx%d  |  pal@0x%X (%d bytes)  |  img@0x%X%s",
-                        name, IMG_W, img_h, pal_off, pal_size, img_off, warning),
-                }
+                return {type = "text", text = "Failed to read palette for " .. name}
             end
-
-            -- Floppy: img_off/img_size here are actually the overlay segment's
-            -- (offset, size) in IGOR.DAT; re-scan it for the trailing
-            -- [palette][image] blob (see get_floppy_rooms()).
+            local img_raw = file_read(fh, img_off, img_size)
             file_close(fh)
-            local pal_raw, img_raw = scan_floppy_room_blob(data_path, { offset = img_off, size = img_size })
-            if not pal_raw or not img_raw then
-                return {type = "text", text = "No background data found for " .. name}
+            if not img_raw or #img_raw < img_size then
+                return {type = "text", text = "Failed to read image for " .. name}
             end
 
-            local palette = {}
-            for i = 0, 255 do
-                palette[i*3+1] = expand6(pal_raw:byte(i*3+1))
-                palette[i*3+2] = expand6(pal_raw:byte(i*3+2))
-                palette[i*3+3] = expand6(pal_raw:byte(i*3+3))
-            end
-
+            local img_h = math.floor(img_size / IMG_W)
             local pixels = {}
-            for i = 1, #img_raw do
+            for i = 1, img_size do
                 pixels[i] = img_raw:byte(i)
             end
 
-            local img = image_create_indexed(IMG_W, 200, pixels, palette)
+            local img = image_create_indexed(IMG_W, img_h, pixels, palette)
+            local warning = ""
+            if bad_colors and bad_colors > 0 then
+                warning = string.format(
+                    "  |  WARNING: %d palette entries outside valid 6-bit VGA range - offsets are likely wrong for this room",
+                    bad_colors)
+            end
             return {
                 type = "image",
                 image = img,
                 description = string.format(
-                    "%s  |  %dx200  |  overlay segment @0x%X (%d bytes)",
-                    name, IMG_W, img_off, img_size),
+                    "%s  |  %dx%d  |  pal@0x%X (%d bytes)  |  img@0x%X%s",
+                    name, IMG_W, img_h, pal_off, pal_size, img_off, warning),
             }
 
         elseif room_type == "msk" then
@@ -2255,8 +2123,8 @@ function engine.load_resource(game_path, resource_id)
             end
 
             local decoded
-            if version == VER_CD then
-                local strings = name == "Part 79" and decode_room_dialogue(txt_raw, 1, true)
+            do
+                local strings = (name == "Part 79" or name == "Beach Ending (Part 79)") and decode_room_dialogue(txt_raw, 1, true)
                     or decode_room_dialogue(txt_raw)
                 local lines = {}
                 for i = 0, 249 do
@@ -2265,8 +2133,6 @@ function engine.load_resource(game_path, resource_id)
                     end
                 end
                 decoded = table.concat(lines, "\n")
-            else
-                decoded = decode_text(txt_raw)
             end
             return {
                 type = "text",
@@ -2276,6 +2142,38 @@ function engine.load_resource(game_path, resource_id)
 
         file_close(fh)
         return {type = "text", text = "Unknown room sub-resource: " .. room_type}
+    end
+
+    -- Telescope views use sparse frames on a cleared 320x144 screen.
+    local scene_idx = resource_id:match("^scene_(%d+)$")
+    if scene_idx then
+        local scene = (version == VER_CD and CD_SCENES or FLOPPY_SCENES)[tonumber(scene_idx)]
+        if not scene then return {type = "text", text = "Scene index out of range"} end
+        local fh = file_open(data_path)
+        if not fh then return {type = "text", text = "Cannot open data file"} end
+        local data = file_read(fh, scene[2], scene[3])
+        local palette = read_palette(fh, scene[4], scene[5])
+        file_close(fh)
+        if not data or #data ~= scene[3] or not palette then
+            return {type = "text", text = "Incomplete telescope scene data"}
+        end
+        local pixels = {}
+        for i = 1, 320 * 144 do pixels[i] = 0 end
+        local function paint(frame)
+            -- The game loads the bank at buffer+1; table offsets are absolute
+            -- within that buffer, so a stored offset is already a Lua index.
+            local word = 0x851e + frame * 2
+            if word + 1 > #data then return false end
+            local pos = u16le(data, word)
+            local q, y, h = parse_sparse_frame(data, pos, true)
+            if not q or y + h > 144 then return false end
+            paint_sparse_frame(data, pos, pixels, 320, 0, 0)
+            return true
+        end
+        if not paint(scene[6] == 3 and 2 or scene[6]) or (scene[6] == 3 and not paint(3)) then
+            return {type = "text", text = "Invalid telescope frame table"}
+        end
+        return {type = "image", image = image_create_indexed(320, 144, pixels, palette), description = scene[1]}
     end
 
     -- ====== Fullscreen images ======
@@ -2328,6 +2226,12 @@ function engine.load_resource(game_path, resource_id)
         -- UI elements use the engine's fixed colour ranges (208..255) on top
         -- of a room palette for the low colours
         local palette = read_ui_palette(fh, version == VER_FLOPPY and FLOPPY_UI_PAL or nil)
+        if version == VER_FLOPPY and palette then
+            local verbs = file_read(fh, 0xa27cec, 48)
+            local inventory = file_read(fh, 0xaae2ef, 96)
+            if verbs and #verbs == 48 then overlay_palette(palette, 240, {verbs:byte(1, 48)}) end
+            if inventory and #inventory == 96 then overlay_palette(palette, 208, {inventory:byte(1, 96)}) end
+        end
         file_close(fh)
         if u[4] == "card" then
             -- Intertitles fade only three colours: black, orange, dark red.
