@@ -2925,3 +2925,18 @@ these checks. Background E01 and frame B02/4/1 match the independent Python
 RGB565 decoder pixel for pixel; exported WAV headers confirm 16000 Hz stereo
 16-bit music and mono 8-bit speech. Opening the existing Hollywood Monsters
 folder still selects its own engine.
+
+
+## Les Manley 2 and El Tesoro de la Isla Alcachofa (2026-10-16)
+
+Both games now have Lua resource engines. See the corresponding sections of
+`engine-sources.md` for verified binary layouts and validation coverage.
+
+Two prior handoff conclusions were incorrect: LES2's ILBM tags are real custom
+picture wrappers (19-byte BMHD and LZW chunky pixels), and TESORO.TRE has no
+8-byte header (each 28-byte record begins with offset/size, then flag/name).
+Tesoro image spans store relative skips, not absolute x positions. Resource
+names, audio, RGB565 room images and sparse character sprites now decode.
+LES2 exposes 498 decoded picture banks and 83 palettes; its one remaining
+invalid LZW stream is preserved as metadata. Neither engine interprets original
+scripted scene composition/timing; LES2 audio remains unsupported.

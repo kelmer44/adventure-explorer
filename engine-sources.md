@@ -511,3 +511,53 @@ Key references in `scummvm-fork/engines/access`:
 Container parsing was verified against every scene (73 playfields), screen (27)
 and sprite resource (17) in the release; all decode without error, with playfield
 sizes matching the header arithmetic exactly.
+
+### LES MANLEY 2: LOST IN L.A.
+
+`scripts/engines/les2/engine.lua`, reverse engineered from the supplied Spanish
+DOS release (`ags/LES2`). No external engine source is used.
+
+- `EXE.EXE` contains consecutive 14-byte resource records at file offset 114867:
+  u32 filename hash, lower-case DAT letter, zero pad, u32 offset, u32 size.
+  The engine locates the longest valid run, rather than assuming this EXE offset.
+- Filename hash is the sum of character bytes times position-specific u32
+  coefficients (20 entries at EXE file offset 110026), modulo 2^32. Internal
+  resource extensions are `.pic`, `.lsc`, `.pal`. Decompressed `.SCN` sources
+  preserve original image names with `.lbm`, allowing image names and palettes
+  to be recovered through the hash table.
+- Picture headers mimic IFF (`FORM`, `ILBM`, `BMHD`, `BODY`), but BMHD is 19
+  physical bytes despite declaring 20. BODY is contiguous LSB-first LZW,
+  9..12 bits, 256 clear, 257 end; pixels are chunky, consecutive image frames.
+- Palettes are raw 8-bit RGB, 82 in DATAA and `256.pal` in DATAZ. DATAA starts
+  with a 576-byte symbol table followed by a 1095-byte name table, then text.
+- Verified 498 of 499 pictures (267 still / 231 animated), all 83 palettes,
+  and metadata previews with `scripts/tests/les2.lua`. DATAF offset 502964
+  rejects an invalid LZW code and remains an explicit metadata entry. Audio,
+  original animation timing/compositing and some palette associations remain
+  unsupported. The unindexed tail of DATAZ is not exposed.
+
+### EL TESORO DE LA ISLA ALCACHOFA
+
+`scripts/engines/tesoro/engine.lua`, reverse engineered from `ags/TESORO` and
+`TESORO.EXE`; analysis in `/tmp/tesoro/decomp.c` informed the implementation.
+
+- TRE has NO header: 2421 x 28-byte records: u32 DAT offset, u32 payload size,
+  u8 flags, name[19]. Flag bit 4 denotes a file. Every DAT resource has a u32
+  size prefix; read `offset+4` for `size` bytes. Earlier handoff notes started
+  records at byte 8 and incorrectly paired names with the NEXT resource.
+- ANM magic is `ANM\x01` (`ANM\x00` for the 141 font glyphs), followed by a 24-byte bank header: u16 frame count
+  at +4, u16 image count at +8 (relative to magic). Frame records are 24 bytes
+  plus the u16 additional-data byte count at +22. Then image blocks follow,
+  each with u32 size. LVL has `LVL\x01`, a 12-byte header, bank count at +8,
+  and sequential ANM banks; magic scanning is unnecessary.
+- Image buffer: u32 pixel offset, u32 pixel byte count, u16 w/h/type/unused,
+  h row entries (u32 span-table offset, u16 span count, u16 unused). Each span
+  is u32 pixel offset or colour, u16 relative x skip, u16 length. X skips are
+  relative to the END of the preceding span. Type 1 uses RGB565 pixels,
+  type 3 solid RGB565 spans, type 2 shadow intensities (grayscale preview).
+- `scripts/tests/tesoro.lua` validates malformed structures and synthetic span,
+  colour and WAV fixtures, then optionally loads all 2,012 images and 2,346 WAV
+  clips. 112 multi-image banks offer uniform 100 ms sequence previews. Scripts
+  use Latin-1; compiled scripts/object metadata expose readable strings.
+- Both engines were exercised through the Kotlin/LuaJ developer CLI. No changes
+  to the Kotlin runtime or external extraction dependencies are required.

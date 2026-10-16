@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-45 game engines are currently supported via Lua scripts — no recompilation needed.
+47 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -35,6 +35,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
+| El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
 | Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
@@ -45,6 +46,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | L.A. Law: The Computer Game | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
+| Les Manley 2: Lost in L.A. | 1991 | `les2` | Scenes, Sprites, Animation Previews, Palettes, Text and Data | ✅ Working* |
 | Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
 | MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
 | Noctropolis | 1994 | `noctropolis` | Backgrounds, Screens, Sprites | ✅ Working* |
@@ -70,6 +72,20 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Les Manley 2 reads the resource directory from `EXE.EXE` alongside
+> `DATA*.DAT` and `OOPS.OOP`. The supplied Spanish release exposes 267 still
+> pictures, 231 animation banks and 83 palettes. Scene palettes are selected by
+> filename hash where available; unassigned resources permit manual palette
+> selection. One picture (`DATAF.DAT` offset 502964) has an undecodable LZW
+> stream and is listed as metadata. Audio and scripted scene playback are not
+> implemented; animation previews use uniform 100 ms timing.
+>
+> \* El Tesoro de la Isla Alcachofa reads `TESORO.TRE` / `TESORO.DAT` directly:
+> 2,012 images from the level, player and font banks, 112 image sequence previews,
+> 2,346 PCM WAV clips, plus scripts and readable object metadata. Shadow masks
+> display as grayscale. Previews use stored image order at 100 ms; game script
+> timing, movement and scene compositing are not interpreted.
 
 > \* Runaway reads loose files from the game root or its `RESOURCE` directory.
 > The supplied media folder exposes 70 backgrounds, 33,407 scene sprite frames,
@@ -353,6 +369,8 @@ adventure-explorer/
 │       ├── lastexpress/          # The Last Express
 │       ├── lure/engine.lua       # Lure of the Temptress
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
+│       ├── les2/engine.lua       # Les Manley 2: Lost in L.A.
+│       ├── tesoro/engine.lua     # El Tesoro de la Isla Alcachofa
 │       ├── noctropolis/engine.lua # Noctropolis
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
