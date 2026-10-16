@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-47 game engines are currently supported via Lua scripts — no recompilation needed.
+48 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -50,6 +50,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
 | MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
 | Noctropolis | 1994 | `noctropolis` | Backgrounds, Screens, Sprites | ✅ Working* |
+| Pink Panther: Passport to Peril / Hokus Pokus Pink | 1996/98 | `pink` | CEL Backgrounds, Sprites & Animations, Speech, Sound, Music, Text | ✅ Working* |
 | Prisoner of Ice | 1997 | `ice` | Backgrounds, Palettes, Dialogue Text, Sound Effects | ✅ Working* |
 | Ringworld: Revenge of the Patriarch / Blue Force | 1992-94 | `tsage` | Backgrounds, Palettes, Sprites & Animations, Messages, Sound metadata | ✅ Working* |
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
@@ -72,6 +73,15 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Pink Panther reads `PPTP.ORB` (Passport to Peril) and `HPP.ORB` (Hokus
+> Pokus Pink), with matching companion BRO archives in the game root or `INSTALL`.
+> Open `PINKPANTHER/Peligrosa` or `PINKPANTHER/Abracadabra`. Resources are grouped
+> by archive page: indexed CEL stills and animations, PCM WAV/VOX audio and
+> Windows-1252 text. Large animations are split into batches of at most 200 frames
+> and eight million pixels; all frames remain accessible. Previews use the last
+> decoded frame delay uniformly. Sprites retain their stored background colour;
+> scene compositing, scripted playback, and SONGS.SON/ALLSONGS.PTP are not decoded.
 
 > \* Les Manley 2 reads the resource directory from `EXE.EXE` alongside
 > `DATA*.DAT` and `OOPS.OOP`. The supplied Spanish release exposes 267 still

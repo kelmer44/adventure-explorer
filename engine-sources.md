@@ -561,3 +561,40 @@ DOS release (`ags/LES2`). No external engine source is used.
   use Latin-1; compiled scripts/object metadata expose readable strings.
 - Both engines were exercised through the Kotlin/LuaJ developer CLI. No changes
   to the Kotlin runtime or external extraction dependencies are required.
+
+### PINK — Pink Panther: Passport to Peril / Hokus Pokus Pink
+
+Local media: `~/Desktop/ags/PINKPANTHER/Peligrosa` and `Abracadabra`.
+Reference: local `scummvm-fork/engines/pink/file.{cpp,h}` (ORB/BRO directory),
+`resource_mgr.cpp` (external resources), `cel_decoder.cpp` (CEL header/prefix),
+`sound.cpp` (VOX is WAV), and `video/flic_decoder.cpp` (FLIC codecs).
+
+ORB v2 header: `ORB\0`, u16 minor=0, u16 major=2, u32 timestamp,
+u32 object-table offset, u32 count. Each 32-byte object entry contains a
+16-byte NUL-terminated page name, u32 object offset/count, u32 resource-table
+offset/count. Each 26-byte resource entry has name[16], u32 absolute offset,
+u32 size, u16 inBro. External resources use a matching timestamp BRO v1 in
+the root or INSTALL directory. Directory padding after the first NUL is garbage.
+
+CEL files are 8-bit FLC (`0xAF12`), 128-byte headers, frame count at offset 6,
+width/height at 8/10, millisecond delay at 16 and first-frame offset at 80.
+The first-frame pointer skips the optional CEL prefix. Frame type `0xF1FA`
+contains a 16-byte header, chunk count, optional delay/dimension overrides.
+Supported chunks: 4/11 palettes, 7 SS2 word delta (line skip and odd last pixel),
+13 black, 15 byte-run, 16 raw copy; 18 postage stamp is skipped. Palette and
+pixels persist between frames; ring frames after the declared count are ignored.
+Animations retain up to eight million pixels / 200 frames per preview batch,
+replaying prior deltas to reconstruct later batches. CEL centers/transparency
+are not composited. The host API uses one uniform frame delay per preview.
+
+Audio is signature-detected RIFF PCM (including WAV, VOX and MUS names); text
+is converted from Windows-1252. Other resource formats return metadata.
+Tests: `lua scripts/tests/pink.lua [game directory]` covers synthetic codec and
+malformed-input cases, and optionally loads every leaf of the supplied archive.
+
+Pink media compatibility details: `Pub/PBDRPP04.CEL` contains a stale frame
+size at frame 16; actual subchunk boundaries remain valid. Like ScummVM,
+the decoder advances by chunk count/size while bounding reads to the resource.
+`StrangeInterior/SBPP0001.VOX` has an odd-length sample payload without RIFF
+padding before cue metadata. Parsing stops once format and sample data are
+available, so this trailing metadata does not prevent PCM playback.

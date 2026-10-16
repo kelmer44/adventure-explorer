@@ -2940,3 +2940,28 @@ names, audio, RGB565 room images and sparse character sprites now decode.
 LES2 exposes 498 decoded picture banks and 83 palettes; its one remaining
 invalid LZW stream is preserved as metadata. Neither engine interprets original
 scripted scene composition/timing; LES2 audio remains unsupported.
+
+
+## Pink Panther (2026-10-16)
+
+The supplied Spanish Passport to Peril (`Peligrosa/PPTP.ORB`) and Hokus Pokus
+Pink (`Abracadabra/HPP.ORB`) use the Pink ORB v2 resource layout. They have
+600 and 219 object directory entries respectively, with 14,737 and 11,091
+resource references. All references in these copies reside inside the ORB;
+companion BRO files are still supported for other layouts.
+
+Passport: 8,423 CEL, 2,189 VOX, 1,349 WAV, 2,772 TXT, four MUS references.
+Hokus Pokus: 7,319 CEL, 1,717 VOX, 1,325 WAV, 730 TXT references.
+CEL is standard indexed FLC with a prefix and a first-frame pointer, not an
+image file accepted by ImageIO. The new Lua engine decodes palette packets,
+BRUN, COPY, BLACK and SS2 deltas, including odd last-pixel and line-skip opcodes.
+Audio signatures identify WAV independently of filename. Resource page and
+filename are preserved; no MFC object deserialization or scene interpreter is
+needed for extraction. See `engine-sources.md` for offsets and preview limits.
+
+Pink media compatibility details: `Pub/PBDRPP04.CEL` contains a stale frame
+size at frame 16; actual subchunk boundaries remain valid. Like ScummVM,
+the decoder advances by chunk count/size while bounding reads to the resource.
+`StrangeInterior/SBPP0001.VOX` has an odd-length sample payload without RIFF
+padding before cue metadata. Parsing stops once format and sample data are
+available, so this trailing metadata does not prevent PCM playback.
