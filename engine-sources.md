@@ -641,3 +641,18 @@ Validation: `lua scripts/tests/sulfato.lua [game path]` covers picture padding,
 RLE truncation/overflow, FLC bounds and delta reconstruction; the optional
 full-data sweep loads every image, palette, sound and text and reconstructs
 every animation through its last declared frame.
+
+### 3 SKULLS OF THE TOLTECS
+
+- Game: `/Users/gabriel/Desktop/ags/3SKULLS/ESPA_OL.PDI/WESTERN` (Spanish CD).
+- Local reference: `/Users/gabriel/Desktop/source/scummvm-fork/engines/toltecs/`.
+- `resource.cpp`: offset directory and archive resource boundaries.
+- `toltecs.cpp` (`loadScene`): scene dimensions, 128-color VGA palette and RLE.
+- `screen.cpp`: GUI RLE and animation delta RLE (nibble-swapped colors).
+- `sprite.cpp`, `screen.h`: 12-byte frame records, 16/256-color and shadow packets.
+- `animation.cpp`: full palette, chained frame sizes, delta skips and hold markers.
+- `palette.cpp`: VGA expansion, fragment allocation and interface palette base.
+- `sound.cpp`: unsigned 8-bit mono 22050 Hz PCM; `music.cpp`: XMIDI/SMF.
+- Implementation: `scripts/engines/toltecs/engine.lua`.
+- Validation: `lua scripts/tests/toltecs.lua ~/Desktop/ags/3SKULLS` plus Gradle
+  `compileKotlin` and the LuaJ `devcli` resource/export checks.

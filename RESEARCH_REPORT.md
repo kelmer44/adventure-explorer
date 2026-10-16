@@ -3008,3 +3008,45 @@ TXT, this gives 43 raw text/data previews. ALD files are plaintext, unlike
 Drascula's inverted text. No object rectangle layout or script semantics are
 assumed. The new `sulfato` engine exposes complete image sheets, palettes,
 FLIC previews, PCM audio and raw text, with strict picture/chunk bounds.
+
+
+## 3 Skulls of the Toltecs (Spanish CD, 2026-10-16)
+
+The 308,391,018-byte `ESPA_OL.PDI/WESTERN` starts with a 19,364-byte
+little-endian offset directory. Its last word (4101) is not an offset;
+the preceding offset points at the final 22-byte GUI image. EOF supplies
+that resource's end. There are 4,840 payloads (indices 0-4839).
+
+Scene payloads begin with `u32 imageSize, u16 height, u16 width`, followed
+by 384 VGA palette bytes. Pixels begin at offset 392; a high-bit byte is
+its low seven bits repeated `nextByte+2` times, otherwise one literal.
+`imageSize+4` is the end of image data / start of the segmentation map.
+All 56 backgrounds decode exactly to their declared dimensions and boundary.
+GUI images use `u16 headerSize=4, u8 width, u8 height` and the same RLE,
+with color base 224. Resource 9 supplies the 32 GUI palette colors.
+
+Sprite banks contain 12-byte frame headers: signed y/x anchor, u16 h/w,
+u32 offset. The first offset gives the table size. Every row and payload
+boundary is validated when choosing a packet format: nibble color/count,
+byte color/count, or seven-bit count with high-bit shadow presence.
+All 533 banks validate unambiguously (415 16-color, 87 256-color, 31 shadow).
+Palette fragments are script-selected; the browser exposes manual selection
+and grayscale fallback, without inferring scene colors from archive order.
+
+Animation banks begin `u16 h,w,deltaTickCount`, 768 VGA palette bytes,
+then chained u32 packet sizes. Each normal packet contains pairs of count
+and nibble-swapped color; zero count skips the second byte's pixel count,
+preserving the previous canvas. Size 0 or 1 carries a one-byte hold count.
+The timeline contains the initial image plus deltaTickCount ticks. The large
+resource 914 declares 1000 delta ticks but stores only 955 packets, because
+holds repeat the existing canvas. All 11 banks are exposed in bounded batches;
+each batch reconstructs earlier deltas before emitting its selected frames.
+Uniform 100 ms preview timing does not interpret game scripts.
+
+The Spanish layout's raw audio ranges 936-4800 and 4819-4822 contain 3,868
+unsigned 8-bit mono 22050 Hz clips. Enable these only when archive size,
+directory size and resource count match the tested layout. Other releases
+still get structural image/music classification and metadata for unknown data.
+Indices 4801-4818 alternate nine XMIDI and nine standard MIDI resources.
+The remaining 172 resources (including one empty audio entry) include scripts, fonts, cursor masks and 16
+movie streams; these receive bounded hex/ASCII previews, not guessed decoders.

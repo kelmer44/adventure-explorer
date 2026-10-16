@@ -19,10 +19,11 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-49 game engines are currently supported via Lua scripts — no recompilation needed.
+50 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
+| 3 Skulls of the Toltecs | 1996 | `toltecs` | Backgrounds, Sprites, Palettes, Animations, Speech/Sound, Music, Data | ✅ Working* |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | Alone in the Dark series | 1992-95 | `aitd` | Backgrounds | ✅ Working |
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
@@ -74,6 +75,20 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* 3 Skulls of the Toltecs opens `3SKULLS`, a language `.PDI` directory,
+> or an installed directory containing `WESTERN`. The supplied Spanish CD has
+> 56 backgrounds, 533 sprite banks (16-color, 256-color and shadow masks),
+> 92 interface images, 11 animation banks, 90 palette fragments, 3,868 unsigned
+> 22,050 Hz PCM speech/effect clips and 18 XMIDI/MIDI music resources.
+> Backgrounds and animations use their embedded palettes. Sprite palettes are
+> selected by game scripts: previews use grayscale until a palette fragment is
+> chosen manually. Animation previews retain delta frames and holds, in batches
+> of at most 100 frames / eight million pixels, with uniform 100 ms timing.
+> Raw audio ranges are enabled only for the verified Spanish CD layout;
+> other releases retain unclassified resources as metadata and hex previews.
+> Scripts, fonts, cursor masks, movie playback and scene compositing are not
+> interpreted. Resource names are numeric archive indices.
 
 > \* El Sulfato Atomico opens the unpacked `SULFATO` directory (detected by
 > `SULFATO.EXE`, `1.ALG` and `1.ALD`). The supplied Spanish release contains
@@ -407,6 +422,7 @@ adventure-explorer/
 │       ├── sword1/engine.lua     # Broken Sword 1
 │       ├── sword2/engine.lua     # Broken Sword 2
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
+│       ├── toltecs/engine.lua     # 3 Skulls of the Toltecs
 │       ├── tot/engine.lua        # Trick or Treat
 │       ├── toonstruck/engine.lua # Toonstruck
 │       ├── tsage/engine.lua      # Ringworld & Blue Force (Tsunami/TsAGE)
