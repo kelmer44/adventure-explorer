@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-48 game engines are currently supported via Lua scripts — no recompilation needed.
+49 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -35,6 +35,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
+| El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
 | Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
@@ -74,11 +75,24 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
 
+> \* El Sulfato Atomico opens the unpacked `SULFATO` directory (detected by
+> `SULFATO.EXE`, `1.ALG` and `1.ALD`). The supplied Spanish release contains
+> 111 NMP/PCX ALG images plus one SVS save thumbnail, their embedded palettes,
+> 53 FLC animation banks in VHS files, 735 PCM WAV clips, and 43 text/data files.
+> Wide pictures retain their full dimensions. Large animation banks are split
+> into batches of at most 200 frames and eight million pixels, with all declared
+> frames accessible; the extra FLC loop-closing frame is omitted. Previews use
+> uniform file timing. Sprite sheets are shown whole; object extraction, script
+> interpretation, character movement and scene compositing are not implemented.
+> The misnamed `sk494.wav` developer message is shown as text.
+
 > \* Pink Panther reads `PPTP.ORB` (Passport to Peril) and `HPP.ORB` (Hokus
 > Pokus Pink), with matching companion BRO archives in the game root or `INSTALL`.
 > Open `PINKPANTHER/Peligrosa` or `PINKPANTHER/Abracadabra`. Resources are grouped
 > by archive page: indexed CEL stills and animations, PCM WAV/VOX audio and
-> Windows-1252 text. Large animations are split into batches of at most 200 frames
+> Windows-1252 text. The supplied Spanish copies expose 14,820 resources in
+> Passport to Peril and 11,146 in Hokus Pokus Pink. Original-media CEL size and
+> VOX padding quirks are handled. Large animations are split into batches of at most 200 frames
 > and eight million pixels; all frames remain accessible. Previews use the last
 > decoded frame delay uniformly. Sprites retain their stored background colour;
 > scene compositing, scripted playback, and SONGS.SON/ALLSONGS.PTP are not decoded.

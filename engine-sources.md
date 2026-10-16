@@ -598,3 +598,46 @@ the decoder advances by chunk count/size while bounding reads to the resource.
 `StrangeInterior/SBPP0001.VOX` has an odd-length sample payload without RIFF
 padding before cue metadata. Parsing stops once format and sample data are
 available, so this trailing metadata does not prevent PCM playback.
+
+`TheMarket/IMVS0002.CEL` and `TheVillage/FVSPB004.CEL` undercount final COPY
+chunks by two bytes, including word padding for odd pixel counts. Recovery is
+allowed only when the pixel count plus padding exactly matches the enclosing
+frame boundary. Synthetic tests cover both even and odd pixel counts; arbitrary
+truncated chunks are still rejected.
+
+Verification: archive sweeps plus targeted reruns exercised all 25,966 leaves:
+Passport 4,032 images, 4,474 animation previews, 3,542 PCM clips, 2,772 texts;
+Hokus Pokus 4,084 images, 3,290 animation previews, 3,042 PCM clips, 730 texts.
+Kotlin compilation and Lua regressions pass. LuaJ exports cover both games,
+a six-frame animation, the repaired COPY animation and odd-sized VOX audio.
+The exported Hokus Pokus background and all six frames of Passport's
+`NC00WART.CEL` match FFmpeg RGB output pixel for pixel. Odd-width SS2 uses
+ScummVM's last-pixel opcode semantics, independently covered by synthetic tests.
+
+### EL SULFATO ATOMICO
+
+Game data: `/Users/gabriel/Desktop/ags/mortadelos/SULFATO`.
+Implemented in `scripts/engines/sulfato/engine.lua`, from direct inspection of
+this release. No external source or game executable execution was needed.
+
+- ALG: standard 8-bit single-plane PCX layout, except signature `4E 4D 50 08`
+  (`NMP` plus depth 8). Dimensions come from xmin/ymin/xmax/ymax, pitch at
+  offset 66; image data begins at 128 and uses PCX RLE. Palette marker 12 and
+  768 8-bit RGB bytes terminate each file. 111 images; some are 1280x480.
+- `1.SVS` is a standard PCX save thumbnail (640x240), not a sprite bank.
+- VHS: Autodesk FLC (0xAF12), 640x480 indexed images; chunks 4 (palette),
+  7 (word delta), 15 (byte run), and 18 (postage stamp, ignored). Standard
+  codecs adapted from the project's Pink Panther engine. Honor the first-frame
+  offset (80), skipping prefix chunks, and declared count, excluding the extra
+  loop-closing frame. 53 banks. Preview batches cap retained pixels at eight
+  million; replay earlier deltas before emitting later batches.
+- WAV: 735 PCM mono unsigned 8-bit clips, mostly 11025 Hz, five at 22050 Hz and
+  one at 13157 Hz. `sk494.wav` contains a developer text message.
+- ALD/CAL/GSV/SAV/TXT: 42 plaintext room/script/save/help files, plus the
+  misnamed WAV. Text accents use Latin-1 bytes. These are raw text previews;
+  no scene interpreter or inferred sprite rectangles.
+
+Validation: `lua scripts/tests/sulfato.lua [game path]` covers picture padding,
+RLE truncation/overflow, FLC bounds and delta reconstruction; the optional
+full-data sweep loads every image, palette, sound and text and reconstructs
+every animation through its last declared frame.

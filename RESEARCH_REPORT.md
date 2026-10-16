@@ -2965,3 +2965,46 @@ the decoder advances by chunk count/size while bounding reads to the resource.
 `StrangeInterior/SBPP0001.VOX` has an odd-length sample payload without RIFF
 padding before cue metadata. Parsing stops once format and sample data are
 available, so this trailing metadata does not prevent PCM playback.
+
+`TheMarket/IMVS0002.CEL` and `TheVillage/FVSPB004.CEL` undercount final COPY
+chunks by two bytes, including word padding for odd pixel counts. Recovery is
+allowed only when the pixel count plus padding exactly matches the enclosing
+frame boundary. Synthetic tests cover both even and odd pixel counts; arbitrary
+truncated chunks are still rejected.
+
+Verification: archive sweeps plus targeted reruns exercised all 25,966 leaves:
+Passport 4,032 images, 4,474 animation previews, 3,542 PCM clips, 2,772 texts;
+Hokus Pokus 4,084 images, 3,290 animation previews, 3,042 PCM clips, 730 texts.
+Kotlin compilation and Lua regressions pass. LuaJ exports cover both games,
+a six-frame animation, the repaired COPY animation and odd-sized VOX audio.
+The exported Hokus Pokus background and all six frames of Passport's
+`NC00WART.CEL` match FFmpeg RGB output pixel for pixel. Odd-width SS2 uses
+ScummVM's last-pixel opcode semantics, independently covered by synthetic tests.
+
+
+## El Sulfato Atomico resource formats (2026-10-16)
+
+The supplied Spanish DOS release at `ags/mortadelos/SULFATO` contains 111
+`.alg` images whose first four bytes are `NMP\x08`. The remaining header,
+PCX RLE byte stream, trailing palette marker (12) and 768-byte RGB palette
+follow single-plane 8-bit PCX. Header coordinate bounds determine dimensions,
+not the nominal 640x480 resolution fields: wide sheets/backgrounds are
+1280x480. Every image expands exactly to header pitch times height. `1.SVS`
+is an ordinary 640x240 PCX thumbnail, bringing the picture total to 112.
+
+All 53 VHS files are FLC containers (magic 0xAF12). Fifty-two have prefix
+chunks at offset 128; use the first-frame offset at header offset 80. Frame
+magic is 0xF1FA; observed chunk types are palette 4, word delta 7, byte run 15
+and postage stamp 18. Each file stores one extra loop-closing frame beyond
+the declared frame count; omit it from previews. File speed is milliseconds.
+Preview batches reconstruct earlier deltas and retain no more than eight
+million pixels or 200 frames. They use uniform file timing and do not emulate
+script playback or scene composition.
+
+Of 736 WAV-named files, 735 are PCM mono unsigned 8-bit: 729 at 11025 Hz,
+five at 22050 Hz, one at 13157 Hz. The remaining `sk494.wav` is a plaintext
+developer message. Together with 31 ALD, eight CAL, one GSV, one SAV and one
+TXT, this gives 43 raw text/data previews. ALD files are plaintext, unlike
+Drascula's inverted text. No object rectangle layout or script semantics are
+assumed. The new `sulfato` engine exposes complete image sheets, palettes,
+FLIC previews, PCM audio and raw text, with strict picture/chunk bounds.
