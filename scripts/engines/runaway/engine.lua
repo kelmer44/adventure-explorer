@@ -223,12 +223,9 @@ function engine.get_resources(path)
     -- Also accept an installed RESOURCE folder selected directly.
     if dir==path then data_dir=find_dir(join(path,".."),"DATAA") end
     audio_nodes(tree,data_dir,"^DATAACA%d+%.000$","speech",48000,8,1)
-    local cabinets=find_dir(path,"CAB")
-    if #(list_files(cabinets) or {})>0 then
-        local info=category("installation","Installation files")
-        add(info,"installation_info","Additional resources in installer cabinets","text",{kind="installation"})
-        tree[#tree+1]=info
-    end
+    local info=category("installation","Opening Instructions")
+    add(info,"installation_info","How to open this game","text",{kind="installation"})
+    table.insert(tree,1,info)
     return tree
 end
 -- Use exact 5/6-bit expansion, with no scene-specific palette or gamma correction.
@@ -283,7 +280,24 @@ local function load(path,id)
     if state.path~=path then engine.get_resources(path) end
     local e=state.entries[id]; if not e then return nil end
     if e.kind=="installation" then
-        return {type="text",text="This folder contains the Runaway installation media. Loose RESOURCE and DATAA files can be browsed directly.\n\nAdditional scenes, shared resources, speech and videos remain in Cab/*.cab. To browse those resources, use an installed game folder or extract the cabinets with scripts/prepare-runaway.py.\n\nBink cutscenes and scene logic are not played by this resource explorer."}
+        return {type="text",text="HOW TO OPEN RUNAWAY: A ROAD ADVENTURE\n\n"
+            .."Installed or previously prepared copy:\n"
+            .."Click Open Folder and select the game folder containing RESOURCE and DATAA. "
+            .."You can also open RESOURCE directly, but selecting the parent game folder is recommended so speech in DATAA is available. "
+            .."No preparation is needed.\n\n"
+            .."CD installer copy (Cab/*.cab):\n"
+            .."The explorer can browse the loose RESOURCE and DATAA files directly, but additional scenes, shared resources and speech "
+            .."remain inside the cabinets. Extraction is required once for those resources; it is not automatic. "
+            .."You can install the game normally and open its installed folder, or use the preparation script below.\n\n"
+            .."1. Install Python 3 and cabextract, with both available in your terminal.\n"
+            .."2. Open a terminal in the Adventure Explorer source folder (the folder containing scripts).\n"
+            .."3. Run this command, replacing the example paths with your media folder and a new or empty output folder:\n\n"
+            .."python3 scripts/prepare-runaway.py \"/path/to/media\" \"/path/to/runaway-data\"\n\n"
+            .."4. In Adventure Explorer, click Open Folder and select runaway-data.\n\n"
+            .."Keep the output outside the original media folder. The script extracts cabinet resources and links loose files. "
+            .."Keep the original media folder in place: the prepared folder still depends on those links. "
+            .."Once preparation finishes, reopen runaway-data directly. Bink cutscenes are not previewed.\n\n"
+            .."Currently selected folder: "..path}
     elseif e.kind=="sound" then
         local d=read(e.path,e.offset,e.size); if not d or #d~=e.size then return nil end
         local alignment=e.bits/8*e.channels

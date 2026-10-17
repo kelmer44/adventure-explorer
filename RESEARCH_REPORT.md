@@ -3130,3 +3130,33 @@ as well as telescope views and floppy UI. Exported contact sheets were visually
 inspected. The gallery contains 98 floppy / 99 CD images; four per version are
 stored interface panels without dynamically drawn labels. This is an artwork
 catalog, not an exhaustive replay of gameplay states or cutscene compositions.
+
+
+## Una Aventura de Cine: verified Alcachofa V3.0 resource formats
+
+The supplied 2003 Spanish CD stores the installed folder hierarchy in two
+independent Microsoft cabinets, `data01.cab` and `data02.cab`. Use cabextract
+with Windows-1252 filename encoding. The installer `Data/adata` directory is
+not the game data. The second cabinet holds thirteen BIN videos.
+
+AN0 has no magic: two little-endian u32 counts (sprite count, image count),
+then consecutive TGA images ending with the 18-byte `TRUEVISION-XFILE.\0`
+marker. The verified data uses RLE 32-bit/24-bit truecolor and 8-bit paletted
+TGA. After the images: 256 u32 sprite bases, one signed i32 x/y pair per image,
+256 u32 sprite mappings, u32 frame count. Each frame stores spriteCount u32
+image offsets, signed i32 center x/y and movement x/y, and u32 duration.
+For sprite ID i, j=mapping[i], and nonzero offset selects image
+base[j]+offset-1 (zero-based). Offset zero disables a sprite. Transparent 2x1
+images are placeholders. Image offsets position sprite layers. Three Ofelia
+banks have zero sprites/images but valid frame tables; these are empty resources.
+
+SND begins with u32 format length, the WAVEFORMAT payload, u32 data length,
+then audio data. The verified 4,150 clips are mono 22,050 Hz IMA ADPCM;
+44 WAV tracks are stereo 44,100 Hz IMA ADPCM. ADPCM uses a predictor and
+step index per channel, low nibble first, and four-byte channel groups.
+Standard IMA rounding matches FFmpeg byte for byte on the checked speech clip.
+
+V3 NKR files retain 32 cipher bytes, one embedded XOR key, four garbage bytes,
+then remaining cipher bytes. Remove the five inserted bytes, XOR both cipher
+ranges with that key, then decode Windows-1252. Full dialogue content is exposed.
+Other room/script data and video files retain bounded hex/metadata previews.

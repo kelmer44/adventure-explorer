@@ -679,3 +679,32 @@ every animation through its last declared frame.
 - `sound.cpp`: STEVE signed PCM rates and MIDI loading; `screen.cpp`: palette expansion.
 - Implementation: `scripts/engines/amazon/engine.lua`; regression/full-data scan:
   `lua scripts/tests/amazon.lua ~/Desktop/ags/AMAZON`.
+
+### UNA AVENTURA DE CINE (ALCACHOFA V3)
+
+`scripts/engines/alcachofa/engine.lua`, verified against the supplied Spanish
+2003 CD in `ags/mortadelos/decine`, extracted with `scripts/prepare-decine.py`.
+ScummVM references in the sibling `scummvm-fork` checkout:
+- `engines/alcachofa/graphics.cpp`: `AnimationBase::readV3`, `readImageV3`,
+  `Animation::imageIndex`, `spriteBounds` and `prerenderFrame` describe embedded
+  TGA boundaries, sprite base/mapping tables, image offsets and frame composition.
+- `engines/alcachofa/sounds.cpp`: `loadSND` describes the removed WAV chunks and
+  the PCM / Microsoft IMA ADPCM formats. Decoder uses standard IMA per-bit
+  rounding and includes each block's predictor sample, matching FFmpeg output.
+- `engines/alcachofa/rooms.cpp`: `loadEncryptedFile` describes the embedded NKR
+  XOR key after 32 cipher bytes, followed by four garbage bytes to discard.
+- `engines/alcachofa/detection_tables.h`: Spanish CD `OBJETOS.NKR` size 24467,
+  engine V3.0. Detection requires this game's named background and text folder.
+
+Previews use an animation-wide bounding canvas, stored sprite offsets and alpha
+blending over gray. Scripted frame center/movement, scene layering and variable
+frame delays are not replayed. Batches cap decoded output at 100 frames / 8M
+pixels. Three Ofelia banks contain no sprites/images and show placeholder text.
+All 981 AN0 bank structures are checked; tests cover malformed TGA/AN0 input,
+color order, ADPCM predictors and encrypted text headers. Actual runtime exports
+were checked through the JVM developer CLI. BIN files are video data, not archives.
+
+Opening guidance for Runaway and Una Aventura de Cine is available in each
+engine's resource tree and in README.md. It distinguishes installed/extracted
+folders from installer media, gives preparation commands and dependencies, and
+explains that Runaway's linked loose files still require the original media.

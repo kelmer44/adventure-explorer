@@ -19,11 +19,12 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-51 game engines are currently supported via Lua scripts — no recompilation needed.
+52 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
 | 3 Skulls of the Toltecs | 1996 | `toltecs` | Backgrounds, Sprites, Palettes, Animations, Speech/Sound, Music, Data | ✅ Working* |
+| Una Aventura de Cine - Edición Especial | 2003 | `alcachofa` | Backgrounds, Sprites, Animation Previews, Masks, Speech/Sound, Text, Data | ✅ Working* |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | Amazon: Guardians of Eden | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
 | Alone in the Dark series | 1992-95 | `aitd` | Backgrounds | ✅ Working |
@@ -76,6 +77,41 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Una Aventura de Cine supports the supplied Spanish 2003 CD edition
+> (Alcachofa V3.0). Open the installed folder containing `Fondos`, `Animaciones`,
+> `Mascaras`, `Sonidos` and `Textos`. The verified copy contains 123 background
+> banks, 433 animation/sprite banks (three empty placeholders), 425 mask/overlay
+> banks, 4,150 SND speech/effect clips and 44 stereo WAV tracks. AN0 previews
+> compose stored TGA sprites at their original offsets, blend alpha over dark gray,
+> and preserve full background dimensions. Animations are split into batches of
+> at most 100 frames / eight million pixels, using the first frame's duration
+> uniformly. Encrypted NKR text is decoded with its embedded XOR key and displayed
+> as Windows-1252. Scripts, room data and 13 BIN videos have raw metadata/hex
+> previews; script execution, scene composition and video playback are not implemented.
+> Other Alcachofa games and releases are unverified.
+>
+> **Opening the game:** Click **Open Folder** and choose the installed or extracted
+> parent folder containing `Fondos`, `Animaciones`, `Mascaras`, `Sonidos` and
+> `Textos`. Do not select one of those subfolders. Select **How to open this game**
+> in the resource tree for the same instructions inside the app.
+>
+> For installer media containing `data01.cab` and `data02.cab`, preparation is
+> required once; cabinet extraction is not automatic. Either install the game
+> normally and open its installed folder, or install **Python 3** and **cabextract**
+> (both available in your terminal), then run the following from the Adventure
+> Explorer source folder containing `scripts/`. Replace both example paths:
+>
+> ```sh
+> python3 scripts/prepare-decine.py "/path/to/decine" "/path/to/decine-data"
+> ```
+>
+> Choose a new or empty output folder outside the source media. When the command
+> finishes, click **Open Folder** and select `decine-data`. Subsequent opens need
+> no preparation. The script preserves Spanish filenames, copies extracted assets,
+> and leaves the source media untouched. Validate with
+> `lua scripts/tests/alcachofa.lua /path/to/output catalog` (all bank structures),
+> `audio` (all sound clips), or `visual` (first frame of every AN0 bank).
 
 > \* Amazon: Guardians of Eden opens the supplied `AMAZON` directory, detected
 > by `AMAZON.EXE`, `S00.AP` and `C00.AP`. AP archives and DBE compression are read
@@ -149,14 +185,28 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > cutscenes and the shared `RESOURCE.000`-`.004` formats are not interpreted.
 > Files still inside installer cabinets require extraction or an installed copy.
 
-To prepare Runaway installation media without modifying it (requires `cabextract`):
+**Opening Runaway:** Click **Open Folder** and select the installed or prepared
+parent folder containing `RESOURCE` and `DATAA`. Opening `RESOURCE` directly also
+works; selecting the parent folder makes the speech directory easier to locate.
+In the resource tree, expand **Opening Instructions** and select **How to open
+this game** for the same instructions inside the app.
+
+Installer media with `Cab/*.cab` can expose its loose files immediately, but
+additional resources require one-time extraction. Extraction is not automatic.
+Either install the game normally and open its installed folder, or install
+**Python 3** and **cabextract** (both available in your terminal). From the
+Adventure Explorer source folder containing `scripts/`, run this command,
+replacing both example paths:
 
 ```sh
-python3 scripts/prepare-runaway.py /path/to/media /path/to/runaway-data
+python3 scripts/prepare-runaway.py "/path/to/media" "/path/to/runaway-data"
 ```
 
-Open the resulting folder in Adventure Explorer. Loose files are linked from
-that folder, so keep the original media available; cabinet members are extracted.
+Choose a new or empty output folder outside the source media. When preparation
+finishes, click **Open Folder** and select `runaway-data`. Subsequent opens need
+no preparation. Cabinet resources are extracted, while loose files are linked:
+**keep the original media folder in place** so those links continue to work.
+Bink cutscenes are not previewed.
 
 > \* Capstone / Manley support covers the supplied AMTAIL, BHB and LALAW releases.
 > Fievel actor previews play stored frames in order at 100 ms; choose a scene palette
