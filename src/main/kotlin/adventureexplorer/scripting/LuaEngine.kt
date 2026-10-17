@@ -596,6 +596,14 @@ class LuaEngine {
 
     fun getMidi(handle: Int): MidiData? = midis[handle]
 
+    /** Release decoded assets between bulk-export entries without resetting the Lua script. */
+    fun releaseDecodedResources() {
+        images.clear()
+        animations.clear()
+        sounds.clear()
+        midis.clear()
+    }
+
     fun cleanup() {
         openFiles.values.forEach { runCatching { it.close() } }
         openFiles.clear()
@@ -606,6 +614,8 @@ class LuaEngine {
         nextAnimHandle = 1
         sounds.clear()
         nextSoundHandle = 1
+        midis.clear()
+        nextMidiHandle = 1
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

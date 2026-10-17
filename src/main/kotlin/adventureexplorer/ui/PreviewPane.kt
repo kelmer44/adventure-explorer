@@ -33,6 +33,7 @@ import javax.imageio.ImageIO
 @Composable
 fun PreviewPane(
     image: BufferedImage?,
+    onExportPng: () -> Unit,
     paletteImage: BufferedImage?,
     paletteOptions: List<ResourceNode>,
     selectedPaletteIndex: Int,
@@ -68,6 +69,7 @@ fun PreviewPane(
             )
             image != null -> ImagePreview(
                 image = image,
+                onExportPng = onExportPng,
                 paletteImage = paletteImage,
                 paletteOptions = paletteOptions,
                 selectedPaletteIndex = selectedPaletteIndex,
@@ -97,6 +99,7 @@ fun PreviewPane(
 @Composable
 private fun ImagePreview(
     image: BufferedImage,
+    onExportPng: () -> Unit,
     paletteImage: BufferedImage?,
     paletteOptions: List<ResourceNode>,
     selectedPaletteIndex: Int,
@@ -123,6 +126,8 @@ private fun ImagePreview(
                 modifier = Modifier.weight(1f)
             )
             ZoomButtons(current = zoomLevel, options = listOf(1, 2, 3), onSelect = { zoomLevel = it })
+            Spacer(Modifier.width(12.dp))
+            ControlButton("💾  Export PNG", onExportPng)
         }
 
         Divider(color = Color(0xFF333333))

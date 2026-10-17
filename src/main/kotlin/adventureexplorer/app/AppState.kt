@@ -36,6 +36,7 @@ class AppState {
     var previewMidiData  by mutableStateOf<MidiData?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
+    var isExporting      by mutableStateOf(false)
 
     // ── Palette dropdown state ────────────────────────────────────
     /** All palette options for the currently selected background (same category). */
@@ -72,6 +73,7 @@ class AppState {
     fun openGameFolder(path: String) {
         loadJob?.cancel()
         gamePath = path
+        resourceTree = emptyList()
         statusMessage = "Detecting game\u2026"
         isLoading = true
         previewImage = null
@@ -268,6 +270,53 @@ class AppState {
             statusMessage = "Exported to ${file.name}"
         } catch (e: Exception) {
             statusMessage = "Export failed: ${e.message}"
+        }
+    }
+
+    val canExportAll: Boolean
+        get() = gamePath != null && resourceTree.isNotEmpty() && !isLoading && !isExporting
+
+    fun exportAll(outputDir: String) {
+        if (!canExportAll) return
+        val path = gamePath ?: return
+        val tree = resourceTree
+        val companions = paletteCompanionOf.toMap()
+        val palettes = allPalettes.toList()
+        isExporting = true
+        statusMessage = "Preparing export\u2026"
+        ioScope.launch {
+            // Use a separate Lua session so preview interaction cannot affect exported resources.
+            val manager = ScriptManager()
+            try {
+                check(manager.detectGame(path) != null) { "Could not reopen game for export" }
+                val exporter = ResourceExporter(load = { node ->
+                    val paletteId = if (node.type == "image" || node.type == "animation") {
+                        val companion = companions[node.id] ?: manager.defaultPaletteFor(path, node.id)
+                            ?: derivePaletteId(node.id)
+                        palettes.firstOrNull { it.id == companion }?.id ?: palettes.firstOrNull()?.id
+                    } else null
+                    manager.loadResource(path, node.id, paletteId)
+                }, release = manager::releaseDecodedResources)
+                val result = exporter.export(tree, File(outputDir)) { index, total, node ->
+                    withContext(Dispatchers.Main) {
+                        statusMessage = "Exporting $index / $total: ${node.name}"
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    statusMessage = if (result.failures.isEmpty()) {
+                        "Exported ${result.exported} resources to $outputDir"
+                    } else {
+                        "Exported ${result.exported} resources; ${result.failures.size} failed. See ${result.errorLog?.absolutePath}"
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { statusMessage = "Export failed: ${e.message}" }
+            } finally {
+                manager.close()
+                withContext(Dispatchers.Main) { isExporting = false }
+            }
         }
     }
 

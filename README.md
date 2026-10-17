@@ -333,7 +333,8 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 3. The app auto-detects the game engine and populates the resource tree
 4. Click on a resource to preview it
 5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
-6. Click **Export PNG** to save the current preview, or use the animation export buttons to save individual frames or the full sequence
+6. Click **Export PNG** in the image preview to save the current image, or use the animation export buttons to save individual frames or the full sequence
+7. Click **Export all** in the toolbar and choose an output folder to export every resource in the tree's folder hierarchy. Images use PNG, animations get a folder of numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`.
 
 ## Writing Engine Scripts
 
@@ -538,7 +539,7 @@ adventure-explorer/
 - [ ] Sprite sheet viewer
 - [x] More engine scripts (SCI, AITD, Harvester, Cobra Mission)
 - [ ] Resource search/filter
-- [ ] Batch export
+- [x] Batch export
 - [ ] Support for all scumm games
 - [ ] Support for all Coktel games
 - [x] Support for Capstone games (Genus GXL and Manley/Synergistic resource formats; driver audio remains metadata)

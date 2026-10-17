@@ -11,6 +11,10 @@ import java.io.File
  */
 class ScriptManager {
 
+    fun releaseDecodedResources() { engine?.releaseDecodedResources() }
+
+    fun close() { engine?.cleanup() }
+
     private var engine: LuaEngine? = null
     private var currentScript: LuaValue? = null
     private var scriptsDir: File = resolveScriptsDir()

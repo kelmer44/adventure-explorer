@@ -82,15 +82,15 @@ fun App() {
 
                     Spacer(Modifier.width(8.dp))
 
-                    // Export PNG button
+                    // Export the complete resource tree
                     Button(
-                        onClick = { scope.launch(Dispatchers.IO) { showExportDialog(appState) } },
-                        enabled = appState.canExport,
+                        onClick = { scope.launch(Dispatchers.IO) { showExportAllDialog(appState) } },
+                        enabled = appState.canExportAll,
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = MaterialTheme.colors.primary
                         )
                     ) {
-                        Text("💾  Export PNG")
+                        Text(if (appState.isExporting) "Exporting\u2026" else "💾  Export all")
                     }
 
                     Spacer(Modifier.width(8.dp))
@@ -123,6 +123,7 @@ fun App() {
                     // Right panel: preview
                     PreviewPane(
                         image = appState.previewImage,
+                        onExportPng = { scope.launch(Dispatchers.IO) { showExportDialog(appState) } },
                         paletteImage = appState.previewPaletteImage,
                         paletteOptions = appState.previewPaletteOptions,
                         selectedPaletteIndex = appState.selectedPaletteIndex,
@@ -161,7 +162,7 @@ fun App() {
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (appState.isLoading) {
+                        if (appState.isLoading || appState.isExporting) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(14.dp),
                                 strokeWidth = 2.dp,
@@ -267,6 +268,21 @@ private suspend fun showOpenFolderDialog(appState: AppState) {
         prefs.put("lastGamePath", chosen)
         withContext(Dispatchers.Main) { appState.openGameFolder(chosen) }
     }
+}
+
+private suspend fun showExportAllDialog(appState: AppState) {
+    val chosen = withContext(Dispatchers.IO) {
+        onEdt {
+            val chooser = JFileChooser()
+            chooser.dialogTitle = "Choose folder to export all resources"
+            chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+            chooser.isAcceptAllFileFilterUsed = false
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION)
+                chooser.selectedFile.absolutePath
+            else null
+        }
+    } ?: return
+    withContext(Dispatchers.Main) { appState.exportAll(chosen) }
 }
 
 private suspend fun showExportDialog(appState: AppState) {

@@ -18,6 +18,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation("org.luaj:luaj-jse:3.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
+    testImplementation("junit:junit:4.13.2")
 }
 
 compose.desktop {
