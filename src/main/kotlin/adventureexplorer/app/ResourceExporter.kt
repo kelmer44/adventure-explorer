@@ -71,6 +71,8 @@ class ResourceExporter(
     private suspend fun writeResource(node: ResourceNode, data: ResourceData, parent: File) {
         val name = safeName(node.name)
         when {
+            data.modelData != null -> check(ImageIO.write(adventureexplorer.models.ModelRenderer.render(data.modelData),
+                "PNG", availableFile(parent, name, ".png")))
             !data.frames.isNullOrEmpty() -> {
                 val folder = availableFile(parent, name)
                 check(folder.mkdir()) { "Cannot create ${folder.path}" }

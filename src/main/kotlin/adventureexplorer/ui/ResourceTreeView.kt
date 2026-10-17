@@ -227,6 +227,7 @@ private fun TreeRowItem(
         Text(
             text = when (node.type) {
                 "category" -> "\uD83D\uDCC1"
+                "model"    -> "◇"
                 "image"    -> "\uD83D\uDDBC"
                 "animation" -> "\uD83C\uDFAC"
                 "sound"    -> "\uD83D\uDD0A"

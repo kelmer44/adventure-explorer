@@ -1,5 +1,8 @@
 package adventureexplorer.scripting
 
+import adventureexplorer.model.ModelData
+import adventureexplorer.models.CityModelDecoder
+import adventureexplorer.models.GrimModelDecoder
 import adventureexplorer.model.SoundData
 import adventureexplorer.model.MidiData
 import adventureexplorer.audio.GobAdlDecoder
@@ -53,7 +56,11 @@ class LuaEngine {
     private val midis = mutableMapOf<Int, MidiData>() // handle -> standard MIDI file bytes
     private var nextMidiHandle = 1
 
+    private val models = mutableMapOf<Int, ModelData>()
+    private var nextModelHandle = 1
+
     init {
+        registerModelApi()
         registerFileApi()
         registerImageApi()
         registerSoundApi()
@@ -62,6 +69,23 @@ class LuaEngine {
         registerImuseApi()
         registerImuseStream()
         registerLogApi()
+    }
+
+    private fun registerModelApi() {
+        fun decoder(name: String, decode: (ByteArray) -> ModelData) {
+            globals[name] = object : OneArgFunction() {
+                override fun call(data: LuaValue): LuaValue {
+                    val ls = data.checkstring()
+                    val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                    val model = try { decode(bytes) } catch (e: Exception) { throw LuaError(e.message ?: "Invalid model") }
+                    val handle = nextModelHandle++
+                    models[handle] = model
+                    return valueOf(handle)
+                }
+            }
+        }
+        decoder("model_decode_grim", GrimModelDecoder::decode)
+        decoder("model_decode_city", CityModelDecoder::decode)
     }
 
     // ── File I/O API ────────────────────────────────────────────────
@@ -588,6 +612,8 @@ class LuaEngine {
         return chunk.call()
     }
 
+    fun getModel(handle: Int): ModelData? = models[handle]
+
     fun getImage(handle: Int): BufferedImage? = images[handle]
 
     fun getAnimation(handle: Int): Pair<List<BufferedImage>, Int>? = animations[handle]
@@ -598,6 +624,7 @@ class LuaEngine {
 
     /** Release decoded assets between bulk-export entries without resetting the Lua script. */
     fun releaseDecodedResources() {
+        models.clear()
         images.clear()
         animations.clear()
         sounds.clear()
@@ -608,6 +635,7 @@ class LuaEngine {
         openFiles.values.forEach { runCatching { it.close() } }
         openFiles.clear()
         nextFileHandle = 1
+        models.clear()
         images.clear()
         nextImageHandle = 1
         animations.clear()

@@ -6,6 +6,7 @@ enum class ExportCategory(val label: String) {
     SPRITES("Sprites"),
     ANIMATIONS("Animations"),
     IMAGES("Images (all)"),
+    MODELS("3D Models"),
     SOUNDS("Sounds"),
     MUSIC("Music / MIDI"),
     PALETTES("Palettes"),
@@ -35,6 +36,7 @@ object ResourceCategories {
                 add(ExportCategory.ANIMATIONS)
                 addAll(roles)
             }
+            "model" -> add(ExportCategory.MODELS)
             "sound" -> add(ExportCategory.SOUNDS)
             "midi" -> add(ExportCategory.MUSIC)
             "palette" -> add(ExportCategory.PALETTES)

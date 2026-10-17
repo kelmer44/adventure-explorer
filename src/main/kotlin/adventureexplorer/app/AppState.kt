@@ -9,6 +9,7 @@ import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.ExportCategory
 import adventureexplorer.model.ResourceCategories
 import adventureexplorer.model.SoundData
+import adventureexplorer.model.ModelData
 import adventureexplorer.model.MidiData
 import adventureexplorer.scripting.ScriptManager
 import kotlinx.coroutines.*
@@ -37,6 +38,7 @@ class AppState {
     var previewFrames    by mutableStateOf<List<BufferedImage>?>(null)
     var previewFrameDelayMs by mutableStateOf(100)
     var previewSoundData by mutableStateOf<SoundData?>(null)
+    var previewModelData by mutableStateOf<ModelData?>(null)
     var previewMidiData  by mutableStateOf<MidiData?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
@@ -92,6 +94,7 @@ class AppState {
         previewFrameDelayMs = 100
         previewSoundData = null
         previewMidiData = null
+        previewModelData = null
         selectedNode = null
         previewNode = null
         nodeById.clear()
@@ -184,6 +187,7 @@ class AppState {
                         previewFrameDelayMs = bgWithPal?.frameDelayMs?.takeIf { it > 0 } ?: data.frameDelayMs
                         previewSoundData = data.soundData
                         previewMidiData = data.midiData
+                        previewModelData = data.modelData
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
@@ -206,6 +210,7 @@ class AppState {
                         previewFrameDelayMs = 100
                         previewSoundData = null
                         previewMidiData = null
+                        previewModelData = null
                         statusMessage = "Failed to load ${node.name}"
                     }
                 }

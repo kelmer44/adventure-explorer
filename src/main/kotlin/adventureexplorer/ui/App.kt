@@ -176,6 +176,7 @@ fun App() {
                             scope.launch(Dispatchers.IO) { showExportSoundWavDialog(appState) }
                         },
                         midiData = appState.previewMidiData,
+                        modelData = appState.previewModelData,
                         onExportMidi = {
                             scope.launch(Dispatchers.IO) { showExportMidiDialog(appState) }
                         },

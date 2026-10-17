@@ -91,7 +91,7 @@ local function catalog(path)
                     groups[kind]={id=root.id..'/'..kind,name=label,type='category',children={}}
                     root.children[#root.children+1]=groups[kind]
                 end
-                local typ=kind=='palette' and 'palette' or ((kind=='bitmap' or kind=='depth' or kind=='texture') and 'image' or ((kind=='speech' or kind=='music' or kind=='sound') and 'sound' or 'text'))
+                local typ=kind=='model' and 'model' or kind=='palette' and 'palette' or ((kind=='bitmap' or kind=='depth' or kind=='texture') and 'image' or ((kind=='speech' or kind=='music' or kind=='sound') and 'sound' or 'text'))
                 groups[kind].children[#groups[kind].children+1]={id=id,name=e.name..(frame and (' [image '..frame..']') or ''),type=typ}
                 if kind=='palette' then c.palettes[#c.palettes+1]=id end
             end
@@ -109,6 +109,7 @@ local function catalog(path)
                     elseif ext=='wav' then node(e,a.name:lower():match('^vox') and 'speech' or 'sound',a.name:lower():match('^vox') and 'Speech' or 'Sound effects')
                     elseif ext=='imu' or ext=='imc' then node(e,'music','Music')
                     elseif ext=='txt' or ext=='set' then node(e,'text','Text and scene definitions')
+                    elseif ext=='3do' then node(e,'model','3D Models')
                     elseif ext=='snm' then node(e,'video','Movies (metadata)')
                     else node(e,'data','Scripts, models and data') end
                 end)
@@ -393,7 +394,7 @@ local function utf8_text(s)
 end
 local function metadata(e,s)
     local lines={e.name,string.format('%d bytes, archive offset 0x%X',e.size,e.offset),'',
-        'Binary resource preview (first 1024 bytes). Models, costumes, Lua bytecode, keyframes and movies are not rendered.',''}
+        'Binary resource preview (first 1024 bytes). Costumes, Lua bytecode, keyframes and movies are not rendered.',''}
     for p=1,math.min(#s,1024),16 do
         local row=s:sub(p,p+15);local hex=row:gsub('.',function(c) return string.format('%02X ',c:byte()) end)
         lines[#lines+1]=string.format('%06X  %-48s %s',p-1,hex,(row:gsub('[^ -~]','.')))
@@ -401,7 +402,7 @@ local function metadata(e,s)
     return {type='text',text=table.concat(lines,'\n')}
 end
 function engine.load_resource(path,id,palette_id)
-    if id=='grim/help' then return {type='text',text='Open the original PC game folder containing DATA000.LAB (or other DATA00x.LAB files), or a disc root containing GRIMDATA. Each disc can be browsed separately. To browse all years together, copy the LAB files from both discs into one folder; include GRIM.TAB for dialogue. No installation or cabinet extraction is needed.\n\nBitmaps are RGB565; depth masks use grayscale. Each stored bitmap/texture image is separately accessible. Textures require a manually selected CMP palette (grayscale by default). Audio plays the stored PCM/VIMA stream linearly. 3D rendering, scene composition, scripted animation, iMUSE transitions and movie playback are not implemented. Remastered and Escape from Monkey Island archives are unverified.'} end
+    if id=='grim/help' then return {type='text',text='Open the original PC game folder containing DATA000.LAB (or other DATA00x.LAB files), or a disc root containing GRIMDATA. Each disc can be browsed separately. To browse all years together, copy the LAB files from both discs into one folder; include GRIM.TAB for dialogue. No installation or cabinet extraction is needed.\n\nBitmaps are RGB565; depth masks use grayscale. Each stored bitmap/texture image is separately accessible. Textures require a manually selected CMP palette (grayscale by default). Audio plays the stored PCM/VIMA stream linearly. Models show untextured default poses. Scene composition, scripted animation, iMUSE transitions and movie playback are not implemented. Remastered and Escape from Monkey Island archives are unverified.'} end
     local c=catalog(path);local record=c.entries[tonumber(id:match('^grim/(%d+)$'))]
     if not record then return nil end
     local e=record.entry
@@ -409,7 +410,9 @@ function engine.load_resource(path,id,palette_id)
         local limit=(record.kind=='data' or record.kind=='video') and 1024 or 64000000
         check(e.size<=limit or limit==1024,'Resource exceeds preview size limit')
         local s=read(e.path,e.offset,math.min(e.size,limit));check(s~=nil,'Cannot read resource')
-        if record.kind=='bitmap' or record.kind=='depth' then return bitmap(s,record.frame,record.kind=='depth')
+        if record.kind=='model' then
+            return {type='model',model=model_decode_grim(s),description='Default pose; untextured geometry'}
+        elseif record.kind=='bitmap' or record.kind=='depth' then return bitmap(s,record.frame,record.kind=='depth')
         elseif record.kind=='texture' then
             local pal={};for i=0,255 do pal[#pal+1]=i;pal[#pal+1]=i;pal[#pal+1]=i end
             if palette_id then
@@ -433,7 +436,12 @@ function engine.load_resource(path,id,palette_id)
         elseif record.kind=='text' then return {type='text',text=utf8_text(s)} end
         return metadata(e,s)
     end)
-    if not ok then return {type='text',text=e.name..'\nUnable to preview: '..tostring(result)} end
+    if not ok then
+        if tostring(result):find('Model has no visible geometry',1,true) then
+            return {type='text',text=e.name..'\nModel has no visible geometry (empty helper object).',description=e.name}
+        end
+        return {type='text',text=e.name..'\nUnable to preview: '..tostring(result)}
+    end
     result.description=e.name..(result.description and (' - '..result.description) or '')
     return result
 end

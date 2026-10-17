@@ -727,3 +727,102 @@ full-media scans: `scripts/tests/grim.lua`. Stored image states are independent
 leaves rather than inferred animations. Texture palette assignment is manual;
 no 3D renderer, script execution, scene composition, movie playback or iMUSE
 transition simulation. Remastered/EMI and alternate platforms are not claimed.
+
+### SAGA (I Have No Mouth, and I Must Scream)
+
+Reference: `/Users/gabriel/Desktop/source/scummvm-fork/engines/saga/`.
+Test data: `/Users/gabriel/Desktop/ags/IHNMAIMS` (Spanish DOS CD).
+Implementation: `scripts/engines/saga/engine.lua`.
+
+- `resource.cpp` (`loadResV1`): final 8 bytes are LE table offset/count;
+  each zero-based entry is LE offset/size. Table ends immediately before footer.
+- `saga.cpp`: full CD scene LUT = resource 1272, module LUT = 29,
+  main strings = 21. `scene.cpp`: 14/16-byte scene descriptors, resource-list
+  entries are u16 resource/u16 type; 2 = background, 3 = mask, 5 = strings,
+  14..23 = animation, 27 = palette.
+- `image.cpp`: 8-byte header, 768-byte RGB palette, SAGA RLE with literal,
+  repeat, backreference and two-color bitfield commands. Four-row banking,
+  height rounded up to 4; backgrounds flip vertically, masks do not.
+- `sprite.cpp`: u16 count, u32 offsets; i16 x/y, u16 width/height, then
+  skip/copy byte pairs. Flip vertically. Clamp shipped final transparent
+  overruns just as ScummVM does (e.g. resource 834 frames 3 and 5, zero-based).
+- `resource_res.cpp`: seven chapter metadata records (326,517,677,805,968,
+  1165,1271) identify inventory/faces, actor/object strings and cutaways.
+  Cutaways are 8-byte background/animation/cycles/rate records.
+  `introproc_ihnm.cpp` uses resource 39 for intro cutaways.
+- `animation.cpp`/`.h`: magic LE 0x0044, 12-byte header, BE delta-frame
+  commands; IHNM uses 16-bit coordinates. Zero literals retain prior pixels.
+  Previews composite onto mapped background, default 140ms or cutaway rate;
+  cap 120 frames / 12 million pixels, without scripted layers/palette effects.
+- `script.cpp`: module LUT has 16-byte records; strings resource is at +2
+  in SCRIPTS.RES. `saga.cpp::loadStrings`: u16 absolute offsets with 64K wrap,
+  terminated strings and optional end sentinel. Text converted from Windows-1252.
+- `sndres.cpp`: RIFF WAVE speech/effects; `music.cpp`: XMIDI in GM/FM banks.
+  Use host `midi_create_from_xmi` for playback/export.
+- `detection_tables.h`: Spanish CD SCREAM.RES size 78,560,025;
+  PATCH.RE_ is deliberately disabled for this release. Exclude demos and Mac.
+
+Validation: `lua scripts/tests/saga.lua [game folder]` runs synthetic format
+regressions and an optional full resource sweep. Exercise actual exports with
+`./gradlew --offline devcli --args='load /path/to/IHNMAIMS bg_125 /tmp/bg.png'`.
+
+### THE CITY OF LOST CHILDREN (PC)
+
+Data: `/Users/gabriel/Desktop/ags/CITY`; open this folder or `DATAS` directly.
+Implementation: `scripts/engines/city/engine.lua`; regression/full-data scan:
+`lua scripts/tests/city.lua [CITY folder] [catalog|all]`.
+
+Formats were reverse engineered from the supplied PC files; no external decoder
+or ScummVM engine was used. `CITE1.DAT` has 708 resources; `CITEG.DAT` has 15.
+Both start `CRSL 01 00`, a u16le count, then 28-byte directory records:
+u32le stored size, unpacked size, absolute offset, 12-byte NUL-padded filename,
+four flag bytes. All supplied entries have equal stored/unpacked sizes.
+
+- CPA: `CRSL 01 01 00 01`, then 768 RGB VGA values (0..63, scaled by four).
+- CRP: three headerless 640x480 screens; otherwise `CRSL 01 02 01`,
+  u16le width/height, u32le payload size, then byte RLE. High-bit tag packets
+  repeat the next byte `(tag & 127)+2` times; low-bit packets copy `tag+1`
+  bytes. All 84 picture/font streams validate to their exact dimensions.
+- ZBF: version u32le 2; width/height at offsets 16/18, decoded/encoded sizes
+  at 20/24, same RLE from offset 28. All 77 decode to 640x480 depth values.
+- FRM: texture atlas width u16le at 14, height u32le at 16, byte count u32le
+  at 28; pixels begin at 40. Count u16le at 0; 14-byte crop records follow
+  the atlas, with x/y/w/h at record offsets 6/8/10/12. All 38 atlases and
+  672 crop rectangles validate, including two interface banks in CITEG.
+  Crop previews retain stored colors and backgrounds; no 3D scene rendering.
+- TXF/TXE/TXS/TXG/TXI: u32le text count, four-byte scene code, count+1
+  u32le absolute offsets. The first locates count four-byte dialogue names;
+  subsequent offsets locate blocks. Each line begins with u16 horizontal
+  position and u8 style/speaker, then Windows-1252 text; 0x0C introduces another
+  line header and 0 terminates the block. All 95 tables decode.
+- SNW: u32le count and total PCM bytes, then count 16-byte records containing
+  u32le size/absolute offset and two zero fields. All 273 clips validate.
+  Rate/format confirmed in supplied CITE.EXE: file offsets 0x28680..0x28689
+  set Miles sample format/flags to 0/0 (8-bit mono unsigned); 0x28691..0x2869B
+  set playback rate to 0x2B11 (11025). All 265 loose WAVE speech files also
+  explicitly declare PCM mono 8-bit 11025 Hz.
+
+Matching same-stem CPA palettes are used first, then room SCENE.CPA; CIFONT
+uses DEFAULTS.CPA. Missing palette associations fall back to grayscale and
+allow manual override. ANI/SKL/ENV/TMM model/animation data and TSK scripts
+remain bounded metadata/hex previews. MOVS/*.YOP and TRACK2.RAW likewise have
+metadata only. No movie/CD music playback, script execution, 3D animation or
+scene composition is claimed. Other editions/platforms are unverified.
+
+
+### 3D preview formats
+
+Grim 3DO binary/text geometry and hierarchy fields were checked against local
+ScummVM `engines/grim/model.cpp`. The preview assembles the first geoset with
+Z-X-Y Euler rotations and mesh-only pivots; no costume scripts are evaluated.
+545 original PC 3DO entries were scanned, including empty helper objects.
+
+City TMM files have Sony TMD ID `0x41`, relative pointers based at offset 12,
+and 28-byte object descriptors. See the original Sony [File Format 4.7 manual](https://psx.arthus.net/sdk/Psy-Q/DOCS/FileFormat47.pdf).
+All 44 supplied PC meshes use triangle primitive modes 0x34 (textured Gouraud),
+0x35 with flag 1 (unlit), 0x24 (textured flat), or 0x30 (untextured Gouraud).
+Each primitive advances by `4 + input_words * 4`; vertex references are checked
+against the object vertex count. Coordinates are signed 16-bit XYZ with 8-byte
+stride. Character vertices remain in bone space: ENV assignments, SKL hierarchy
+and ANI transformations are not applied, so complete posed characters are not
+claimed by this preview. Textures are not sampled.

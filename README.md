@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-52 game engines are currently supported via Lua scripts — no recompilation needed.
+54 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -31,6 +31,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
+| The City of Lost Children | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
@@ -47,6 +48,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Grim Fandango | 1998 | `grim` | RGB565 Bitmaps, Depth Masks, Textures, Palettes, Speech, Sound, Music, Dialogue, Scene Data | ✅ Working* |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
+| I Have No Mouth, and I Must Scream | 1995 | `saga` | Backgrounds, Masks, Sprite Frames, Animation Previews, Palettes, Text, Speech, Sound, Music (XMI→MIDI), Data | ✅ Working* |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
 | L.A. Law: The Computer Game | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
@@ -79,6 +81,42 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
 
+> \* I Have No Mouth, and I Must Scream supports the full DOS CD resource layout.
+> Open the folder containing `SCREAM.RES` and `SCRIPTS.RES`, with optional
+> `SFX.RES`, `MUSICGM.RES`, `MUSICFM.RES` and `VOICES1.RES` through `VOICES6.RES`
+> plus `VOICESS.RES`. Images decode SAGA RLE, four-row banking and the game's
+> vertical inversion. Sprites are individual stored frames, with scene/chapter
+> palettes where known and the interface palette as a fallback; shared actor
+> sprites may need a manually selected palette. Delta animation previews use
+> scene or cutaway backgrounds, capped at 120 frames and 12 million pixels.
+> Script-controlled timing, simultaneous animation layers and palette effects
+> are not reconstructed. PCM WAVE speech/effects play directly and both GM/FM
+> XMIDI banks export as MIDI (FM instruments use the MIDI player's sounds).
+> Scene, interface, actor/object and script dialogue strings are decoded as
+> Windows-1252. Other resources have size/hex previews. The Spanish CD data was tested;
+> demos, Macintosh resources and compressed replacement audio are unsupported.
+> `PATCH.RE_` is not applied, matching ScummVM's Spanish CD configuration.
+> The verified copy exposes 9,210 resources: 176 backgrounds/screens, 80 masks,
+> 4,834 sprite frames, 231 animations, 177 palettes, 100 text tables, 2,940
+> speech/effect clips, 80 music tracks and 592 data resources.
+
+> \* The City of Lost Children opens the supplied PC `CITY` folder directly,
+> containing `DATAS/CITE1.DAT`, `DATAS/CITEG.DAT`, `LANGS`, `GLOBS` and `MOVS`.
+> No installation or extraction is required. Opening `DATAS` alone also works,
+> with archive resources only. The verified copy exposes 80 pictures, four font
+> sheets, 77 grayscale depth masks, 38 texture atlases and 672 individual stored
+> texture/sprite rectangles, 105 palettes, 273 sound effects, 265 speech WAVs
+> and 95 dialogue tables across English, French, Spanish, German and Italian.
+> Images use matching CPA palettes when available; palettes can be overridden
+> manually, and unassigned images use grayscale. Speech/effects are unsigned
+> 8-bit mono PCM at 11,025 Hz. Dialogue and installer text are decoded as DOS CP850.
+> TMM models have untextured geometry previews. Character parts remain in bone
+> space until SKL/ENV/ANI poses are supported. Scripts, animations, YOP movies and
+> `TRACK2.RAW` CD music have metadata/hex previews. Scene composition, animation,
+> movie playback and CD music decoding are not implemented. Other releases and
+> platforms are unverified. Validate with `lua scripts/tests/city.lua`, or append
+> the game folder and `all` to decode every resource (`catalog` lists counts only).
+
 > \* Grim Fandango supports the original PC LAB archives. Open an installed folder
 > containing `DATA000.LAB` (or another `DATA00x.LAB`), or either CD root containing
 > `GRIMDATA`. No installation is required. To browse all four years together, copy
@@ -92,9 +130,9 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > PCM WAVE, big-endian iMUSE PCM and MCMP/VIMA, including stereo music. Audio
 > plays linearly, without scripted iMUSE loops or transitions. `GRIM.TAB` dialogue
 > is decrypted and displayed as Windows-1252, alongside text and SET scene data.
-> Lua bytecode, costumes, models, keyframes and SNM movies have metadata/hex
-> previews. 3D rendering, scene composition, scripted animation and movie playback
-> are not implemented; Remastered, demos and other platforms are unverified.
+> 3DO models have interactive untextured previews in their stored default pose.
+> Lua bytecode, costumes, keyframes and SNM movies have metadata/hex previews.
+> Scene composition, scripted animation and movie playback are not implemented; Remastered, demos and other platforms are unverified.
 > Validate with `lua scripts/tests/grim.lua`, or append a game folder and an optional
 > resource type (`image`, `sound`, `text`, `palette`) to scan real game data.
 
@@ -495,6 +533,7 @@ adventure-explorer/
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
+│       ├── city/engine.lua       # The City of Lost Children
 │       ├── cobramission/         # Cobra Mission
 │       ├── comet/engine.lua      # Shadow of the Comet
 │       ├── cruise/engine.lua     # Cruise for a Corpse
@@ -520,6 +559,7 @@ adventure-explorer/
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
+│       ├── saga/engine.lua       # I Have No Mouth, and I Must Scream
 │       ├── scumm/engine.lua      # SCUMM V5-V8 (+ scumm_cost/snd/nut/util.lua modules)
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
@@ -575,3 +615,20 @@ adventure-explorer/
 ## License
 
 MIT
+
+
+## 3D model previews
+
+Open Grim Fandango or The City of Lost Children and select a resource in **3D Models**.
+Drag to rotate, scroll or use **+ / −** to zoom, and switch **Wireframe** on to inspect
+polygon edges. **Reset view** restores the camera; **Export PNG** saves the current
+view. The toolbar's **Export → 3D Models** exports default views in bulk.
+
+Grim's binary and text 3DO models use the first geoset and stored hierarchy pose.
+City's TMM meshes display untextured geometry: props are directly viewable, while
+character parts remain in bone space and overlap because SKL/ENV/ANI transforms
+are not yet applied. Textures, skeletal playback and game scene composition are
+not included. Empty Grim helper models display an explanation instead of geometry.
+
+Run decoder/renderer tests with `./gradlew test`. To also scan installed game assets,
+set `GRIM_MODEL_TEST_PATH` and/or `CITY_MODEL_TEST_PATH` to their game folders.

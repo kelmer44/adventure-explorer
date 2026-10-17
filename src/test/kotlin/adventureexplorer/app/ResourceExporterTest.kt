@@ -19,6 +19,18 @@ import javax.sound.sampled.AudioSystem
 class ResourceExporterTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun `model category exports rendered PNG instead of metadata`() = runBlocking {
+        val node=ResourceNode("mesh","mesh","model")
+        val model=ModelData(listOf(ModelVertex(-1.0,0.0,-1.0),ModelVertex(1.0,0.0,-1.0),ModelVertex(0.0,0.0,1.0)),
+            listOf(ModelFace(listOf(0,1,2))),1)
+        assertEquals(listOf(node),ResourceCategories.filter(listOf(node),ExportCategory.MODELS))
+        val result=ResourceExporter({ ResourceData("model",null,"triangle",modelData=model) }).export(listOf(node),temporary.root)
+        assertEquals(1,result.exported)
+        val image=ImageIO.read(File(temporary.root,"mesh.png"))
+        assertEquals(800,image.width)
+        assertTrue(image.getRGB(0,0,800,600,null,0,800).distinct().size>1)
+    }
+
     @Test fun `exports every decoded format within nested tree folders`() = runBlocking {
         val image = BufferedImage(256, 256, BufferedImage.TYPE_INT_RGB)
         image.setRGB(0, 0, 0x123456)

@@ -15,5 +15,6 @@ data class ResourceData(
     val frames: List<BufferedImage>? = null, // non-null for animation resources
     val frameDelayMs: Int = 100,     // milliseconds per frame for animation playback
     val soundData: SoundData? = null, // non-null for sound resources
-    val midiData: MidiData? = null   // non-null for midi resources
+    val midiData: MidiData? = null,  // non-null for midi resources
+    val modelData: ModelData? = null // static 3D geometry
 )

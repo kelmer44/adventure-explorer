@@ -117,6 +117,8 @@ class ScriptManager {
             val description = table.get("description").optjstring(null)
 
             return when (type) {
+                "model" -> ResourceData(type, null, description,
+                    modelData = lua.getModel(table.get("model").checkint()))
                 "image" -> {
                     val imgHandle = table.get("image").checkint()
                     val image = lua.getImage(imgHandle)

@@ -50,6 +50,7 @@ fun main(args: Array<String>) {
                     val ms = System.currentTimeMillis() - t0
                     val info = when {
                         r == null -> "FAILED"
+                        r.modelData != null -> "model ${r.modelData.vertices.size} vertices, ${r.modelData.faces.size} faces"
                         r.frames != null -> "${r.frames!!.size} frames ${r.frames!![0].width}x${r.frames!![0].height}"
                         r.image != null -> "image ${r.image!!.width}x${r.image!!.height}"
                         r.soundData != null -> "sound ${r.soundData!!.durationMs}ms"
@@ -75,6 +76,7 @@ fun main(args: Array<String>) {
             println("type=${r.type} desc=${r.description}")
             val out = File(args[3])
             when {
+                r.modelData != null -> { ImageIO.write(adventureexplorer.models.ModelRenderer.render(r.modelData), "png", out) }
                 r.frames != null -> {
                     val fr = r.frames!!
                     val w = fr.sumOf { it.width }; val h = fr.maxOf { it.height }

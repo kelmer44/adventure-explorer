@@ -3200,3 +3200,98 @@ Scene SET files and credits are readable text. Models, costumes, Lua bytecode,
 keyframes and movies retain archive metadata and bounded hex previews. Scene
 composition, scripted animation, 3D and SNM playback remain outside this engine.
 Remastered, demos, EMI and alternate-platform layouts are unverified.
+
+
+## SAGA: I Have No Mouth, and I Must Scream (DOS CD)
+
+Implemented from the local ScummVM `engines/saga` sources; see the SAGA section
+of `engine-sources.md` for exact source files and field offsets. Verified with
+`/Users/gabriel/Desktop/ags/IHNMAIMS`, the Spanish DOS CD release.
+
+RES archives have no magic header: the final two LE DWORDs are table offset and
+count, with offset/size DWORD pairs immediately before the footer. Validate
+both directory placement and every payload's bounds. Full CD SCREAM.RES has
+1273 entries; scene LUT 1272 links scene descriptors to explicitly typed resources.
+
+Images have dimensions, four reserved bytes, 768 RGB palette bytes and SAGA
+RLE data. The decoder supports short/long literal runs, fills, overlapping
+backreferences and two-color bitfields. Unbank groups of four rows before
+flipping backgrounds vertically. Masks retain their stored vertical orientation.
+Sprite banks start with u16 count and u32 offsets; beware that a one-frame bank
+can resemble a 1x6 background. Validate sprite structure before image heuristics.
+Some resource 834 sprite frames finish with a transparent run beyond the output
+buffer; ScummVM clips these runs, so the explorer does the same.
+
+Animations use LE magic 0x0044 and dimensions but BE commands/coordinates.
+Decode delta frames into a persistent canvas with zero literals transparent.
+Use scene resource lists, chapter cutaways and intro cutaway list 39 to pair
+animations with backgrounds and palettes. Previews are bounded and cannot
+reproduce script scheduling, concurrent layers or palette effects. Sprite banks
+are exposed as individual frames, without inventing animation sequences.
+
+Text tables use absolute u16 offsets, potentially wrapping at 65536, and NUL
+terminators. Chapter metadata supplies actor/object text; module LUT 29 supplies
+script dialogue IDs. PCM RIFF/WAVE audio lives in SFX/VOICES archives; GM/FM music
+is XMIDI and uses the existing host converter. Untyped data gets a hex preview.
+Spanish CD PATCH.RE_ remains unapplied, following its ScummVM detection entry.
+
+---
+
+## City of Lost Children: verified PC CRSL resources (2026-10-17)
+
+The supplied `CITY/DATAS/CITE1.DAT` (708 entries) and `CITEG.DAT` (15) use
+`CRSL 01 00`, u16le count and 28-byte directory records: three u32le values
+(stored size, unpacked size, absolute offset), 12 filename bytes and four flag
+bytes. These flags must not be included in filenames. All supplied entries are
+uncompressed at the archive level; image compression is inside CRP/ZBF.
+
+CRP uses `CRSL 01 02 01`, u16le dimensions at 7/9, u32le compressed size at 11,
+and RLE at 15. Tags below 128 copy tag+1 literal bytes; tags >=128 repeat the
+following byte tag-126 times. In particular, 0x80 is a two-byte run and 0xFF a
+129-byte run. This accounts exactly for every supplied compressed picture/font
+sheet. Three 307200-byte CRPs instead store headerless 640x480 indices.
+CPA has eight header bytes `CRSL 01 01 00 01` followed by 768 RGB VGA components.
+Depth ZBF version 2 stores dimensions at 16/18, decoded byte count at 20,
+compressed byte count at 24 and the same RLE at 28. All 77 are 640x480.
+
+FRM is a texture atlas, not a standalone encoded animation. The width at 14
+(u16le), height at 16 (u32le), byte count at 28 (u32le) describe indexed pixels
+at 40. A u16le rectangle count at 0 describes 14-byte records after the pixels;
+x/y/width/height are at +6/+8/+10/+12. All 672 rectangles fit within 38 atlases.
+Trailing data is retained but its sequence/3D meaning is not interpreted.
+
+Dialogue has a u32le count, four-byte scene code, and count+1 u32le offsets.
+Offset zero points to four-byte names; the rest point to text blocks. Lines
+carry a u16 position and u8 style/speaker before Windows-1252 bytes; form feed starts
+the next header. This yields 95 tables in five languages. Installer TEXTDATA
+files are also plain Windows-1252. SNW directories contain count/data-byte-count,
+then 16-byte size/offset/zero/zero records; all 273 effect clips validate.
+CITE.EXE offsets 0x28680..0x2869B set Miles format 0, flags 0 and rate 11025,
+confirming unsigned 8-bit mono PCM. All 265 loose WAVs declare this same format.
+
+The engine exposes 1955 leaves: 871 images (80 pictures, four font sheets,
+77 depth masks, 38 atlases, 672 crops), 105 palettes, 538 audio clips, and
+441 text/metadata resources. Images use same-stem or room CPA palettes, with
+manual selection and grayscale fallback. No 3D rendering, scene composition,
+model animation, script execution, YOP playback or TRACK2.RAW decoding is
+implemented. Reference: engine-sources.md; regression and full-media decoding
+runner: scripts/tests/city.lua. LuaJ runtime exports verify the host integration.
+
+Validation: synthetic decoder/archive tests and a complete 9,210-resource sweep
+passed, including all 176 backgrounds/screens, 80 masks, 4,834 sprite frames,
+231 bounded animation previews, 177 palettes, 100 text tables, 2,940 PCM WAVE
+clips, 80 XMIDI tracks and 592 metadata previews. All 231 animations reached
+their frame count or documented preview cap without incomplete-stream errors.
+Headless LuaJ exports also verified actual PNG, WAVE, MIDI and text output.
+
+
+### 3D preview implementation follow-up (2026-10-17)
+
+Grim binary/text 3DO previews now assemble stored hierarchy poses with a shared
+software renderer. City TMM previews decode mesh geometry only; character parts
+remain in bone space pending SKL/ENV/ANI interpretation. Both support rotation,
+zoom, wireframe and PNG export. A real-data test scanned 545 Grim entries
+(including four empty helper objects) and all 44 City meshes without unexpected
+decode failures. Parser bounds, hierarchy transforms, depth ordering and PNG
+bulk export are covered by the Kotlin tests. No skeletal playback or texture
+sampling is claimed.
