@@ -10,6 +10,9 @@ import java.io.File
 class ModelIntegrationTest {
     @Test fun `all local Grim models decode and render`() = scan("GRIM_MODEL_TEST_PATH", "grim")
     @Test fun `all local City models decode and render`() = scan("CITY_MODEL_TEST_PATH", "city")
+    @Test fun `all local Alone 1 bodies decode and render`() = scan("AITD1_MODEL_TEST_PATH", "aitd")
+    @Test fun `all local Alone 2 bodies decode and render`() = scan("AITD2_MODEL_TEST_PATH", "aitd")
+    @Test fun `all local Alone 3 bodies decode and render`() = scan("AITD3_MODEL_TEST_PATH", "aitd")
     private fun scan(variable: String, engineId: String) {
         val path=System.getenv(variable)
         assumeTrue("Set $variable to test installed assets", path!=null)
@@ -28,9 +31,9 @@ class ModelIntegrationTest {
                 else if (model!=null) {
                     val image=ModelRenderer.render(model,160,120)
                     assertEquals(160,image.width)
-                    if (node.name in listOf("manny.3do","manny_deathrobe.3do","CIMIET.TMM","BATONP.TMM")) {
+                    if (node.name in listOf("manny.3do","manny_deathrobe.3do","CIMIET.TMM","BATONP.TMM") || (engineId=="aitd" && node.id.endsWith("_0"))) {
                         val out=File("build/model-previews"); out.mkdirs()
-                        javax.imageio.ImageIO.write(ModelRenderer.render(model),"png",File(out,node.name+".png"))
+                        javax.imageio.ImageIO.write(ModelRenderer.render(model),"png",File(out,File(path).name+"_"+node.id.replace('/','_')+".png"))
                     }
                 }
                 mgr.releaseDecodedResources()

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /** City's PC .TMM assets use the relative-pointer Sony TMD layout (ID 0x41).
- * Character vertices are in bone space; SKL/ENV/ANI transforms are not applied.
+ * Character vertices are in bone space; CityModelPose assembles their SKL/ENV/ANI pose.
  */
 object CityModelDecoder {
     fun decode(bytes: ByteArray): ModelData {
@@ -29,8 +29,8 @@ object CityModelDecoder {
             val base=vertices.size
             repeat(nv) { i ->
                 val v=vo+i*8
-                // PSX Y points down; present models with Z up.
-                vertices += ModelVertex(b.getShort(v).toDouble(),b.getShort(v+4).toDouble(),-b.getShort(v+2).toDouble())
+                // City uses Z up, including its skeleton offsets and camera projection.
+                vertices += ModelVertex(b.getShort(v).toDouble(),b.getShort(v+2).toDouble(),b.getShort(v+4).toDouble())
             }
             repeat(nf) {
                 range(p,4)
@@ -45,7 +45,12 @@ object CityModelDecoder {
                     else -> error("Unsupported TMM primitive 0x${mode.toString(16)}")
                 }
                 require(indices.all { it in 0 until nv }) { "Invalid TMM vertex index" }
-                faces += ModelFace(indices.map { it+base },obj)
+                val uvs=if (mode and 4 != 0) List(3) { j ->
+                    val u=bytes[p+4+j*4].toInt() and 255
+                    val v=(bytes[p+5+j*4].toInt() and 255) + ((short(p+10) shr 4) and 1)*256
+                    ModelUv(u.toDouble(),v.toDouble())
+                } else emptyList()
+                faces += ModelFace(indices.map { it+base },obj,uvs=uvs)
                 p+=4+words*4
             }
         }

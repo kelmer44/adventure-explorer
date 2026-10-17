@@ -51,11 +51,12 @@ fun PreviewPane(
     midiData: MidiData?,
     onExportMidi: () -> Unit,
     modelData: adventureexplorer.model.ModelData? = null,
+    onModelTextureSelected: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
         when {
-            modelData != null -> ModelPreview(modelData, description, onExportFrame)
+            modelData != null -> ModelPreview(modelData, description, onExportFrame, paletteOptions, selectedPaletteIndex, onPaletteSelected, onModelTextureSelected)
             frames != null && frames.isNotEmpty() -> AnimationPreview(
                 frames = frames,
                 frameDelayMs = frameDelayMs,

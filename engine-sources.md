@@ -823,6 +823,57 @@ All 44 supplied PC meshes use triangle primitive modes 0x34 (textured Gouraud),
 0x35 with flag 1 (unlit), 0x24 (textured flat), or 0x30 (untextured Gouraud).
 Each primitive advances by `4 + input_words * 4`; vertex references are checked
 against the object vertex count. Coordinates are signed 16-bit XYZ with 8-byte
-stride. Character vertices remain in bone space: ENV assignments, SKL hierarchy
-and ANI transformations are not applied, so complete posed characters are not
-claimed by this preview. Textures are not sampled.
+stride. CityModelPose assembles character bones using SKL's child ranges, ENV's
+per-bone vertex ranges and the first ANI frame. Coordinates are Z up. Primitive
+UV bytes are sampled from FRM atlases, including the texture page's V offset.
+
+
+### Alone in the Dark body previews
+
+Body layouts were checked against FITD [createBodyFromPtr](https://github.com/yaz0r/FITD/blob/master/FitdLib/hqr.cpp)
+and [AnimNuage](https://github.com/yaz0r/FITD/blob/master/FitdLib/renderer.cpp).
+After the flags and collision bounds, skip the length-prefixed scratch area;
+vertices are signed XYZ shorts. Flag 2 introduces a bone order table and
+16-byte bone records (24 bytes with flag 8). References store vertex byte
+offsets divided by six. Original rotation groups affect descendants before
+base-vertex attachment; optimized records rotate only their own groups.
+Y-down coordinates are mapped to the viewer's Z-up convention.
+
+Primitives include lines, variable-length polygons, points and spheres.
+The viewer retains palette colors and lines, and tessellates sphere/point
+markers. It does not execute LISTANIM or reproduce material-specific effects.
+AITD1 uses ITD_RESS[3] as confirmed by AITD1_PALETTE_JEU. Later games take the
+first CAMERA00 palette and apply the reserved first sixteen colors from FITD's
+main.cpp; scene-specific recoloring is not evaluated. Palettes are cached per
+folder to avoid scanning ITD_RESS for every model. PAK body output is capped at
+four MB; vertex ranges, bone order, primitive references and counts are checked.
+The supplied bodies total 542 entries in Alone 1's two banks, 532 in Alone 2,
+and 787 in Alone 3 (three empty helper objects). Jack/TimeGate are unverified.
+
+
+### Model texture and City pose follow-up
+
+Grim 3DO decoders retain material names, UV vertices and per-face UV references.
+The engine resolves named MAT resources (same LAB preferred), loads the first
+stored material image and applies a filename-matched CMP (Manny defaults to suit;
+otherwise a same-name CMP or item palette is preferred). CMP assignment is
+scene-dependent; the viewer exposes a searchable image override and palette menu.
+The orthographic rasterizer interpolates pixel-space UVs per triangle and wraps
+texture coordinates; missing textures retain a solid geometry fallback.
+
+City pose reconstruction was checked against the supplied CITE.EXE: file-offset
+0x324F9 parses ANI blocks; 0x31969 assembles skeleton nodes, and 0x1F3E9 applies
+row-major matrices. ANI starts with an 8-byte header and a four-byte-per-clip table.
+Each clip has a 12-byte header, (frame count + 1) eight-byte root positions, then
+frame count × bone count 20-byte rotation records. Matrices contain nine signed
+12-bit fixed-point coefficients. SKL has a four-byte header and eight-byte nodes
+(XYZ offset, child count, first child). ENV has a 12-byte header and 12-byte records
+(vertex count/start, reserved, normal count/start). Parent rotation transforms
+child offsets; parent × local rotation transforms each assigned vertex. The
+preview omits root movement and uses frame zero of clip zero.
+
+City selects room-prefixed SCTEX.FRM or shared CITEXFR.FRM and offers all FRM atlases
+as overrides. Matching room palettes (101SCENE for shared models) are used by
+default with MIETTE.CPA entries 208–255; an explicitly different palette is honored
+in full. Texture mapping/material effects can depend on game scene state. Runtime
+animation, texture animation and scene composition remain outside the viewer.

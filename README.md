@@ -27,7 +27,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Una Aventura de Cine - Edición Especial | 2003 | `alcachofa` | Backgrounds, Sprites, Animation Previews, Masks, Speech/Sound, Text, Data | ✅ Working* |
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | Amazon: Guardians of Eden | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
-| Alone in the Dark series | 1992-95 | `aitd` | Backgrounds | ✅ Working |
+| Alone in the Dark series | 1992-95 | `aitd` | Backgrounds, 3D Models | ✅ Working |
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
@@ -110,8 +110,8 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > Images use matching CPA palettes when available; palettes can be overridden
 > manually, and unassigned images use grayscale. Speech/effects are unsigned
 > 8-bit mono PCM at 11,025 Hz. Dialogue and installer text are decoded as DOS CP850.
-> TMM models have untextured geometry previews. Character parts remain in bone
-> space until SKL/ENV/ANI poses are supported. Scripts, animations, YOP movies and
+> TMM models have textured previews, with character skeletons assembled from
+> SKL/ENV data and the first stored ANI pose. Scripts, animations, YOP movies and
 > `TRACK2.RAW` CD music have metadata/hex previews. Scene composition, animation,
 > movie playback and CD music decoding are not implemented. Other releases and
 > platforms are unverified. Validate with `lua scripts/tests/city.lua`, or append
@@ -130,7 +130,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > PCM WAVE, big-endian iMUSE PCM and MCMP/VIMA, including stereo music. Audio
 > plays linearly, without scripted iMUSE loops or transitions. `GRIM.TAB` dialogue
 > is decrypted and displayed as Windows-1252, alongside text and SET scene data.
-> 3DO models have interactive untextured previews in their stored default pose.
+> 3DO models have interactive previews with their named MAT textures and default pose.
 > Lua bytecode, costumes, keyframes and SNM movies have metadata/hex previews.
 > Scene composition, scripted animation and movie playback are not implemented; Remastered, demos and other platforms are unverified.
 > Validate with `lua scripts/tests/grim.lua`, or append a game folder and an optional
@@ -619,16 +619,38 @@ MIT
 
 ## 3D model previews
 
-Open Grim Fandango or The City of Lost Children and select a resource in **3D Models**.
+Open Alone in the Dark, Grim Fandango or The City of Lost Children and select a resource in **3D Models**.
 Drag to rotate, scroll or use **+ / −** to zoom, and switch **Wireframe** on to inspect
 polygon edges. **Reset view** restores the camera; **Export PNG** saves the current
-view. The toolbar's **Export → 3D Models** exports default views in bulk.
+view. **Texture** selects automatic materials, an image override or an untextured
+view; its search field finds images by filename. **Palette** recolors the texture.
+Camera rotation and zoom are retained when changing textures or palettes.
+The toolbar's **Export → 3D Models** exports default views in bulk.
 
 Grim's binary and text 3DO models use the first geoset and stored hierarchy pose.
-City's TMM meshes display untextured geometry: props are directly viewable, while
-character parts remain in bone space and overlap because SKL/ENV/ANI transforms
-are not yet applied. Textures, skeletal playback and game scene composition are
+Grim automatically resolves each material's named MAT image. Its default CMP is
+a filename-based best match; use the palette selector for scene-specific colors.
+City assembles SKL/ENV skeletons using the first ANI frame and uses Z-up coordinates.
+Room models select their room's SCTEX atlas; shared models use CITEXFR. The default
+room palette includes Miette's reserved colors. Other releases may need a manual
+texture or palette selection. Skeletal playback and game scene composition are
 not included. Empty Grim helper models display an explanation instead of geometry.
 
 Run decoder/renderer tests with `./gradlew test`. To also scan installed game assets,
 set `GRIM_MODEL_TEST_PATH` and/or `CITY_MODEL_TEST_PATH` to their game folders.
+
+
+Alone in the Dark 1–3 expose `LISTBODY.PAK` and, where present, `LISTBOD2.PAK`
+under **3D Models**. Character bones are assembled in the body's stored pose.
+Polygon colors use Alone 1's game palette or the first camera palette with reserved
+colors for Alone 2/3. Lines are preserved; spheres and point primitives use mesh
+approximations. Animation playback and original game material effects are not
+simulated. All 1,861 supplied body entries were checked, including three empty
+helper objects in Alone 3. Jack and TimeGate model data remain unverified.
+For optional real-data tests set `AITD1_MODEL_TEST_PATH`, `AITD2_MODEL_TEST_PATH`
+and/or `AITD3_MODEL_TEST_PATH` before running `./gradlew test`.
+
+
+After updating these preview scripts, rebuild and restart the app (`./gradlew run`)
+to load the corresponding Kotlin decoders and viewer controls. An older running
+app displays a restart message instead of a missing-function error.

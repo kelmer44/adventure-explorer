@@ -13,11 +13,11 @@ object GrimModelDecoder {
     private data class Mesh(val vertices: List<ModelVertex>, val faces: List<ModelFace>)
     private data class Node(val mesh: Int, val parent: Int, val pos: ModelVertex,
                             val pivot: ModelVertex, val pitch: Double, val yaw: Double, val roll: Double)
-    private val zero = ModelVertex(0.0, 0.0, 0.0)
+    private data class Parsed(val meshes: List<Mesh>, val nodes: List<Node>, val materials: List<String>)
 
     fun decode(bytes: ByteArray): ModelData {
         require(bytes.size <= 16_000_000) { "Model exceeds preview limit" }
-        val (meshes, nodes) = if (bytes.take(4).toByteArray().toString(Charsets.US_ASCII) == "LDOM")
+        val (meshes, nodes, materials) = if (bytes.take(4).toByteArray().toString(Charsets.US_ASCII) == "LDOM")
             binary(bytes) else text(bytes.toString(Charsets.ISO_8859_1))
         require(nodes.size <= 4096) { "Too many hierarchy nodes" }
         require(nodes.all { it.mesh in -1 until meshes.size && it.parent in -1 until nodes.size }) { "Invalid hierarchy index" }
@@ -47,7 +47,7 @@ object GrimModelDecoder {
             count++
         }
         require(vertices.isNotEmpty() && faces.isNotEmpty()) { "Model has no visible geometry" }
-        return ModelData(vertices, faces, count)
+        return ModelData(vertices, faces, count, materialNames = materials)
     }
 
     private fun add(a: ModelVertex, b: ModelVertex) = ModelVertex(a.x+b.x, a.y+b.y, a.z+b.z)
@@ -67,9 +67,12 @@ object GrimModelDecoder {
         fun float(): Double { require(b.remaining() >= 4) { "Truncated 3DO" }; return b.float.toDouble().also { require(it.isFinite()) { "Invalid 3DO float" } } }
         fun vec() = ModelVertex(float(), float(), float())
     }
-    private fun binary(bytes: ByteArray): Pair<List<Mesh>, List<Node>> {
+    private fun binary(bytes: ByteArray): Parsed {
         val r = Reader(bytes); r.skip(4)
-        r.skip(r.count(4096)*32) // material names
+        val materials = List(r.count(4096)) {
+            val name = ByteArray(32); r.b.get(name)
+            name.toString(Charsets.ISO_8859_1).substringBefore('\u0000').lowercase()
+        }
         r.skip(36)
         val geosets = r.count(64)
         require(geosets > 0) { "No geosets" }
@@ -79,16 +82,19 @@ object GrimModelDecoder {
                 r.skip(48)
                 val nv = r.count(); val nt = r.count(); val nf = r.count()
                 val vertices = List(nv) { r.vec() }
-                r.skip(nt*8 + nv*8) // UVs, intensities, reserved
+                val uvs = List(nt) { ModelUv(r.float(), r.float()) }
+                r.skip(nv*8) // intensities, reserved
                 val faces = List(nf) {
                     r.skip(20); val n = r.count(4096); r.skip(4)
                     val tex = r.int(); val mat = r.int()
                     r.skip(40)
                     val indices = List(n) { r.int().also { require(it in vertices.indices) { "Invalid vertex index" } } }
-                    if (tex != 0) r.skip(n*4)
+                    val faceUvs = if (tex != 0) List(n) {
+                        val uv = r.int(); require(uv in uvs.indices) { "Invalid texture vertex index" }; uvs[uv]
+                    } else emptyList()
                     val material = if (mat != 0) r.int() else 0
                     require(n >= 3) { "Invalid polygon" }
-                    ModelFace(indices, material)
+                    ModelFace(indices, material, uvs = faceUvs)
                 }
                 r.skip(nv*12 + 36)
                 Mesh(vertices, faces)
@@ -108,10 +114,10 @@ object GrimModelDecoder {
             Node(mesh, parent, pos, pivot, pitch, yaw, roll)
         }
         r.skip(40); r.vec() // radius, reserved, insertion offset
-        return first to nodes
+        return Parsed(first, nodes, materials)
     }
 
-    private fun text(source: String): Pair<List<Mesh>, List<Node>> {
+    private fun text(source: String): Parsed {
         val lines = source.lineSequence().map { it.substringBefore('#').trim().lowercase().replace(Regex("\\s+"), " ") }.filter { it.isNotEmpty() }.toList()
         var cursor = 0
         fun line(): String { require(cursor < lines.size) { "Truncated text 3DO" }; return lines[cursor++] }
@@ -128,7 +134,7 @@ object GrimModelDecoder {
         fun vec(t: List<String>, start: Int = 0) = ModelVertex(number(t[start]), number(t[start+1]), number(t[start+2]))
         expect("section: header"); expect("3do")
         expect("section: modelresource")
-        repeat(count("materials", 4096)) { line() }
+        val materials = List(count("materials", 4096)) { record(it)[0] }
         expect("section: geometrydef"); expect("radius"); expect("insert offset")
         val geosets = count("geosets", 64); require(geosets > 0)
         var first = emptyList<Mesh>()
@@ -140,14 +146,17 @@ object GrimModelDecoder {
                 expect("geometrymode"); expect("lightingmode"); expect("texturemode")
                 val nv = count("vertices")
                 val vertices = List(nv) { vec(record(it)) }
-                repeat(count("texture vertices")) { record(it) }
+                val uvs = List(count("texture vertices")) { val t=record(it); ModelUv(number(t[0]),number(t[1])) }
                 expect("vertex normals"); repeat(nv) { record(it) }
                 val nf = count("faces")
                 val faces = List(nf) {
                     val t = record(it); val n = t[6].toInt()
                     require(n in 3..4096 && t.size >= 7+n*2) { "Invalid face" }
                     val indices = List(n) { j -> t[7+j*2].toInt().also { require(it in vertices.indices) { "Invalid vertex index" } } }
-                    ModelFace(indices, t[0].toInt())
+                    val faceUvs = if (uvs.isEmpty()) emptyList() else List(n) { j ->
+                        val uv=t[8+j*2].toInt(); require(uv in uvs.indices) { "Invalid texture vertex index" }; uvs[uv]
+                    }
+                    ModelFace(indices, t[0].toInt(), uvs=faceUvs)
                 }
                 expect("face normals"); repeat(nf) { record(it) }
                 Mesh(vertices, faces)
@@ -159,6 +168,6 @@ object GrimModelDecoder {
             val t = record(it)
             Node(t[2].toInt(), t[3].toInt(), vec(t,7), vec(t,13), number(t[10]), number(t[11]), number(t[12]))
         }
-        return first to nodes
+        return Parsed(first, nodes, materials)
     }
 }

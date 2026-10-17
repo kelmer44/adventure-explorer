@@ -159,8 +159,8 @@ are decoded. SNW effects and loose PCM WAVE speech are playable. Dialogue is
 shown in all five stored languages. Use the palette selector to recolor an image.
 Scene sprites use the matching SCENE palette; unassigned images use grayscale.
 
-TMM models have interactive untextured geometry previews. Character parts remain
-in bone space; ANI/SKL/ENV skeleton poses and animation are not applied.
+TMM models have interactive textured previews; characters use their first stored
+ANI pose assembled with SKL/ENV data. Choose a texture atlas and palette when needed.
 FRM crops are stored texture/sprite rectangles, without scene composition.
 YOP movies, TRACK2.RAW CD music, game scripts and scene composition are not decoded.]]
 function engine.detect(path)
@@ -273,18 +273,65 @@ local function build(path)
     return tree
 end
 function engine.get_resources(path) return build(path) end
-function engine.default_palette(path,id)
-    build(path);local e=cache.entries[id];if e and (e.kind=='crp' or e.kind=='atlas' or e.kind=='crop') then return e.pal end
+local function model_names()
+    local names={}
+    for _,e in pairs(cache.entries) do
+        if e.kind~='crop' and e.kind~='pcm' then names[e.name:upper()]=e end
+    end
+    return names
 end
-function engine.load_resource(path,id,paletteId)
+function engine.default_palette(path,id)
+    build(path);local e=cache.entries[id]
+    if e and e.kind=='model' then
+        local names=model_names()
+        local pal=names[(e.name:match('^(%d%d%d)') or '101')..'SCENE.CPA'] or names['MIETTE.CPA']
+        return pal and pal.id
+    end
+    if e and (e.kind=='crp' or e.kind=='atlas' or e.kind=='crop') then return e.pal end
+end
+function engine.load_resource(path,id,paletteId,textureId)
     build(path)
     if id=='city_help' then return {type='text',text=instructions} end
     local e=cache.entries[id];if not e then return nil end
     local desc=e.name
     if e.kind=='model' then
-        local ok,model=pcall(model_decode_city,bytes(e))
-        if not ok then return {type='text',text=desc..'\nUnable to preview model: '..tostring(model),description=desc} end
-        return {type='model',model=model,description=desc..(e.has_skeleton and ' - Untextured character parts in bone space; skeleton poses not applied' or ' - Untextured model geometry')}
+        if not model_decode_city or not model_set_textures or not model_pose_city then
+            return {type='text',text='The running app is older than the model preview scripts. Rebuild and restart Adventure Explorer to open 3D models.',description=desc}
+        end
+        local ok,result=pcall(function()
+            local names=model_names();local model=model_decode_city(bytes(e))
+            local stem=e.name:upper():gsub('%.TMM$','')
+            local pose='Static mesh'
+            if e.has_skeleton then
+                local skl,env,ani=names[stem..'.SKL'],names[stem..'.ENV'],names[stem..'.ANI']
+                assert(skl and env and ani,'Missing character skeleton, envelope or animation')
+                model_pose_city(model,bytes(skl),bytes(env),bytes(ani));pose='First stored character pose'
+            end
+            local options={}
+            for _,entry in pairs(cache.entries) do
+                if entry.kind=='atlas' then options[#options+1]={id=entry.id,name=entry.name,type='image'} end
+            end
+            table.sort(options,function(a,b) return a.name<b.name end)
+            local room=e.name:match('^(%d%d%d)')
+            local automatic=names[(room or '')..'SCTEX.FRM'] or names['CITEXFR.FRM']
+            local chosen=textureId and cache.entries[textureId] or automatic
+            local status='Untextured'
+            if textureId~='__none__' and chosen and chosen.kind=='atlas' then
+                local pal=gray
+                local pe=cache.entries[paletteId or engine.default_palette(path,id) or '']
+                if pe and pe.kind=='palette' then pal=palette(bytes(pe)) end
+                local miette=names['MIETTE.CPA']
+                if miette and (not paletteId or paletteId==engine.default_palette(path,id)) then local fixed=palette(bytes(miette));for i=208*3+1,768 do pal[i]=fixed[i] end end
+                local a=chosen.atlas;local raw=bytes(chosen);local pixels={}
+                for i=1,a.w*a.h do pixels[i]=raw:byte(40+i) end
+                model_set_textures(model,{{slot=0,image=image_create_indexed(a.w,a.h,pixels,pal)}})
+                status=chosen.name
+            end
+            return {type='model',model=model,texture_options=options,texture_id=textureId,
+                description=desc..' - '..pose..'; texture: '..status}
+        end)
+        if ok then return result end
+        return {type='text',text=desc..'\nUnable to preview model: '..tostring(result),description=desc}
     elseif e.kind=='pcm' then
         -- CITE.EXE file offset 0x28680: AIL_set_sample_type(handle,0,0),
         -- then 0x28691: AIL_set_sample_playback_rate(handle,11025).

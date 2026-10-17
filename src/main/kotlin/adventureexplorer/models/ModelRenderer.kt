@@ -28,7 +28,7 @@ object ModelRenderer {
         val pixels = IntArray(width*height) { 0xFF1A1D24.toInt() }
         val depth = DoubleArray(pixels.size) { Double.POSITIVE_INFINITY }
         val colors = intArrayOf(0x86B5D9,0xDBAE82,0x95C3AE,0xB4A1D8,0xD38E95,0xC1C78C)
-        fun triangle(p: DoubleArray, q: DoubleArray, r: DoubleArray, color: Int) {
+        fun triangle(p: DoubleArray, q: DoubleArray, r: DoubleArray, color: Int, texture: BufferedImage? = null, uv: List<adventureexplorer.model.ModelUv> = emptyList()) {
             val area = (q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0])
             if (abs(area)<1e-8) return
             val x0 = floor(minOf(p[0],q[0],r[0])).toInt().coerceIn(0,width-1)
@@ -47,14 +47,38 @@ object ModelRenderer {
                 val w=((q[0]-p[0])*(py-p[1])-(q[1]-p[1])*(px-p[0]))/area
                 if (v>=-1e-8 && w>=-1e-8 && v+w<=1.00000001) {
                     val z=p[2]+v*(q[2]-p[2])+w*(r[2]-p[2]); val i=y*width+x
-                    if (z<depth[i]) { depth[i]=z; pixels[i]=shade }
+                    if (z<depth[i]) {
+                        var pixel=shade
+                        if (texture!=null && uv.size==3) {
+                            val tu=uv[0].u+v*(uv[1].u-uv[0].u)+w*(uv[2].u-uv[0].u)
+                            val tv=uv[0].v+v*(uv[1].v-uv[0].v)+w*(uv[2].v-uv[0].v)
+                            val tx=Math.floorMod(floor(tu).toInt(),texture.width)
+                            val ty=Math.floorMod(floor(tv).toInt(),texture.height)
+                            pixel=texture.getRGB(tx,ty)
+                            if ((pixel ushr 24)<128) continue
+                        }
+                        depth[i]=z; pixels[i]=pixel
+                    }
                 }
             }
         }
         if (!wireframe) for (face in model.faces) {
             val p=points[face.indices[0]]
             for (j in 1 until face.indices.size-1)
-                triangle(p,points[face.indices[j]],points[face.indices[j+1]],colors[Math.floorMod(face.material,colors.size)])
+                triangle(p,points[face.indices[j]],points[face.indices[j+1]],face.rgb ?: colors[Math.floorMod(face.material,colors.size)],
+                    model.textures[face.material],if (face.uvs.size==face.indices.size) listOf(face.uvs[0],face.uvs[j],face.uvs[j+1]) else emptyList())
+        }
+        for (line in model.lines) {
+            val p=points[line.start]; val q=points[line.end]
+            val steps=ceil(max(abs(q[0]-p[0]),abs(q[1]-p[1]))).toInt().coerceIn(1,20000)
+            for (step in 0..steps) {
+                val t=step.toDouble()/steps
+                val x=(p[0]+(q[0]-p[0])*t).roundToInt(); val y=(p[1]+(q[1]-p[1])*t).roundToInt()
+                if (x in 0 until width && y in 0 until height) {
+                    val z=p[2]+(q[2]-p[2])*t; val i=y*width+x
+                    if (wireframe || z<=depth[i]+0.002) { depth[i]=z; pixels[i]=0xFF000000.toInt() or line.rgb }
+                }
+            }
         }
         val image=BufferedImage(width,height,BufferedImage.TYPE_INT_RGB)
         image.setRGB(0,0,width,height,pixels,0,width)

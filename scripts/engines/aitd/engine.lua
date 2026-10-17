@@ -14,6 +14,7 @@
 --   ITD_RESS.PAK  - Title/intro screens, palettes and movie frames
 --   CAMERA00.PAK  - Camera backgrounds for floor 0
 --   CAMERA01.PAK  - Camera backgrounds for floor 1  ... etc.
+--   LISTBODY.PAK / LISTBOD2.PAK - Polygonal 3D characters and objects
 --
 --   Screen / background entries are identified by their decompressed size:
 --     64770 : AITD1 -- 8-bit palette (0-767) + 2 filler bytes + 64000 pixels
@@ -402,7 +403,7 @@ end
 
 -- Read and decompress PAK entry `index` (0-based) from `base_name`.PAK.
 -- Returns decompressed binary string, or nil on failure.
-local function pak_entry(game_path, base_name, index)
+local function pak_entry(game_path, base_name, index, max_size)
     local path = game_path .. "/" .. base_name .. ".PAK"
     local fh   = file_open(path)
     if not fh then return nil end
@@ -443,6 +444,9 @@ local function pak_entry(game_path, base_name, index)
 
     -- Data begins after pakInfo + optional name bytes
     local data_pos = pak_info_pos + 12 + name_off
+    if max_size and (disk_sz>max_size or unpack_sz>max_size or data_pos+disk_sz>file_size(fh)) then
+        file_close(fh);error('Body entry exceeds preview bounds')
+    end
     local raw      = file_read(fh, data_pos, disk_sz)
     file_close(fh)
 
@@ -672,12 +676,64 @@ function engine.get_resources(game_path)
         end
     end
 
+    -- BODY archives store polygonal characters and objects, independently of cameras.
+    local banks={}
+    for _,base in ipairs({'LISTBODY','LISTBOD2'}) do
+        local fh=file_open(game_path..'/'..base..'.PAK')
+        if fh then
+            local n=pak_count(fh);file_close(fh)
+            local children={}
+            for i=0,n-1 do children[#children+1]={id='body_'..base..'_'..i,name='Body '..i,type='model'} end
+            banks[#banks+1]={id='bodies_'..base,name=base..'.PAK',type='category',children=children}
+        end
+    end
+    if #banks>0 then tree[#tree+1]={id='bodies',name='3D Models',type='category',children=banks} end
     return tree
+end
+
+local body_palettes={}
+local function body_palette(path)
+    if body_palettes[path]==nil then
+        local variant=detect_variant(path)
+        local pal
+        if variant=='AITD1' then pal=ress_palette(path)
+        else
+            local camera=pak_entry(path,'CAMERA00',0)
+            if camera and #camera==64768 then pal=pal_read(camera,64001,pal_depth(camera,64001)) end
+            if not pal then pal=gray_pal() end
+            -- The engine reserves the first 16 colors when applying a camera palette.
+            local fixed={0,0,0,63,63,63,12,12,14,48,47,63,35,44,35,42,29,42,42,33,24,63,5,42,
+                18,20,24,49,21,23,21,37,21,21,47,63,63,34,21,43,21,63,63,63,33,63,63,63}
+            for i=1,48 do pal[i]=fixed[i]*4 end
+            if variant=='AITD3' then
+                local third={0,0,0,252,252,252,48,48,56,192,188,252,120,88,60,0,0,0,240,112,16,252,252,252,
+                    72,80,96,196,84,92,84,148,84,84,188,252,252,136,84,172,84,252,252,252,252,252,252,248}
+                for i=1,48 do pal[i]=third[i] end
+            end
+        end
+        body_palettes[path]=pal or false
+    end
+    return body_palettes[path] or nil
 end
 
 function engine.load_resource(game_path, resource_id)
     local variant      = detect_variant(game_path)
     local variant_name = VARIANT_NAMES[variant] or variant
+
+    local bank,index=resource_id:match('^body_(LISTBOD[Y2]+)_(%d+)$')
+    if bank then
+        local label=bank..'['..index..'] - '..variant_name
+        local ok,result=pcall(function()
+            local data=assert(pak_entry(game_path,bank,tonumber(index),4000000),'Cannot read body entry')
+            return {type='model',model=model_decode_aitd(data,body_palette(game_path)),
+                description=label..' - Stored body pose; default palette; spheres approximated as meshes'}
+        end)
+        if ok then return result end
+        if tostring(result):find('Model has no visible geometry',1,true) then
+            return {type='text',text=label..'\nModel has no visible geometry (empty helper object).',description=label}
+        end
+        return {type='text',text=label..'\nUnable to preview: '..tostring(result),description=label}
+    end
 
     -- ---- ITD_RESS entry ----------------------------------------------------
     -- Resource ID format: "ress_N"

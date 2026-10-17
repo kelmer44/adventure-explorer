@@ -1,6 +1,8 @@
 package adventureexplorer.scripting
 
 import adventureexplorer.model.ModelData
+import adventureexplorer.models.AitdModelDecoder
+import adventureexplorer.models.CityModelPose
 import adventureexplorer.models.CityModelDecoder
 import adventureexplorer.models.GrimModelDecoder
 import adventureexplorer.model.SoundData
@@ -82,6 +84,51 @@ class LuaEngine {
                     models[handle] = model
                     return valueOf(handle)
                 }
+            }
+        }
+        globals["model_decode_aitd"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, palette: LuaValue): LuaValue {
+                val ls=data.checkstring()
+                val bytes=ByteArray(ls.length()).also { ls.copyInto(0,it,0,it.size) }
+                val colors=if (palette.istable()) IntArray(256) { i ->
+                    (palette.get(i*3+1).checkint().coerceIn(0,255) shl 16) or
+                    (palette.get(i*3+2).checkint().coerceIn(0,255) shl 8) or
+                    palette.get(i*3+3).checkint().coerceIn(0,255)
+                } else null
+                val model=try { AitdModelDecoder.decode(bytes,colors) }
+                    catch (e: Exception) { throw LuaError(e.message ?: "Invalid AITD model") }
+                val handle=nextModelHandle++
+                models[handle]=model
+                return valueOf(handle)
+            }
+        }
+        globals["model_materials"] = object : OneArgFunction() {
+            override fun call(handle: LuaValue): LuaValue {
+                val model=models[handle.checkint()] ?: return NIL
+                return tableOf().also { t -> model.materialNames.forEachIndexed { i,n -> t[i+1]=valueOf(n) } }
+            }
+        }
+        globals["model_set_textures"] = object : TwoArgFunction() {
+            override fun call(handle: LuaValue, entries: LuaValue): LuaValue {
+                val id=handle.checkint();val model=models[id] ?: return NIL
+                val textures=mutableMapOf<Int,BufferedImage>()
+                val t=entries.checktable()
+                for (i in 1..t.length()) {
+                    val entry=t.get(i);val slot=entry.get("slot").checkint()
+                    val image=images[entry.get("image").checkint()] ?: throw LuaError("Missing texture image")
+                    textures[slot]=image
+                }
+                models[id]=model.copy(textures=textures)
+                return handle
+            }
+        }
+        globals["model_pose_city"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                fun bytes(i: Int): ByteArray { val s=args.checkstring(i);return ByteArray(s.length()).also { s.copyInto(0,it,0,it.size) } }
+                val id=args.checkint(1);val model=models[id] ?: return NIL
+                models[id]=try { CityModelPose.apply(model,bytes(2),bytes(3),bytes(4)) }
+                    catch(e: Exception) { throw LuaError(e.message ?: "Invalid City pose") }
+                return valueOf(id)
             }
         }
         decoder("model_decode_grim", GrimModelDecoder::decode)

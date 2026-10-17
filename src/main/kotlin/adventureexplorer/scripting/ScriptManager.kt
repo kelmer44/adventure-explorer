@@ -11,8 +11,10 @@ import java.io.File
  */
 class ScriptManager {
 
+    @Synchronized
     fun releaseDecodedResources() { engine?.releaseDecodedResources() }
 
+    @Synchronized
     fun close() { engine?.cleanup() }
 
     private var engine: LuaEngine? = null
@@ -23,6 +25,7 @@ class ScriptManager {
      * Try to detect a game from the given folder path.
      * Iterates through all engine scripts and calls detect(path) on each.
      */
+    @Synchronized
     fun detectGame(gamePath: String): DetectionResult? {
         // Clean up any previous engine
         engine?.cleanup()
@@ -89,7 +92,8 @@ class ScriptManager {
      * Load a specific resource by ID using the currently active engine script.
      * @param paletteId optional palette resource ID to override the default palette when rendering
      */
-    fun loadResource(gamePath: String, resourceId: String, paletteId: String? = null): ResourceData? {
+    @Synchronized
+    fun loadResource(gamePath: String, resourceId: String, paletteId: String? = null, textureId: String? = null): ResourceData? {
         val script = currentScript ?: return null
         val lua = engine ?: return null
 
@@ -97,18 +101,10 @@ class ScriptManager {
             val loadFunc = script.get("load_resource")
             if (loadFunc.isnil()) return null
 
-            val result = if (paletteId != null) {
-                loadFunc.call(
-                    LuaValue.valueOf(gamePath),
-                    LuaValue.valueOf(resourceId),
-                    LuaValue.valueOf(paletteId)
-                )
-            } else {
-                loadFunc.call(
-                    LuaValue.valueOf(gamePath),
-                    LuaValue.valueOf(resourceId)
-                )
-            }
+            val arguments=mutableListOf<LuaValue>(LuaValue.valueOf(gamePath),LuaValue.valueOf(resourceId))
+            if (paletteId!=null || textureId!=null) arguments += paletteId?.let { LuaValue.valueOf(it) } ?: LuaValue.NIL
+            if (textureId!=null) arguments += LuaValue.valueOf(textureId)
+            val result=loadFunc.invoke(LuaValue.varargsOf(arguments.toTypedArray())).arg1()
 
             if (result.isnil()) return null
 
@@ -118,7 +114,9 @@ class ScriptManager {
 
             return when (type) {
                 "model" -> ResourceData(type, null, description,
-                    modelData = lua.getModel(table.get("model").checkint()))
+                    modelData = lua.getModel(table.get("model").checkint())?.copy(
+                        textureOptions = table.get("texture_options").takeIf { it.istable() }?.let { parseLuaResourceTable(it.checktable()) } ?: emptyList(),
+                        selectedTextureId = table.get("texture_id").optjstring(null)))
                 "image" -> {
                     val imgHandle = table.get("image").checkint()
                     val image = lua.getImage(imgHandle)
@@ -164,6 +162,7 @@ class ScriptManager {
      * default (optional `default_palette(game_path, resource_id)` hook). Returns null when the
      * script has no opinion.
      */
+    @Synchronized
     fun defaultPaletteFor(gamePath: String, resourceId: String): String? {
         val script = currentScript ?: return null
         return try {

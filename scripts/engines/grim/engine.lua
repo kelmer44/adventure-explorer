@@ -401,8 +401,25 @@ local function metadata(e,s)
     end
     return {type='text',text=table.concat(lines,'\n')}
 end
-function engine.load_resource(path,id,palette_id)
-    if id=='grim/help' then return {type='text',text='Open the original PC game folder containing DATA000.LAB (or other DATA00x.LAB files), or a disc root containing GRIMDATA. Each disc can be browsed separately. To browse all years together, copy the LAB files from both discs into one folder; include GRIM.TAB for dialogue. No installation or cabinet extraction is needed.\n\nBitmaps are RGB565; depth masks use grayscale. Each stored bitmap/texture image is separately accessible. Textures require a manually selected CMP palette (grayscale by default). Audio plays the stored PCM/VIMA stream linearly. Models show untextured default poses. Scene composition, scripted animation, iMUSE transitions and movie playback are not implemented. Remastered and Escape from Monkey Island archives are unverified.'} end
+local function model_palette(c,e)
+    local stem=e.name:lower():gsub('%.3do$','')
+    for _,pid in ipairs(c.palettes) do
+        local pe=c.entries[tonumber(pid:match('(%d+)$'))].entry
+        if pe.name:lower()==stem..'.cmp' then return pid end
+        if (stem:match('^manny') or stem:match('^m_') or stem:match('^md_')) and pe.name:lower()=='suit.cmp' then return pid end
+    end
+    for _,pid in ipairs(c.palettes) do
+        local pe=c.entries[tonumber(pid:match('(%d+)$'))].entry
+        if pe.name:lower()=='item.cmp' then return pid end
+    end
+    return c.palettes[1]
+end
+function engine.default_palette(path,id)
+    local c=catalog(path);local record=c.entries[tonumber(id:match('^grim/(%d+)$'))]
+    if record and record.kind=='model' then return model_palette(c,record.entry) end
+end
+function engine.load_resource(path,id,palette_id,texture_id)
+    if id=='grim/help' then return {type='text',text='Open the original PC game folder containing DATA000.LAB (or other DATA00x.LAB files), or a disc root containing GRIMDATA. Each disc can be browsed separately. To browse all years together, copy the LAB files from both discs into one folder; include GRIM.TAB for dialogue. No installation or cabinet extraction is needed.\n\nBitmaps are RGB565; depth masks use grayscale. Each stored bitmap/texture image is separately accessible. Textures require a manually selected CMP palette (grayscale by default). Audio plays the stored PCM/VIMA stream linearly. Models use their named MAT textures in a default pose; select a CMP palette or texture override. Scene composition, scripted animation, iMUSE transitions and movie playback are not implemented. Remastered and Escape from Monkey Island archives are unverified.'} end
     local c=catalog(path);local record=c.entries[tonumber(id:match('^grim/(%d+)$'))]
     if not record then return nil end
     local e=record.entry
@@ -411,7 +428,37 @@ function engine.load_resource(path,id,palette_id)
         check(e.size<=limit or limit==1024,'Resource exceeds preview size limit')
         local s=read(e.path,e.offset,math.min(e.size,limit));check(s~=nil,'Cannot read resource')
         if record.kind=='model' then
-            return {type='model',model=model_decode_grim(s),description='Default pose; untextured geometry'}
+            if not model_decode_grim or not model_set_textures then
+                return {type='text',text='Rebuild and restart Adventure Explorer to use the model preview scripts.'}
+            end
+            local model=model_decode_grim(s);local materials=model_materials(model)
+            local options,byname={},{}
+            for i,tr in ipairs(c.entries) do
+                if tr.kind=='texture' then
+                    local tid='grim/'..i
+                    options[#options+1]={id=tid,name=tr.entry.name..' [image '..tr.frame..']',type='image'}
+                    local key=tr.entry.name:lower()
+                    if tr.frame==1 and (not byname[key] or tr.entry.path==e.path) then byname[key]=tid end
+                end
+            end
+            table.sort(options,function(a,b) return a.name<b.name end)
+            local textures={};local loaded={};local missing={}
+            local palid=palette_id or model_palette(c,e)
+            if texture_id~='__none__' then
+                for slot,name in ipairs(materials) do
+                    local tid=texture_id or byname[name:lower()]
+                    if tid then
+                        if not loaded[tid] then
+                            local decoded=engine.load_resource(path,tid,palid)
+                            loaded[tid]=decoded and decoded.type=='image' and decoded.image or false
+                        end
+                        if loaded[tid] then textures[#textures+1]={slot=slot-1,image=loaded[tid]} else missing[#missing+1]=name end
+                    else missing[#missing+1]=name end
+                end
+            end
+            model_set_textures(model,textures)
+            return {type='model',model=model,texture_options=options,texture_id=texture_id,
+                description='Default pose; '..#textures..' textured materials'..(#missing>0 and ('; '..#missing..' unavailable materials') or '')}
         elseif record.kind=='bitmap' or record.kind=='depth' then return bitmap(s,record.frame,record.kind=='depth')
         elseif record.kind=='texture' then
             local pal={};for i=0,255 do pal[#pal+1]=i;pal[#pal+1]=i;pal[#pal+1]=i end

@@ -70,10 +70,10 @@ class ModelDecoderTest {
         b.putShort(0).putShort(0).putShort(4096).putShort(0)
         return b.array()
     }
-    @Test fun `City relative pointers primitive indices and axis conversion`() {
+    @Test fun `City relative pointers primitive indices and Z-up coordinates`() {
         val model=CityModelDecoder.decode(city())
         assertEquals(listOf(0,1,2),model.faces.single().indices)
-        assertEquals(10.0,model.vertices[2].z,0.0)
+        assertEquals(-10.0,model.vertices[2].y,0.0)
         val invalid=city(); ByteBuffer.wrap(invalid).order(ByteOrder.LITTLE_ENDIAN).putShort(50,99)
         assertThrows(IllegalArgumentException::class.java) { CityModelDecoder.decode(invalid) }
         assertThrows(IllegalArgumentException::class.java) { CityModelDecoder.decode(city().copyOf(70)) }

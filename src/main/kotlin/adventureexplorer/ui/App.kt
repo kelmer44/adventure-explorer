@@ -177,6 +177,7 @@ fun App() {
                         },
                         midiData = appState.previewMidiData,
                         modelData = appState.previewModelData,
+                        onModelTextureSelected = appState::applyModelTexture,
                         onExportMidi = {
                             scope.launch(Dispatchers.IO) { showExportMidiDialog(appState) }
                         },

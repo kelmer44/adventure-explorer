@@ -142,7 +142,7 @@ class AppState {
         loadPreview(resource)
     }
 
-    private fun loadPreview(node: ResourceNode) {
+    private fun loadPreview(node: ResourceNode, textureId: String? = null, paletteId: String? = null) {
         // Only load non-palette resources as primary view
         if (node.type == "palette") return
 
@@ -156,11 +156,11 @@ class AppState {
         loadJob?.cancel()
         loadJob = ioScope.launch {
             try {
-                val data: ResourceData? = scriptManager.loadResource(path, node.id)
+                val data: ResourceData? = scriptManager.loadResource(path, node.id, paletteId, textureId)
 
                 // Determine default palette companion on IO thread
                 val allPalsCopy = withContext(Dispatchers.Main) { allPalettes.toList() }
-                val companionId = paletteCompanionOf[node.id]
+                val companionId = paletteId ?: paletteCompanionOf[node.id]
                     ?: scriptManager.defaultPaletteFor(path, node.id)
                     ?: derivePaletteId(node.id)
                 val defaultIdx = if (companionId != null)
@@ -233,6 +233,10 @@ class AppState {
      */
     fun applyPalette(index: Int) {
         if (index < 0 || index >= previewPaletteOptions.size) return
+        if (previewModelData != null) {
+            previewNode?.let { loadPreview(it, previewModelData?.selectedTextureId, previewPaletteOptions[index].id) }
+            return
+        }
         val path = gamePath ?: return
         val bgId = currentBgNodeId ?: return
         isLoading = true
@@ -267,6 +271,12 @@ class AppState {
                 withContext(Dispatchers.Main) { isLoading = false }
             }
         }
+    }
+
+    fun applyModelTexture(id: String?) {
+        val node=previewNode ?: return
+        val palette=previewPaletteOptions.getOrNull(selectedPaletteIndex)?.id
+        loadPreview(node,id,palette)
     }
 
     fun exportCurrentAsPng(outputPath: String) {
