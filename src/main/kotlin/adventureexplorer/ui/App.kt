@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.app.AppState
 import adventureexplorer.model.ResourceNode
+import adventureexplorer.model.ExportCategory
+import adventureexplorer.model.ResourceCategories
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,6 +44,8 @@ private val DarkColors = darkColors(
 fun App() {
     val appState = remember { AppState() }
     val scope = rememberCoroutineScope()
+    var exportMenuExpanded by remember { mutableStateOf(false) }
+    val categoryCounts = remember(appState.resourceTree) { ResourceCategories.counts(appState.resourceTree) }
 
     MaterialTheme(colors = DarkColors) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colors.background) {
@@ -83,28 +87,36 @@ fun App() {
 
                     Spacer(Modifier.width(8.dp))
 
-                    Button(
-                        onClick = {
-                            val folder = appState.selectedNode
-                            scope.launch(Dispatchers.IO) { showExportAllDialog(appState, folder) }
-                        },
-                        enabled = appState.canExportFolder,
-                        colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.primary)
-                    ) {
-                        Text("💾  Export selected folder")
-                    }
-
-                    Spacer(Modifier.width(8.dp))
-
-                    // Export the complete resource tree
-                    Button(
-                        onClick = { scope.launch(Dispatchers.IO) { showExportAllDialog(appState) } },
-                        enabled = appState.canExportAll,
-                        colors = ButtonDefaults.buttonColors(
-                            backgroundColor = MaterialTheme.colors.primary
-                        )
-                    ) {
-                        Text(if (appState.isExporting) "Exporting\u2026" else "💾  Export all")
+                    Box {
+                        Button(
+                            onClick = { exportMenuExpanded = true },
+                            enabled = appState.canExportAll,
+                            colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.primary)
+                        ) {
+                            Text(if (appState.isExporting) "Exporting\u2026" else "💾  Export ▾")
+                        }
+                        DropdownMenu(expanded = exportMenuExpanded, onDismissRequest = { exportMenuExpanded = false }) {
+                            DropdownMenuItem(onClick = {
+                                exportMenuExpanded = false
+                                scope.launch(Dispatchers.IO) { showExportAllDialog(appState) }
+                            }, enabled = appState.canExportAll) { Text("Export all") }
+                            DropdownMenuItem(onClick = {
+                                exportMenuExpanded = false
+                                val folder = appState.selectedNode
+                                scope.launch(Dispatchers.IO) { showExportAllDialog(appState, folder) }
+                            }, enabled = appState.canExportFolder) { Text("Export selected folder") }
+                            Divider()
+                            Text("Export by category", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
+                            ExportCategory.values().filter { (categoryCounts[it] ?: 0) > 0 }.forEach { category ->
+                                DropdownMenuItem(onClick = {
+                                    exportMenuExpanded = false
+                                    scope.launch(Dispatchers.IO) { showExportAllDialog(appState, category = category) }
+                                }, enabled = appState.canExportAll) {
+                                    Text("${category.label} (${categoryCounts[category]})")
+                                }
+                            }
+                        }
                     }
 
                     Spacer(Modifier.width(8.dp))
@@ -289,11 +301,15 @@ private suspend fun showOpenFolderDialog(appState: AppState) {
     }
 }
 
-private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode? = null) {
+private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode? = null, category: ExportCategory? = null) {
     val chosen = withContext(Dispatchers.IO) {
         onEdt {
             val chooser = JFileChooser()
-            chooser.dialogTitle = if (folder != null) "Export folder: ${folder.name}" else "Choose folder to export all resources"
+            chooser.dialogTitle = when {
+                folder != null -> "Export folder: ${folder.name}"
+                category != null -> "Export category: ${category.label}"
+                else -> "Choose folder to export all resources"
+            }
             chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
             chooser.isAcceptAllFileFilterUsed = false
             if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION)
@@ -302,7 +318,11 @@ private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode
         }
     } ?: return
     withContext(Dispatchers.Main) {
-        if (folder != null) appState.exportFolder(chosen, folder) else appState.exportAll(chosen)
+        when {
+            folder != null -> appState.exportFolder(chosen, folder)
+            category != null -> appState.exportCategory(chosen, category)
+            else -> appState.exportAll(chosen)
+        }
     }
 }
 

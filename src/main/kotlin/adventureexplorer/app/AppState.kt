@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import adventureexplorer.model.DetectionResult
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
+import adventureexplorer.model.ExportCategory
+import adventureexplorer.model.ResourceCategories
 import adventureexplorer.model.SoundData
 import adventureexplorer.model.MidiData
 import adventureexplorer.scripting.ScriptManager
@@ -288,6 +290,12 @@ class AppState {
     fun exportFolder(outputDir: String, folder: ResourceNode? = selectedNode) {
         if (!canExportAll || folder?.isCategory != true) return
         exportResources(outputDir, listOf(folder))
+    }
+
+    fun exportCategory(outputDir: String, category: ExportCategory) {
+        if (!canExportAll) return
+        val filtered = ResourceCategories.filter(resourceTree, category)
+        if (filtered.isNotEmpty()) exportResources(outputDir, filtered)
     }
 
     fun stopExport() {

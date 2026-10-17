@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-53 game engines are currently supported via Lua scripts — no recompilation needed.
+52 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -354,8 +354,8 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 4. Click on a resource to preview it
 5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
 6. Click **Export PNG** in the image preview to save the current image, or use the animation export buttons to save individual frames or the full sequence
-7. Click **Export all** in the toolbar and choose an output folder to export every resource in the tree's folder hierarchy. Images use PNG, animations get a folder of numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`.
-8. Select a folder in the tree and click **Export selected folder** to export that folder and its descendants into the chosen output directory. During either export, click **Stop export** to stop after the current decode or file write; files already exported are kept.
+7. Open the toolbar's **Export** menu and choose **Export all**, **Export selected folder**, or a category with its resource count. Category exports retain the tree's hierarchy and omit unrelated branches. Background and sprite roles are inferred from engine folder labels and resource names/IDs; animations, images, sounds, MIDI, palettes, text, and data use explicit resource types. Categories can overlap: a sprite animation appears under both Sprites and Animations; Images (all) includes backgrounds and sprite stills.
+8. Choose an output folder. Images use PNG, animations get numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`. Click **Stop export** to stop after the current decode or file write; files already exported are kept.
 
 ## Writing Engine Scripts
 
