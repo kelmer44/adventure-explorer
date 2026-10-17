@@ -3353,3 +3353,39 @@ zoom, wireframe and PNG export. A real-data test scanned 545 Grim entries
 decode failures. Parser bounds, hierarchy transforms, depth ordering and PNG
 bulk export are covered by the Kotlin tests. No skeletal playback or texture
 sampling is claimed.
+
+
+### Bud Tucker in Double Trouble (2026-10-17)
+
+The supplied Spanish DOS data resides at `~/Desktop/TUCKER`, rather than
+`~/Desktop/ags/TUCKER`. Its loose PCX art uses standard 8-bit single-plane RLE
+with bytes-per-line padding and a trailing 0x0C + 768-byte RGB palette. Walk
+masks are separate PATH PCX files; LOC files are stored background tiles.
+PANOBJS sheets have 50 inventory icons on a 10x5 grid, 32x24 pixels each.
+
+SPR files start with a u32le frame count and count four-byte offset slots;
+ScummVM reads only the low 24 bits. Each frame has a 12-byte header (width,
+height at +0/+2, x/y origins at +8/+10), then nonzero literal colors or a zero
+followed by the count of transparent pixels. Runs span rows. The 660 banks
+contain 17,031 stored frames. Animation previews align those origins on a
+shared canvas and batch at 60 frames / four million pixels, with a uniform
+100 ms delay. Room palettes are selected by A/C bank location number;
+unmatched banks use grayscale and permit manual palette selection.
+
+ENC tables subtract 0x80 modulo 256. Their resulting Spanish DOS CP850 bytes
+are converted to UTF-8; authoring comments and script/table syntax remain
+visible. WAV audio is PCM, 8/16-bit mono in the supplied copy. FX298.WAV is
+actually Creative VOC and SAM1571.WAV is a non-RIFF binary; both are retained
+as metadata. Intro FLC/FLR/PIC, RAW and ScummVM compressed audio replacements
+also receive metadata previews. No game scripts, room composition, palette
+animation, actor sequence logic or movie playback are executed.
+
+
+Validation: synthetic PCX stride/RLE, SPR offsets/runs/origins, RIFF chunk and
+CP850 regressions passed. A complete native-Lua scan decoded all 17,498 images,
+756 animation batches, 317 PCX palettes, 4,594 WAV clips, 25 text tables and 54
+metadata resources without failures. The additional grayscale palette and
+manual palette override passed focused checks. Headless LuaJ exports verified
+background and palette PNGs, aligned sprite animations, Spanish UTF-8 text and
+16-bit PCM speech WAV output. The final catalog has 23,245 leaves, including
+the added grayscale palette (318 palettes in total).

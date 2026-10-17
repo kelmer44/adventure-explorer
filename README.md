@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-54 game engines are currently supported via Lua scripts — no recompilation needed.
+55 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -31,6 +31,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
+| Bud Tucker in Double Trouble | 1996 | `tucker` | Background Tiles, Sprite Sheets/Frames, Animation Previews, Inventory Sprites, Masks, Palettes, Speech, Sound, Music, Text, Data | ✅ Working* |
 | The City of Lost Children | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
@@ -80,6 +81,24 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Bud Tucker opens the DOS game folder containing `CTABLE01.ENC` (or
+> `CTABLE01.C`), `BUD_1.PCX` and `PANEL1.PCX`, with `SPRITES`, `FX`, `MUSIC`,
+> `SPEECH`, `AUDIO` and `GRAPHICS` alongside them. The supplied Spanish copy is
+> at `~/Desktop/TUCKER`. PCX images retain their embedded palettes; walk masks
+> use grayscale. SPR frames use a matching room palette where available, with
+> manual palette selection and grayscale fallback. Inventory icons are cropped
+> from `PANOBJS` sheets. Animation previews preserve stored frame origins and
+> split long banks into batches of at most 60 frames / four million pixels,
+> using a uniform 100 ms delay. Backgrounds are individual stored tiles; scene
+> composition, game animation sequences and palette effects are not reconstructed.
+> Encoded tables subtract 0x80 per byte and display as DOS CP850, including
+> Spanish dialogue. PCM WAV speech, effects, music and intro audio play/export;
+> two mislabeled non-WAVE clips, intro movies, raw data and ScummVM compressed
+> audio replacements have metadata previews. The tested copy exposes 23,245
+> resources, including 17,031 stored sprite frames, 756 animation batches and
+> 4,594 WAV clips. Other editions and demos are unverified. Validate with `lua scripts/tests/tucker.lua`, or append the game
+> folder and `all` to decode every resource (`catalog` lists counts only).
 
 > \* Cobra Mission adds **Texts** with seven decoded `CODE.VOL` authoring scripts
 > and 856 individual scene entries in the tested Spanish copy. Scripts preserve
@@ -586,6 +605,7 @@ adventure-explorer/
 │       ├── sky/engine.lua        # Beneath a Steel Sky
 │       ├── sword1/engine.lua     # Broken Sword 1
 │       ├── sword2/engine.lua     # Broken Sword 2
+│       ├── tucker/engine.lua     # Bud Tucker in Double Trouble
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
 │       ├── toltecs/engine.lua     # 3 Skulls of the Toltecs
 │       ├── tot/engine.lua        # Trick or Treat

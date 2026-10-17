@@ -900,3 +900,25 @@ as overrides. Matching room palettes (101SCENE for shared models) are used by
 default with MIETTE.CPA entries 208–255; an explicitly different palette is honored
 in full. Texture mapping/material effects can depend on game scene state. Runtime
 animation, texture animation and scene composition remain outside the viewer.
+
+### BUD TUCKER IN DOUBLE TROUBLE
+
+Source: local `../scummvm-fork/engines/tucker/` (ScummVM).
+- `resource.cpp`: `loadImage` (8-bit PCX), `loadFile` / `decodeData`
+  (ENC is byte minus 0x80), `loadPanObj` (50 32x24 icons), `loadSound`
+  (`FX/FXn.WAV`, `MUSIC/MUSn.WAV`, `SPEECH/SAMnnnn.WAV`).
+- `tucker.cpp`: `drawBackgroundSprites`, `drawSprite` (SPR frame count,
+  one-based table slots, 24-bit offsets; 12-byte frame headers, dimensions
+  at +0/+2 and origins at +8/+10). `copyLocBitmap` preserves PCX palettes;
+  room tiles and walk masks remain separate resources in the explorer.
+- `graphics.cpp`: zero followed by count skips transparent pixels; nonzero
+  bytes are literal palette indices. Runs span rows.
+- `resource.cpp` / `sequences.cpp`: compressed audio and intro formats are
+  exposed as metadata only. Original PCM WAVs are decoded through RIFF chunks.
+
+Verified data: `/Users/gabriel/Desktop/TUCKER` (Spanish DOS, encoded tables).
+Script: `scripts/engines/tucker/engine.lua`; regression/full-data runner:
+`scripts/tests/tucker.lua`. Every stored SPR frame is available, and bounded
+animation batches retain stored origins at 100 ms/frame. Script timing, actor
+sequences, composited rooms, movies and compressed replacement audio are not
+implemented. DOS CP850 conversion preserves the Spanish text.
