@@ -3439,3 +3439,57 @@ scans of the supplied copy successfully loaded all 22,418 image resources,
 text/metadata entries (including the help entry). LuaJ/DevCli detection and
 representative image, animation and audio loads passed. Exported room and
 character PNGs were visually inspected for orientation and palette correctness.
+
+
+## Fable (1996) original PC CD resources
+
+Verified directly against `~/Desktop/ags/FABLE`; offsets below are zero-based,
+all integers little-endian. There is no Fable engine in the local ScummVM tree.
+
+**ARC1:** four-byte magic, u16 entry count, then 22-byte records: name[14]
+(NUL-padded), u32 absolute offset, u32 size. Entries are uncompressed. Bounds
+are checked against the enclosing archive, with no entry path extraction.
+`DECORS.DAT` holds 83 pairs of 256,000-byte raw 640x400 indexed images and
+768-byte RGB VGA palettes (components 0..63, multiplied by four). Five title
+screens are also 640x400; installer BACKGRND.RAW is 320x200.
+
+**SPR:** magic `SPR\0`; u32 at offset 4 is 20; u32 fields at 8 and 12 reference
+subsequent sections; u32 at 16 ends the pixel region and begins a per-frame
+palette-offset table. u16 frame count at 20; absolute u32 frame offsets at 22.
+The final frame ends at the field at 16, not the field at 8: using the latter
+incorrectly includes palette tables. Each frame begins with four u16 values
+(anchor X, anchor Y, width, height). Pixel streams are either width*height raw
+bytes or row RLE: 0 ends the row, 1..127 copies that many literals, 128..255
+skips opcode-128 transparent pixels. The decoder validates all rows, widths
+and exact stream consumption before accepting RLE; only an exact-size payload
+can fall back to raw. Some small RLE frames occupy exactly width*height bytes
+(e.g. MCSPIRIT and bubble effects), so a raw-size shortcut corrupts them.
+
+The palette-offset table has one absolute u32 per frame, zero meaning no patch.
+The common patch format is u16 firstColor, u16 colorCount, then VGA RGB triplets.
+468 nonzero pointers follow this format. Twelve older headerless blocks in
+INSTALL/CLOSEUP and MISC/MISCDAT are unverified; their banks use the shared
+palette. Room-local frames start with the corresponding DECOR palette; global
+actors/UI start with room 101, title art with BOOKPAL, installer with PALETTE.
+A manual override replaces that choice and suppresses patches. Frame-bank
+previews are bounded uniform-speed overviews, not recovered script sequences.
+There are 473 SPR banks containing 11,474 frames in this edition.
+
+**TXT:** `TXT\0`, u32 dialogue-table offset (normally 12), u32 label-table offset.
+A zero label offset denotes a dialogue-only file (245 of 555 TXT resources).
+Each section starts with relative u16 string offsets; the first offset divided
+by two gives the count. Dialogue entries begin with a speaker/control byte and
+end with `$`; labels end with NUL. Display keeps speaker IDs and converts DOS
+CP850 to UTF-8. Five localized extensions TXE/TXF/TXG/TXS/TXI are present.
+Six installer text files bring the displayed text-resource count to 561.
+
+**Audio:** 2,739 SPEECH WAV entries and one installer WAV use RIFF PCM; the
+loose TITLE.WAV is also playable. SOUNDS.DAT holds 61 CMB1 bundles: magic, u16
+count, pairs of u32 relative offset and u32 size. Each child begins with u32 PCM
+byte count, u16 sample rate, u16 bits, u16 channels, then raw samples. All 191
+children were validated: 176 at 22050/8/mono, eight at 22050/16/mono, five at
+11025/8/mono and two at 15000/8/mono. 8-bit samples are unsigned, 16-bit signed.
+
+Fonts FNT, cursor MOU, inventory INV, credits ANM, miscellaneous binary data
+and IMAX movies are listed with bounded metadata/hex previews. They are not
+decoded. No original script execution or animation timing is claimed.

@@ -42,6 +42,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
+| Fable | 1996 | `fable` | Backgrounds, Sprite Frames, Frame Bank Previews, Palettes, Dialogue, Speech, PCM Sound | ✅ Working* |
 | Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
@@ -82,6 +83,23 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Fable opens the original PC CD folder directly, detected by `DECORS.DAT`
+> containing `101DECOR.RAW` and `101DECOR.PAL`. The supplied edition exposes
+> 83 room backgrounds, six title/installer screens, 11,474 sprite frames in
+> 473 banks, 85 palettes, 561 text resources and 2,932 audio clips (including
+> 2,739 speech WAVs and 191 bundled PCM sounds). English, French, German,
+> Spanish and Italian dialogue/object labels decode as DOS CP850. Raw and
+> scanline RLE sprites use the corresponding room palette, or room 101 for
+> shared actors/UI; title and installer art use their own palettes. Verified
+> per-frame palette patches are applied by default. A manual palette selection
+> overrides them. Twelve headerless palette blocks in `CLOSEUP.SPR` and
+> `MISCDAT*.SPR` remain unverified; those banks retain the shared palette.
+> Frame bank previews show up to 60 stored frames / four million pixels at
+> 100 ms per frame. Game animation scripts, placement and scene composition
+> are not reconstructed. Fonts, cursors, inventory sheets, credits ANM and
+> IMX movies have metadata/hex previews only. Movie playback is unavailable.
+> Validate with `lua scripts/tests/fable.lua /path/to/FABLE all`.
 
 > \* Jack Orlando opens the supplied original Spanish PC CD folder containing
 > `DATA.PAK`, `MENU.PAK`, `JACK95.EXE` and `ACTION` directly. No installation or
@@ -597,6 +615,7 @@ adventure-explorer/
 │       ├── darkseed/engine.lua   # Dark Seed
 │       ├── darkseed2/engine.lua  # Dark Seed 2
 │       ├── drascula/engine.lua   # Drascula: The Vampire Strikes Back
+│       ├── fable/engine.lua      # Fable (original PC ARC1 resources)
 │       ├── gob/engine.lua        # Gobliiins series
 │       ├── capstone/engine.lua  # Fievel, Beverly Hillbillies, L.A. Law
 │       ├── gxl/engine.lua        # Capstone Genus GXL (Wayne's World, The Dark Half)

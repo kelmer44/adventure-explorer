@@ -941,3 +941,18 @@ Script: `scripts/engines/orlando/engine.lua`; tests: `scripts/tests/orlando.lua`
 PCM WAVE uses the embedded format; raw SND effects use an explicitly assumed
 15360 Hz mono rate. Compressed SND speech, MUS music, DLG subtitles, fonts and
 AVX movies remain metadata/hex. Original CD only; Director's Cut is unverified.
+
+### FABLE
+
+- Original PC CD resources inspected directly in `~/Desktop/ags/FABLE`.
+- No Fable engine was present in the workspace ScummVM source. ARC1, SPR, TXT
+  and CMB1 support is based on the supplied binary data and corpus validation.
+- `scripts/engines/fable/engine.lua`: bounded ARC1 directories; 640x400 raw
+  backgrounds and 320x200 installer art; raw/scanline RLE SPR frame banks,
+  explicit frame palette patches, VGA palettes, DOS CP850 dialogue and labels,
+  RIFF PCM and CMB1 PCM subresources.
+- `scripts/tests/fable.lua`: malformed directory/SPR/TXT/WAVE fixtures,
+  equal-size RLE regression, palette patches, optional full real-data scan.
+- Movie, font, cursor, inventory and credits formats remain metadata only.
+  Headerless palette blocks in CLOSEUP/MISCDAT banks retain shared palettes;
+  script timing/placement and room composition are not emulated.
