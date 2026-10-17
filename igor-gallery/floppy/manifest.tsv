@@ -1,0 +1,98 @@
+room_bg_1	Part 79	Part 79  |  320x144  |  pal@0x66C9F (768 bytes)  |  img@0x5B89F
+room_bg_2	Part 81	Part 81  |  320x144  |  pal@0x13F074 (624 bytes)  |  img@0x133C74
+room_bg_3	Lecture Hall (Part 78)	Lecture Hall (Part 78)  |  320x144  |  pal@0x16DAED (768 bytes)  |  img@0x1626ED
+room_bg_4	Part 77	Part 77  |  320x144  |  pal@0x186CEE (624 bytes)  |  img@0x17B8EE
+room_bg_5	Plane (Part 76)	Plane (Part 76)  |  320x144  |  pal@0x1B1BF6 (624 bytes)  |  img@0x1A67F6
+room_bg_6	Philip's Room	Philip's Room  |  320x144  |  pal@0x1C5113 (768 bytes)  |  img@0x1B9D13
+room_bg_7	Sailor (Part 74)	Sailor (Part 74)  |  320x144  |  pal@0x1D35BE (624 bytes)  |  img@0x1C81BE
+room_bg_8	Part 80	Part 80  |  320x144  |  pal@0x1E309D (768 bytes)  |  img@0x1D7C9D
+room_bg_9	Policeman (Part 73)	Policeman (Part 73)  |  320x144  |  pal@0x1F13EA (624 bytes)  |  img@0x1E5FEA
+room_bg_10	Island Map (Part 70)	Island Map (Part 70)  |  320x144  |  pal@0x2028E9 (624 bytes)  |  img@0x1F74E9
+room_bg_11	Flower (Part 72)	Flower (Part 72)  |  320x144  |  pal@0x219347 (624 bytes)  |  img@0x20DF47
+room_bg_12	Fireflies (Part 69)	Fireflies (Part 69)  |  320x144  |  pal@0x2406F5 (624 bytes)  |  img@0x2352F5
+room_bg_13	Outside Maze	Outside Maze  |  320x144  |  pal@0x25CFC2 (576 bytes)  |  img@0x251BC2
+room_bg_14	Part 68	Part 68  |  320x144  |  pal@0x280FC9 (624 bytes)  |  img@0x275BC9
+room_bg_15	Part 71	Part 71  |  320x144  |  pal@0x2A034A (624 bytes)  |  img@0x294F4A
+room_bg_16	Maze 66	Maze 66  |  320x144  |  pal@0x2B5D52 (624 bytes)  |  img@0x2AA952
+room_bg_17	Maze 65	Maze 65  |  320x144  |  pal@0x2C6E81 (624 bytes)  |  img@0x2BBA81
+room_bg_18	Maze 64	Maze 64  |  320x144  |  pal@0x2D81A5 (624 bytes)  |  img@0x2CCDA5
+room_bg_19	Maze 63	Maze 63  |  320x144  |  pal@0x2E9DC3 (624 bytes)  |  img@0x2DE9C3
+room_bg_20	Maze 62	Maze 62  |  320x144  |  pal@0x2FB5A3 (624 bytes)  |  img@0x2F01A3
+room_bg_21	Maze 61	Maze 61  |  320x144  |  pal@0x30CD41 (624 bytes)  |  img@0x301941
+room_bg_22	Maze 60	Maze 60  |  320x144  |  pal@0x31E3AF (624 bytes)  |  img@0x312FAF
+room_bg_23	Maze 59	Maze 59  |  320x144  |  pal@0x32F5CE (624 bytes)  |  img@0x3241CE
+room_bg_24	Maze 58	Maze 58  |  320x144  |  pal@0x340B42 (624 bytes)  |  img@0x335742
+room_bg_25	Maze 57	Maze 57  |  320x144  |  pal@0x351A6B (624 bytes)  |  img@0x34666B
+room_bg_26	Maze 56	Maze 56  |  320x144  |  pal@0x363033 (624 bytes)  |  img@0x357C33
+room_bg_27	Maze Entrance	Maze Entrance  |  320x144  |  pal@0x373DD8 (624 bytes)  |  img@0x3689D8
+room_bg_28	Maze 54	Maze 54  |  320x144  |  pal@0x384D6E (624 bytes)  |  img@0x37996E
+room_bg_29	Maze 53	Maze 53  |  320x144  |  pal@0x395C23 (624 bytes)  |  img@0x38A823
+room_bg_30	Maze 52	Maze 52  |  320x144  |  pal@0x3A65D1 (624 bytes)  |  img@0x39B1D1
+room_bg_31	Maze 51	Maze 51  |  320x144  |  pal@0x3B8B00 (624 bytes)  |  img@0x3AD700
+room_bg_32	Physics Classroom	Physics Classroom  |  320x144  |  pal@0x5A7CB8 (624 bytes)  |  img@0x59C8B8
+room_bg_33	Chemistry Classroom	Chemistry Classroom  |  320x144  |  pal@0x5BA9D5 (624 bytes)  |  img@0x5AF5D5
+room_bg_34	Park Right	Park Right  |  320x144  |  pal@0x5DEA84 (624 bytes)  |  img@0x5D3684
+room_bg_35	Park	Park  |  320x144  |  pal@0x5F56C0 (624 bytes)  |  img@0x5EA2C0
+room_bg_36	College Stairs (2nd Floor)	College Stairs (2nd Floor)  |  320x144  |  pal@0x60B21A (624 bytes)  |  img@0x5FFE1A
+room_bg_37	College Stairs (1st Floor)	College Stairs (1st Floor)  |  320x144  |  pal@0x62839D (624 bytes)  |  img@0x61CF9D
+room_bg_38	Corridor (Miss Barrymore)	Corridor (Miss Barrymore)  |  320x144  |  pal@0x63B294 (624 bytes)  |  img@0x62FE94
+room_bg_39	Corridor (Announcement Bd)	Corridor (Announcement Bd)  |  320x144  |  pal@0x64EC68 (624 bytes)  |  img@0x643868
+room_bg_40	Corridor (Sharon & Michael)	Corridor (Sharon & Michael)  |  320x144  |  pal@0x67337A (624 bytes)  |  img@0x667F7A
+room_bg_41	Corridor (Caroline)	Corridor (Caroline)  |  320x144  |  pal@0x68AA7A (624 bytes)  |  img@0x67F67A
+room_bg_42	Corridor (Lucas)	Corridor (Lucas)  |  320x144  |  pal@0x69E08E (624 bytes)  |  img@0x692C8E
+room_bg_43	Corridor (Margaret)	Corridor (Margaret)  |  320x144  |  pal@0x6BC0B5 (624 bytes)  |  img@0x6B0CB5
+room_bg_44	College Lockers	College Lockers  |  320x144  |  pal@0x6D0271 (624 bytes)  |  img@0x6C4E71
+room_bg_45	Women's Toilets	Women's Toilets  |  320x144  |  pal@0x6EC21C (624 bytes)  |  img@0x6E0E1C
+room_bg_46	Men's Toilets	Men's Toilets  |  320x144  |  pal@0x703C47 (624 bytes)  |  img@0x6F8847
+room_bg_47	Outside College	Outside College  |  320x144  |  pal@0x724116 (624 bytes)  |  img@0x718D16
+room_bg_48	Margaret's Room	Margaret's Room  |  320x144  |  pal@0x767BEA (768 bytes)  |  img@0x75C7EA
+room_bg_49	Laboratory	Laboratory  |  320x144  |  pal@0x74C1EE (624 bytes)  |  img@0x740DEE
+room_bg_50	Map	Map  |  320x144  |  pal@0x778074 (624 bytes)  |  img@0x76CC74
+room_bg_51	Tobias' Office	Tobias' Office  |  320x144  |  pal@0x78C788 (624 bytes)  |  img@0x781388
+room_bg_52	Bell Church	Bell Church  |  320x144  |  pal@0x7A78C5 (624 bytes)  |  img@0x79C4C5
+room_bg_53	Church Final Scene (Part 32)	Church Final Scene (Part 32)  |  320x144  |  pal@0x7BE29B (768 bytes)  |  img@0x7B2E9B
+room_bg_54	Church Lock (Part 32)	Church Lock (Part 32)  |  320x144  |  pal@0x7D3FC5 (624 bytes)  |  img@0x7C8BC5
+room_bg_55	Church Control Room	Church Control Room  |  320x144  |  pal@0x7E071E (624 bytes)  |  img@0x7D531E
+room_bg_56	Church Mosaic	Church Mosaic  |  320x144  |  pal@0x7F3E59 (720 bytes)  |  img@0x7E8A59
+room_bg_57	Church Puzzle	Church Puzzle  |  320x144  |  pal@0x81A298 (624 bytes)  |  img@0x80EE98
+room_bg_58	Inside Church	Inside Church  |  320x144  |  pal@0x82C3CF (624 bytes)  |  img@0x820FCF
+room_bg_59	Outside Church	Outside Church  |  320x144  |  pal@0x8521BC (624 bytes)  |  img@0x846DBC
+room_bg_60	Outside Administration Building B	Outside Administration Building B  |  320x144  |  pal@0x86D935 (624 bytes)  |  img@0x862535
+room_bg_61	Outside Administration Building A	Outside Administration Building A  |  320x144  |  pal@0x87B049 (624 bytes)  |  img@0x86FC49
+room_bg_62	Spring Bridge	Spring Bridge  |  320x144  |  pal@0x8A8988 (720 bytes)  |  img@0x89D588
+room_bg_63	Library	Library  |  320x144  |  pal@0x8C7C9C (624 bytes)  |  img@0x8BC89C
+room_bg_64	Admin (Secretary Room)	Admin (Secretary Room)  |  320x144  |  pal@0x8F2FB9 (624 bytes)  |  img@0x8E7BB9
+room_bg_65	Dean Pepper's Office	Dean Pepper's Office  |  320x144  |  pal@0x919F40 (624 bytes)  |  img@0x90EB40
+room_bg_66	Administration Corridor	Administration Corridor  |  320x144  |  pal@0x92FB00 (624 bytes)  |  img@0x924700
+room_bg_67	Outside Student Dormitory	Outside Student Dormitory  |  320x144  |  pal@0x953FCC (624 bytes)  |  img@0x948BCC
+room_bg_68	Student Dormitory Attic	Student Dormitory Attic  |  320x144  |  pal@0x982AFF (624 bytes)  |  img@0x9776FF
+room_bg_69	Student Dormitory	Student Dormitory  |  320x144  |  pal@0x9ABB92 (624 bytes)  |  img@0x9A0792
+room_bg_70	Spring Bridge (Intro)	Spring Bridge (Intro)  |  320x144  |  pal@0x9C54EA (720 bytes)  |  img@0x9BA0EA
+room_bg_71	Spring Rock	Spring Rock  |  320x144  |  pal@0x9D17E4 (720 bytes)  |  img@0x9C63E4
+room_bg_72	Roman Numbers Paper	Roman Numbers Paper  |  320x144  |  pal@0xA7BE39 (624 bytes)  |  img@0xA70A39
+room_bg_73	News Paper	News Paper  |  320x144  |  pal@0xA94173 (624 bytes)  |  img@0xA88D73
+room_bg_74	Photo Harrison Margaret	Photo Harrison Margaret  |  320x144  |  pal@0xA9FCD8 (624 bytes)  |  img@0xA948D8
+room_bg_75	Beach Ending (Part 79)	Beach Ending (Part 79)  |  320x144  |  pal@0x66C9F (768 bytes)  |  img@0x2D982
+room_bg_76	Corridor (Math Classroom)	Corridor (Math Classroom)  |  320x144  |  pal@0x65F8F0 (624 bytes)  |  img@0x6544F0
+scene_1	Telescope - Empty View	Telescope - Empty View
+scene_2	Telescope - Bell Tower	Telescope - Bell Tower
+scene_3	Telescope - Tower Conversation	Telescope - Tower Conversation
+fs_1	Pendulo Studios	Pendulo Studios  |  320x200
+fs_2	Title Screen	Title Screen  |  320x200
+fs_3	Floppy Title Backdrop	Floppy Title Backdrop  |  320x200
+fs_4	Credits 1	Credits 1  |  320x200
+fs_5	Credits 2	Credits 2  |  320x200
+fs_6	Credits 3	Credits 3  |  320x200
+fs_7	Credits 4	Credits 4  |  320x200
+fs_8	Credits 5	Credits 5  |  320x200
+fs_9	Credits 6	Credits 6  |  320x200
+fs_10	Credits 7	Credits 7  |  320x200
+ui_1	Verbs Panel	Verbs Panel  |  320x11
+ui_2	Inventory Panel	Inventory Panel  |  320x30
+ui_3	Objects	Objects  |  30 inventory objects (40x30 each)
+ui_4	Options Menu	Options Menu  |  320x106
+ui_5	Meanwhile	Meanwhile  |  320x144
+ui_6	Minutes Later (Part 78)	Minutes Later (Part 78)  |  320x144
+ui_7	Next Day (Part 78)	Next Day (Part 78)  |  320x144
+ui_8	Time Card (Part 73)	Time Card (Part 73)  |  320x144
+ui_9	Time Card (Part 76)	Time Card (Part 76)  |  320x144
