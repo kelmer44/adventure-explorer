@@ -3389,3 +3389,53 @@ manual palette override passed focused checks. Headless LuaJ exports verified
 background and palette PNGs, aligned sprite animations, Spanish UTF-8 text and
 16-bit PCM speech WAV output. The final catalog has 23,245 leaves, including
 the added grayscale palette (318 palettes in total).
+
+
+### Jack Orlando original PC CD (2026-10-17)
+
+Verified against `~/Desktop/ags/orlando` (Spanish original PC CD). PAK and PA2
+start with a u32le directory byte size, followed by 21-byte entries: u32le
+absolute offset relative to the current archive, u32le stored size, and a
+13-byte NUL-terminated filename. The count is `(directorySize - 4) / 21`.
+Entries may overlap or repeat names; retain each directory slot with a unique
+resource ID. DATA.PAK embeds SETUP.PAK and GLOBAL.PAK, whose offsets are local
+to those embedded archives. Empty top-level archives are ignored.
+
+BM and many numbered extensions store u16le width/height and exactly w*h
+RGB565 words, top to bottom. Packed PBM (and some BM) stores the same dimensions,
+128 RGB565 palette words at byte 4, then tokens at byte 260. An even token is
+one pixel with index token/2. An odd token is followed by a byte repeat count,
+with index floor(token/2). Decode exactly w*h pixels; a few small frames retain
+unused bytes at the end of their allocated buffer. Tiny placeholder PBMs are
+metadata, not images. BMX has a 24-byte header followed by indexed pixels,
+with ERROR.COL or PALETA.COL (768 RGB bytes) from MENU.PAK.
+
+Standalone FLX has a 20-byte header: `FLX\0`, u16le frame count, width, height,
+fps and eight further bytes. Chunks are u16le kind / u32le size including six
+header bytes. Kind 4 replaces the palette (512 RGB565 or 768 RGB bytes).
+Kinds 0/1/2 draw transparent-zero skip/copy packets over the previous frame;
+kind 1 adds a u32le linear start offset. Kind 2 starts with u32le expanded size
+(including eight header bytes), u32le start offset, and byte RLE where FF,
+value, count expands to repeated values. Terminal skip packets and unused
+trailing packets are present. Kind 3 contains placement metadata, not a frame.
+Previews are bounded to 60 frames and eight million pixels; placement is not
+used to compose scenes. FLX packet semantics were cross-checked against the
+NihAV Game Tool AVX decoder (see engine-sources.md).
+
+Authoring script bytes decode as `(262 - byte) modulo 256`, recovering CRLF
+text, bracketed filenames, numeric tables and REC/END sequences. DOS CP850
+conversion preserves Spanish characters. Plain installer text is also exposed.
+Raw SND effects have a 12-byte header (u32le payload length and eight zero
+bytes), followed by unsigned 8-bit PCM. The 15360 Hz mono preview rate is an
+assumption; WAVE clips instead use their embedded PCM format. Most Tnnn.SND
+speech has a different 52-byte compressed header and remains undecoded. MUS,
+DLG, AVX and fonts likewise retain metadata/hex previews. Scripts are not
+executed, and animations are not assembled into game scenes.
+
+Validation: synthetic tests cover RGB565 channels, packed runs and truncation,
+script decryption, archive bounds, PCM RIFF parsing and FLX deltas. Per-category
+scans of the supplied copy successfully loaded all 22,418 image resources,
+62 bounded FLX previews, 822 PCM sound clips, two COL palettes and 9,150
+text/metadata entries (including the help entry). LuaJ/DevCli detection and
+representative image, animation and audio loads passed. Exported room and
+character PNGs were visually inspected for orientation and palette correctness.

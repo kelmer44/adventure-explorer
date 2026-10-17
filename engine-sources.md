@@ -922,3 +922,22 @@ Script: `scripts/engines/tucker/engine.lua`; regression/full-data runner:
 animation batches retain stored origins at 100 ms/frame. Script timing, actor
 sequences, composited rooms, movies and compressed replacement audio are not
 implemented. DOS CP850 conversion preserves the Spanish text.
+
+
+### JACK ORLANDO (original PC)
+
+Primary source: supplied Spanish PC CD data at `~/Desktop/ags/orlando`.
+Archive, BM/PBM, script and raw SND layouts were inspected directly. The engine
+reads PAK/PA2 directories, including nested SETUP/GLOBAL archives in DATA.PAK,
+and loose MOVIES resources without extracting or modifying the game files.
+
+FLX chunk semantics were cross-checked against Konstantin Shishkov's NihAV
+Game Tool 0.6.0 `src/input/decoders/avx.rs`, available from
+https://nihav.org/game_tool.html . The implementation here is an independent
+Lua decoder for standalone FLX, with bounded previews; AVX playback is not included.
+PBM RLE and script byte transforms were derived from the supplied files.
+
+Script: `scripts/engines/orlando/engine.lua`; tests: `scripts/tests/orlando.lua`.
+PCM WAVE uses the embedded format; raw SND effects use an explicitly assumed
+15360 Hz mono rate. Compressed SND speech, MUS music, DLG subtitles, fonts and
+AVX movies remain metadata/hex. Original CD only; Director's Cut is unverified.

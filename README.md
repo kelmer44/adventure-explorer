@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-55 game engines are currently supported via Lua scripts — no recompilation needed.
+56 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -52,6 +52,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | I Have No Mouth, and I Must Scream | 1995 | `saga` | Backgrounds, Masks, Sprite Frames, Animation Previews, Palettes, Text, Speech, Sound, Music (XMI→MIDI), Data | ✅ Working* |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
 | Interspective (Innocent Until Caught, etc.) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
+| Jack Orlando | 1997 | `orlando` | RGB565 Backgrounds, Packed Sprites, FLX Animation Previews, Palettes, Scripts, PCM Sound, Data | ✅ Working* |
 | L.A. Law: The Computer Game | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Les Manley 2: Lost in L.A. | 1991 | `les2` | Scenes, Sprites, Animation Previews, Palettes, Text and Data | ✅ Working* |
@@ -81,6 +82,22 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Jack Orlando opens the supplied original Spanish PC CD folder containing
+> `DATA.PAK`, `MENU.PAK`, `JACK95.EXE` and `ACTION` directly. No installation or
+> extraction is needed; nested installer archives and loose `MOVIES` resources
+> are included. BM backgrounds and numbered sprite files use RGB565; packed
+> PBM sprites retain their own 128-color RGB565 palettes. FLX previews show up
+> to 60 stored frames / eight million pixels at their stored frame rate.
+> Scripts are decrypted and displayed as DOS CP850. PCM WAVE files play/export;
+> raw SND effects use an assumed 15,360 Hz mono rate. Compressed speech, MUS
+> music, DLG subtitles, fonts and AVX movies have metadata/hex previews.
+> Game scripts, scene composition, sprite placement and movie playback are not
+> reconstructed. Director's Cut PHK/PH2 archives and other editions are unverified.
+> All 22,418 images, 62 animation previews, 822 sound clips, two palettes and
+> 9,150 text/metadata entries in the supplied copy passed decoder checks.
+> Validate with `lua scripts/tests/orlando.lua`, or append the game folder and
+> `all` to decode every resource (`catalog` lists counts only).
 
 > \* Bud Tucker opens the DOS game folder containing `CTABLE01.ENC` (or
 > `CTABLE01.C`), `BUD_1.PCX` and `PANEL1.PCX`, with `SPRITES`, `FX`, `MUSIC`,
@@ -593,6 +610,7 @@ adventure-explorer/
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
 │       ├── les2/engine.lua       # Les Manley 2: Lost in L.A.
 │       ├── tesoro/engine.lua     # El Tesoro de la Isla Alcachofa
+│       ├── orlando/engine.lua    # Jack Orlando (original PC)
 │       ├── noctropolis/engine.lua # Noctropolis
 │       ├── pelrock/engine.lua    # Alfred Pelrock
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
