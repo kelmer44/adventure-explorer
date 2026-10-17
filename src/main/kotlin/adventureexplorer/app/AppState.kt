@@ -25,6 +25,8 @@ class AppState {
     var engineDesc       by mutableStateOf<String?>(null)
     var resourceTree     by mutableStateOf<List<ResourceNode>>(emptyList())
     var selectedNode     by mutableStateOf<ResourceNode?>(null)
+    var previewNode      by mutableStateOf<ResourceNode?>(null)
+        private set
     var previewImage     by mutableStateOf<BufferedImage?>(null)
     var previewPaletteImage by mutableStateOf<BufferedImage?>(null)
     var previewPaletteColors by mutableStateOf(256)
@@ -56,6 +58,7 @@ class AppState {
 
     /** Guard against concurrent loads: cancel previous before starting next. */
     private var loadJob: Job? = null
+    private var exportJob: Job? = null
 
     /** id → node */
     private val nodeById = mutableMapOf<String, ResourceNode>()
@@ -88,6 +91,7 @@ class AppState {
         previewSoundData = null
         previewMidiData = null
         selectedNode = null
+        previewNode = null
         nodeById.clear()
         paletteCompanionOf.clear()
         categoryPaletteMap.clear()
@@ -128,20 +132,17 @@ class AppState {
 
     fun selectResource(node: ResourceNode) {
         selectedNode = node
+        // Preview a folder's first resource while retaining the folder selection.
+        val resource = if (node.isCategory) findFirstLeaf(node) ?: return else node
+        loadPreview(resource)
+    }
 
-        // If a category is selected, auto-load the first leaf (non-palette) child
-        if (node.isCategory) {
-            val firstLeaf = findFirstLeaf(node)
-            if (firstLeaf != null) {
-                selectResource(firstLeaf)
-            }
-            return
-        }
-
+    private fun loadPreview(node: ResourceNode) {
         // Only load non-palette resources as primary view
         if (node.type == "palette") return
 
         val path = gamePath ?: return
+        previewNode = node
         currentBgNodeId = node.id
         statusMessage = "Loading ${node.name}\u2026"
         isLoading = true
@@ -276,19 +277,39 @@ class AppState {
     val canExportAll: Boolean
         get() = gamePath != null && resourceTree.isNotEmpty() && !isLoading && !isExporting
 
+    val canExportFolder: Boolean
+        get() = canExportAll && selectedNode?.isCategory == true
+
     fun exportAll(outputDir: String) {
         if (!canExportAll) return
+        exportResources(outputDir, resourceTree)
+    }
+
+    fun exportFolder(outputDir: String, folder: ResourceNode? = selectedNode) {
+        if (!canExportAll || folder?.isCategory != true) return
+        exportResources(outputDir, listOf(folder))
+    }
+
+    fun stopExport() {
+        if (!isExporting) return
+        statusMessage = "Stopping export\u2026"
+        exportJob?.cancel()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun exportResources(outputDir: String, tree: List<ResourceNode>) {
         val path = gamePath ?: return
-        val tree = resourceTree
         val companions = paletteCompanionOf.toMap()
         val palettes = allPalettes.toList()
         isExporting = true
         statusMessage = "Preparing export\u2026"
-        ioScope.launch {
+        // Start immediately so even an early Stop request runs the cleanup below.
+        exportJob = ioScope.launch(start = CoroutineStart.ATOMIC) {
             // Use a separate Lua session so preview interaction cannot affect exported resources.
             val manager = ScriptManager()
             try {
                 check(manager.detectGame(path) != null) { "Could not reopen game for export" }
+                ensureActive()
                 val exporter = ResourceExporter(load = { node ->
                     val paletteId = if (node.type == "image" || node.type == "animation") {
                         val companion = companions[node.id] ?: manager.defaultPaletteFor(path, node.id)
@@ -310,12 +331,17 @@ class AppState {
                     }
                 }
             } catch (e: CancellationException) {
-                throw e
+                withContext(NonCancellable + Dispatchers.Main) {
+                    statusMessage = "Export stopped. Files already exported remain in $outputDir"
+                }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { statusMessage = "Export failed: ${e.message}" }
             } finally {
                 manager.close()
-                withContext(Dispatchers.Main) { isExporting = false }
+                withContext(NonCancellable + Dispatchers.Main) {
+                    isExporting = false
+                    exportJob = null
+                }
             }
         }
     }

@@ -13,6 +13,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.app.AppState
+import adventureexplorer.model.ResourceNode
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,6 +83,19 @@ fun App() {
 
                     Spacer(Modifier.width(8.dp))
 
+                    Button(
+                        onClick = {
+                            val folder = appState.selectedNode
+                            scope.launch(Dispatchers.IO) { showExportAllDialog(appState, folder) }
+                        },
+                        enabled = appState.canExportFolder,
+                        colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.primary)
+                    ) {
+                        Text("💾  Export selected folder")
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
                     // Export the complete resource tree
                     Button(
                         onClick = { scope.launch(Dispatchers.IO) { showExportAllDialog(appState) } },
@@ -94,6 +108,11 @@ fun App() {
                     }
 
                     Spacer(Modifier.width(8.dp))
+
+                    if (appState.isExporting) {
+                        OutlinedButton(onClick = appState::stopExport) { Text("Stop export") }
+                        Spacer(Modifier.width(8.dp))
+                    }
 
                     Spacer(Modifier.width(16.dp))
                 }
@@ -270,11 +289,11 @@ private suspend fun showOpenFolderDialog(appState: AppState) {
     }
 }
 
-private suspend fun showExportAllDialog(appState: AppState) {
+private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode? = null) {
     val chosen = withContext(Dispatchers.IO) {
         onEdt {
             val chooser = JFileChooser()
-            chooser.dialogTitle = "Choose folder to export all resources"
+            chooser.dialogTitle = if (folder != null) "Export folder: ${folder.name}" else "Choose folder to export all resources"
             chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
             chooser.isAcceptAllFileFilterUsed = false
             if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION)
@@ -282,7 +301,9 @@ private suspend fun showExportAllDialog(appState: AppState) {
             else null
         }
     } ?: return
-    withContext(Dispatchers.Main) { appState.exportAll(chosen) }
+    withContext(Dispatchers.Main) {
+        if (folder != null) appState.exportFolder(chosen, folder) else appState.exportAll(chosen)
+    }
 }
 
 private suspend fun showExportDialog(appState: AppState) {
@@ -290,7 +311,7 @@ private suspend fun showExportDialog(appState: AppState) {
         onEdt {
             val chooser = JFileChooser()
             chooser.dialogTitle = "Export as PNG"
-            val defaultName = (appState.selectedNode?.name ?: "export")
+            val defaultName = (appState.previewNode?.name ?: "export")
                 .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
                 .replace(" ", "_")
             chooser.selectedFile = File("$defaultName.png")
@@ -309,7 +330,7 @@ private suspend fun showExportPaletteBinDialog(appState: AppState) {
         onEdt {
             val chooser = JFileChooser()
             chooser.dialogTitle = "Export Palette as .bin"
-            val defaultName = (appState.selectedNode?.name ?: "palette")
+            val defaultName = (appState.previewNode?.name ?: "palette")
                 .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
                 .replace(" ", "_")
             chooser.selectedFile = File("${defaultName}_palette.bin")
@@ -328,7 +349,7 @@ private suspend fun showExportFrameDialog(appState: AppState, frame: java.awt.im
         onEdt {
             val chooser = JFileChooser()
             chooser.dialogTitle = "Export Frame as PNG"
-            val defaultName = (appState.selectedNode?.name ?: "frame")
+            val defaultName = (appState.previewNode?.name ?: "frame")
                 .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
                 .replace(" ", "_")
             chooser.selectedFile = File("${defaultName}_frame.png")

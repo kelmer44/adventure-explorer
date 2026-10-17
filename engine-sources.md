@@ -708,3 +708,22 @@ Opening guidance for Runaway and Una Aventura de Cine is available in each
 engine's resource tree and in README.md. It distinguishes installed/extracted
 folders from installer media, gives preparation commands and dependencies, and
 explains that Runaway's linked loose files still require the original media.
+
+### GRIM FANDANGO
+
+Original PC discs available at `/Volumes/GRIM_DISC_A/GRIMDATA` and
+`/Volumes/GRIM_DISC_B/GRIMDATA`; either disc root also opens directly.
+Reference: workspace `scummvm-fork/engines/grim/`:
+- `lab.cpp`: original LABN v0x10000, 16-byte directory records and string table.
+- `bitmap.cpp`: BM header, per-image dimensions, RGB565, raw codec 0 and codec 3 LZ.
+- `material.cpp`, `colormap.cpp`: MAT texture offsets and indexed data; CMP RGB at 64.
+- `imuse/imuse_mcmp_mgr.cpp`, `imuse/imuse_sndmgr.cpp`: MCMP block tables,
+  embedded WAVE/iMUS headers, PCM byte order and audio format fields.
+- `movie/codecs/vima.cpp`: VIMA/IMA4 predictor tables and mono/stereo decoding.
+- `localize.cpp`: RCNE dialogue XOR 0xDD, Windows-1252 in supplied PC release.
+
+Implementation: `scripts/engines/grim/engine.lua`; regressions and optional
+full-media scans: `scripts/tests/grim.lua`. Stored image states are independent
+leaves rather than inferred animations. Texture palette assignment is manual;
+no 3D renderer, script execution, scene composition, movie playback or iMUSE
+transition simulation. Remastered/EMI and alternate platforms are not claimed.

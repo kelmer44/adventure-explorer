@@ -43,8 +43,10 @@ class ResourceExporter(
                 return
             }
             onProgress(completed + 1, total, node)
+            currentCoroutineContext().ensureActive()
             try {
                 val data = load(node) ?: error("Could not decode resource")
+                currentCoroutineContext().ensureActive()
                 writeResource(node, data, parent)
                 exported++
             } catch (e: kotlinx.coroutines.CancellationException) {

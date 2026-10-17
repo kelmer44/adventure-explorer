@@ -268,6 +268,18 @@ local function pcm(samples)
     for i,v in ipairs(samples) do v=v%65536;out[i]=string.char(v%256,floor(v/256)) end
     return table.concat(out)
 end
+-- Precompute adaptive deltas once, avoiding six bit tests per audio sample.
+local vima_deltas={}
+for idx=0,88 do
+    local row={};vima_deltas[idx+1]=row
+    local width,step=widths[idx+1],steps[idx+1]
+    for val=0,2^(width-1)-2 do
+        local mask=val*2^(7-width);local d=0
+        for bit=5,0,-1 do if floor(mask/2^bit)%2==1 then d=d+floor(step/2^(5-bit)) end end
+        if val~=0 then d=d+floor(step/2^(width-1)) end
+        row[val+1]=d
+    end
+end
 local function vima(s,size)
     check(#s>=4 and size>0 and size<=8192 and size%2==0,'Invalid VIMA block')
     local indices={s:byte(1)};local channels=1;local values={signed(be16(s,2))};local p=4
@@ -304,9 +316,7 @@ local function vima(s,size)
                 local width=widths[idx+1];local code=take(width);local sign=2^(width-1);local val=code%sign
                 if val==sign-1 then word=signed(take(16))
                 else
-                    local mask=val*2^(7-width);local d=0;local step=steps[idx+1]
-                    for bit=5,0,-1 do if floor(mask/2^bit)%2==1 then d=d+floor(step/2^(5-bit)) end end
-                    if val~=0 then d=d+floor(step/2^(width-1)) end
+                    local d=vima_deltas[idx+1][val+1]
                     word=clamp(word+(code>=sign and -d or d),-32768,32767)
                 end
                 output[i*channels+c]=word

@@ -3,6 +3,10 @@ package adventureexplorer.app
 import adventureexplorer.model.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -105,5 +109,38 @@ class ResourceExporterTest {
             assertTrue(released)
             assertTrue(temporary.root.list()!!.isEmpty())
         }
+    }
+
+    @Test fun `stopping during decode keeps completed files and skips remaining resources`() = runBlocking {
+        val loaded = mutableListOf<String>()
+        var released = 0
+        val job = launch {
+            val runningJob = currentCoroutineContext()[Job]!!
+            ResourceExporter({ node ->
+                loaded += node.id
+                if (node.id == "stop") runningJob.cancel()
+                ResourceData("text", null, null, textContent = node.id)
+            }, { released++ }).export(
+                listOf("first", "stop", "last").map { ResourceNode(it, it, "text") }, temporary.root
+            )
+        }
+        job.join()
+        assertTrue(job.isCancelled)
+        assertEquals(listOf("first", "stop"), loaded)
+        assertEquals(2, released)
+        assertEquals("first", File(temporary.root, "first.txt").readText())
+        assertFalse(File(temporary.root, "stop.txt").exists())
+        assertFalse(File(temporary.root, "last.txt").exists())
+    }
+
+    @Test fun `exports selected subtree without siblings or ancestors`() = runBlocking {
+        val selected = ResourceNode("selected", "Selected folder", "category", listOf(
+            ResourceNode("nested", "Nested", "category", listOf(ResourceNode("leaf", "Leaf", "text")))
+        ))
+        val result = ResourceExporter({ ResourceData("text", null, null, textContent = it.id) })
+            .export(listOf(selected), temporary.root)
+        assertEquals(1, result.exported)
+        assertEquals(listOf("Selected folder"), temporary.root.list()!!.toList())
+        assertEquals("leaf", File(temporary.root, "Selected folder/Nested/Leaf.txt").readText())
     }
 }

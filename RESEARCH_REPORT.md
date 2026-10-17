@@ -3160,3 +3160,43 @@ V3 NKR files retain 32 cipher bytes, one embedded XOR key, four garbage bytes,
 then remaining cipher bytes. Remove the five inserted bytes, XOR both cipher
 ranges with that key, then decode Windows-1252. Full dialogue content is exposed.
 Other room/script data and video files retain bounded hex/metadata previews.
+
+
+## Grim Fandango (original PC, October 2026)
+
+Verified the mounted GRIM_DISC_A/B archives using ScummVM's Grim implementation.
+LABN version 0x10000 stores count/string-table size at offsets 8/12, followed by
+16-byte records (name offset, absolute data offset, size, reserved). The NUL
+string table follows all records. Validate all directory and member ranges.
+The engine accepts a LAB directory or a disc root with GRIMDATA, without writing
+to the media; copying both discs' LAB files into one folder permits combined browsing.
+
+BM signature is `BM  F\0\0\0`. Codec, image count, format and bpp are at
+8/16/32/36. Images start at 128, each with its own u32le width/height. Codec 0
+stores raw pixels; codec 3 adds a u32le compressed length and an interleaved LSB
+16-bit control stream with short/long overlapping byte references and explicit
+end marker. RGB is little-endian RGB565; depth images use a grayscale preview.
+All stored states are exposed separately, without inventing animation timing.
+MAT image count is at 12; the field at 76 selects a 0- or 16-byte extra header.
+Image data starts at 60 + count*40 + extra, with a 24-byte per-image header and
+width*height palette indices. CMP contains 768 RGB bytes at offset 64. Texture
+palettes are scene-selected; default previews use grayscale and manual overrides.
+The discs together contain 5,191 decoded image states and 125 CMP palettes.
+
+MCMP starts with a big-endian u16 record count and 9-byte records (codec, decoded
+length, stored length). The first record describes an uncompressed WAVE/iMUS
+header. A u16 codec-string-table length follows the records; audio blocks follow
+the codec names and header. VIMA blocks carry mono or stereo predictors, MSB
+variable-width codes, signed absolute escapes and an IMA4 fallback. Output is
+signed little-endian PCM16. Forty speech/effect/music blocks were compared
+byte-for-byte with the ScummVM C++ decoder. Some speech files end with a four-byte
+VIMA block producing a single 16-bit sample; no speculative two-byte lookahead
+is needed by the Lua decoder. Uncompressed iMUS PCM16 is big-endian and is swapped
+for the host API. Playback concatenates stored blocks without executing iMUSE
+jumps, hooks, regions or fades. RCNE GRIM.TAB uses XOR 0xDD after its four-byte
+signature; supplied PC text uses Windows-1252.
+
+Scene SET files and credits are readable text. Models, costumes, Lua bytecode,
+keyframes and movies retain archive metadata and bounded hex previews. Scene
+composition, scripted animation, 3D and SNM playback remain outside this engine.
+Remastered, demos, EMI and alternate-platform layouts are unverified.

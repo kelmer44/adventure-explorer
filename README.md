@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-52 game engines are currently supported via Lua scripts — no recompilation needed.
+53 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -44,6 +44,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
+| Grim Fandango | 1998 | `grim` | RGB565 Bitmaps, Depth Masks, Textures, Palettes, Speech, Sound, Music, Dialogue, Scene Data | ✅ Working* |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | Igor: Objective Uikokahonia | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
@@ -77,6 +78,25 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Grim Fandango supports the original PC LAB archives. Open an installed folder
+> containing `DATA000.LAB` (or another `DATA00x.LAB`), or either CD root containing
+> `GRIMDATA`. No installation is required. To browse all four years together, copy
+> the LAB files from both discs into one folder, including `GRIM.TAB` for dialogue.
+> Each disc can also be browsed independently. The supplied discs expose 5,191
+> stored bitmap/depth/texture images and 125 CMP palettes in total. BM codecs 0
+> and 3 are decoded as RGB565; ZBM depth images are shown in grayscale. Every
+> stored image state is a separate resource, preserving its own dimensions.
+> MAT textures default to grayscale; choose a CMP palette manually because
+> palette assignment depends on the scene. Speech, effects and music support
+> PCM WAVE, big-endian iMUSE PCM and MCMP/VIMA, including stereo music. Audio
+> plays linearly, without scripted iMUSE loops or transitions. `GRIM.TAB` dialogue
+> is decrypted and displayed as Windows-1252, alongside text and SET scene data.
+> Lua bytecode, costumes, models, keyframes and SNM movies have metadata/hex
+> previews. 3D rendering, scene composition, scripted animation and movie playback
+> are not implemented; Remastered, demos and other platforms are unverified.
+> Validate with `lua scripts/tests/grim.lua`, or append a game folder and an optional
+> resource type (`image`, `sound`, `text`, `palette`) to scan real game data.
 
 > \* Una Aventura de Cine supports the supplied Spanish 2003 CD edition
 > (Alcachofa V3.0). Open the installed folder containing `Fondos`, `Animaciones`,
@@ -335,6 +355,7 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
 6. Click **Export PNG** in the image preview to save the current image, or use the animation export buttons to save individual frames or the full sequence
 7. Click **Export all** in the toolbar and choose an output folder to export every resource in the tree's folder hierarchy. Images use PNG, animations get a folder of numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`.
+8. Select a folder in the tree and click **Export selected folder** to export that folder and its descendants into the chosen output directory. During either export, click **Stop export** to stop after the current decode or file write; files already exported are kept.
 
 ## Writing Engine Scripts
 
