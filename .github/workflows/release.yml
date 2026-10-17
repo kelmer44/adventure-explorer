@@ -110,6 +110,21 @@ jobs:
           path: engine-scripts.zip
           if-no-files-found: error
 
+      # Publish immediately so failed or cancelled app builds cannot leave scripts stale.
+      - name: Update scripts in rolling release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" engine-scripts.zip --clobber
+          else
+            gh release create "$RELEASE_TAG" engine-scripts.zip \
+              --target "$GITHUB_SHA" --title 'Latest' \
+              --notes "Engine scripts from commit $GITHUB_SHA."
+          fi
+
   build:
     name: Build ${{ matrix.name }}
     if: needs.changes.outputs.app_changed == 'true'
@@ -155,7 +170,7 @@ jobs:
   release:
     name: Publish Rolling Release
     needs: [ changes, scripts, build ]
-    if: always() && needs.changes.result == 'success' && needs.scripts.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    if: always() && github.event_name != 'pull_request' && needs.changes.result == 'success' && needs.scripts.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
