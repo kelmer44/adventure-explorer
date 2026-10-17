@@ -502,6 +502,41 @@ OPL/AdLib FM music format:
 
 ---
 
+## 2.3 CODE scripts, IC constants and VOC sound (2026-10-17)
+
+Verified directly against `/Users/gabriel/Desktop/ags/COBRA`, independently of
+external format documentation:
+
+- `CODE.VOL`: seven nonempty entries, 212,627 bytes in total. High bytes decode
+  as `(0x11F - byte) modulo 256`; CR, LF and TAB are unencoded. The result is
+  complete authoring text with English developer comments and Spanish dialogue
+  in this copy. CP850 conversion follows deobfuscation. Preserve custom font
+  placeholders and speaker/variable markup rather than guessing substitutions.
+  Lines starting `*` plus digits delimit 856 scenes. Repeated labels require
+  ordinal scene resource IDs. Complete-script resources also retain preambles.
+- `ICP.VOL`: nine IC entries. Offset 4 is a LE word containing the padded
+  constant section size; add the 16-byte header to get the bytecode start.
+  Walk `u16 VM_address, u16 payload_length, payload` records from offset 16
+  until 0xFFFF padding. Do not treat VM addresses as archive offsets or guess
+  strings inside binary records. Whole NUL-terminated ASCII constants with
+  letters yield 98 strings across eight entries: names, credits, shop signs,
+  lock messages and combat messages. Other constants and bytecode are not
+  decoded, and this is not a compiled-dialogue decompiler.
+- `PCM1.VOL` through `PCM6.VOL`: 155 VOC resources. Every entry has the Creative
+  Voice File signature and a terminator block. Across the archives there are
+  210 type-1 PCM blocks (codec 0), 49 type-3 silence blocks, 15 type-6 loop starts
+  and 15 type-7 loop ends. All are unsigned 8-bit mono. All blocks in each clip
+  use a consistent sample rate; derive it from `1,000,000 / (256 - time_constant)`.
+  Silence length is `u16 + 1` samples. Preview/export emits each loop body once,
+  including infinite loops. Reject truncated blocks, unsupported codecs,
+  unbalanced loops and sample-rate changes.
+
+The Lua regression harness checks synthetic malformed data and can load all
+286 existing images, 871 text resources (7 complete scripts + 856 scenes + 8
+constant tables) and 155 sounds. The optional output directory exports text
+without adding commercial assets to the repository.
+
+
 # Part 3: Sierra SCI Resource Format
 
 ## 3.1 Overview & Version History

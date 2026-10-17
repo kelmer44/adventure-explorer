@@ -98,6 +98,15 @@ https://moddingwiki.shikadi.net/wiki/MegaTech_VOL_Format
 
 games in ags/COBRA
 
+Local data verification (2026-10-17): CODE.VOL has seven encoded authoring
+scripts (856 scene labels in the Spanish copy), decoded with
+`(0x11F - byte) % 256` for high bytes. ICP.VOL has a 16-byte IC header and
+length-delimited constants; 98 whole ASCII strings are exposed, binary
+constants remain undecoded. PCM1-6.VOL contain 155 Creative VOC clips using
+8-bit PCM, silence and loop blocks. Runtime previews loop bodies once.
+The existing 286 GC images remain available. See RESEARCH_REPORT.md section
+2.3 and scripts/tests/cobramission.lua for the verified layouts and regressions.
+
 ### CURSE OF ENCHANTIA
 No ScummVM engine exists for this game, so the format was reverse engineered from
 the data itself. Both image containers are Rob Northen Compression (ProPack)

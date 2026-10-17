@@ -32,7 +32,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
 | The City of Lost Children | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
-| Cobra Mission | 1992 | `cobramission` | Backgrounds | ✅ Working |
+| Cobra Mission | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
@@ -80,6 +80,17 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* Cobra Mission adds **Texts** with seven decoded `CODE.VOL` authoring scripts
+> and 856 individual scene entries in the tested Spanish copy. Scripts preserve
+> speaker tags, variables, author comments and original custom-font placeholders
+> (such as `{`, `~`, `r` and `w`); DOS accented bytes are converted to Unicode.
+> `ICP.VOL` also exposes 98 plain-text constants (names, messages and credits)
+> across eight entries. **Sounds** contains all 155 Creative VOC clips from
+> `PCM1.VOL` through `PCM6.VOL`, including silence and multiple audio blocks;
+> loop bodies play once for preview/export. Existing 286 GC images remain
+> available. Compiled IC bytecode, raw tile/sprite banks, map layouts and OPL
+> music are not decoded. Counts may vary by edition.
 
 > \* I Have No Mouth, and I Must Scream supports the full DOS CD resource layout.
 > Open the folder containing `SCREAM.RES` and `SCRIPTS.RES`, with optional

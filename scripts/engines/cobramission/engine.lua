@@ -33,7 +33,7 @@ local engine = {}
 engine.name        = "Cobra Mission"
 engine.id          = "cobramission"
 engine.description = "Cobra Mission (MegaTech, 1992)"
-engine.version     = "1.1"
+engine.version     = "1.2"
 
 -- ============================================================================
 -- Binary helpers
@@ -461,6 +461,130 @@ local function decode_gc(data)
     return image_create_indexed(used_w, used_h, pixels, pal)
 end
 
+-- CODE.VOL contains authoring scripts, not the compiled IC bytecode.
+-- Printable source bytes are stored as (0x11F - character) modulo 256;
+-- tabs and CR/LF are stored literally. Keep speaker/variable/font markup.
+local function decode_script(data)
+    return (data:gsub("[\128-\255]", function(c)
+        return string.char((287 - c:byte()) % 256)
+    end))
+end
+
+local DOS_HIGH = {
+    "Ç", "ü", "é", "â", "ä", "à", "å", "ç", "ê", "ë", "è", "ï", "î", "ì", "Ä", "Å",
+    "É", "æ", "Æ", "ô", "ö", "ò", "û", "ù", "ÿ", "Ö", "Ü", "ø", "£", "Ø", "×", "ƒ",
+    "á", "í", "ó", "ú", "ñ", "Ñ", "ª", "º", "¿", "®", "¬", "½", "¼", "¡", "«", "»",
+    "░", "▒", "▓", "│", "┤", "Á", "Â", "À", "©", "╣", "║", "╗", "╝", "¢", "¥", "┐",
+    "└", "┴", "┬", "├", "─", "┼", "ã", "Ã", "╚", "╔", "╩", "╦", "╠", "═", "╬", "¤",
+    "ð", "Ð", "Ê", "Ë", "È", "ı", "Í", "Î", "Ï", "┘", "┌", "█", "▄", "¦", "Ì", "▀",
+    "Ó", "ß", "Ô", "Ò", "õ", "Õ", "µ", "þ", "Þ", "Ú", "Û", "Ù", "ý", "Ý", "¯", "´",
+    "­", "±", "‗", "¾", "¶", "§", "÷", "¸", "°", "¨", "·", "¹", "³", "²", "■", " ",
+}
+
+local function dos_text(data)
+    return (data:gsub("[\128-\255]", function(c)
+        return DOS_HIGH[c:byte() - 127]
+    end):gsub("\r\n", "\n"):gsub("\r", "\n"))
+end
+
+local function script_scenes(data)
+    local scenes, current = {}, nil
+    local text = dos_text(decode_script(data))
+    for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+        if line:match("^%*%d+") then
+            current = { name = line, lines = {} }
+            scenes[#scenes + 1] = current
+        end
+        if current then current.lines[#current.lines + 1] = line end
+    end
+    return scenes, text
+end
+
+-- IC header + constant records + padded bytecode. The word at offset 4
+-- is the padded constant section size, excluding the 16-byte header.
+-- Records are u16 virtual_address, u16 length, length bytes. Many hold
+-- bytecode fragments, so only accept complete NUL-terminated ASCII strings.
+local function compiled_strings(data)
+    if #data < 16 or data:sub(1, 2) ~= "IC" then return nil end
+    local limit = 16 + u16le(data, 5)
+    if limit > #data then return nil end
+    local lines, p = {}, 17
+    while p + 3 <= limit do
+        local addr, size = u16le(data, p), u16le(data, p + 2)
+        if addr == 65535 then break end
+        if size < 1 or p + 3 + size > limit then return nil end
+        local value = data:sub(p + 4, p + 3 + size)
+        if value:sub(-1) == "\0" then
+            value = value:sub(1, -2)
+            if value:find("%a") and not value:find("[^\9\10\13\32-\126]") then
+                lines[#lines + 1] = string.format("[%04X] %s", addr, dos_text(value))
+            end
+        end
+        p = p + 4 + size
+    end
+    return table.concat(lines, "\n\n"), #lines
+end
+
+-- Preview each VOC loop body once, including infinite effect loops. Keep
+-- every sound-data block and silence block, with a single consistent rate.
+local function decode_voc(data)
+    if #data < 26 or data:sub(1, 20) ~= "Creative Voice File\26" then return nil end
+    local p = u16le(data, 21) + 1
+    if p < 27 or p > #data then return nil end
+    local parts, rate, samples, loops = {}, nil, 0, 0
+    local function set_rate(tc)
+        local r = math.floor(1000000 / (256 - tc) + 0.5)
+        if rate and rate ~= r then return false end
+        rate = r
+        return true
+    end
+    while p <= #data do
+        local kind = u8(data, p)
+        if kind == 0 then
+            if samples == 0 or loops ~= 0 then return nil end
+            return table.concat(parts), rate
+        end
+        if p + 3 > #data then return nil end
+        local size = u8(data, p+1) + u8(data, p+2)*256 + u8(data, p+3)*65536
+        local first, last = p + 4, p + 3 + size
+        if last > #data then return nil end
+        if kind == 1 then
+            if size < 2 or u8(data, first+1) ~= 0 or not set_rate(u8(data, first)) then return nil end
+            parts[#parts + 1] = data:sub(first+2, last)
+            samples = samples + size - 2
+        elseif kind == 2 then
+            if not rate then return nil end
+            parts[#parts + 1] = data:sub(first, last)
+            samples = samples + size
+        elseif kind == 3 then
+            if size ~= 3 or not set_rate(u8(data, first+2)) then return nil end
+            local n = u16le(data, first) + 1
+            parts[#parts + 1] = string.rep(string.char(128), n)
+            samples = samples + n
+        elseif kind == 6 then
+            if size ~= 2 then return nil end
+            loops = loops + 1
+        elseif kind == 7 then
+            if size ~= 0 or loops == 0 then return nil end
+            loops = loops - 1
+        elseif kind ~= 4 and kind ~= 5 then
+            return nil -- unsupported codec/format; do not mislabel as PCM
+        end
+        p = last + 1
+    end
+    return nil -- truncated: no terminator
+end
+
+local function read_entry(game_path, vn, idx)
+    local fh = file_open(game_path .. "/" .. vn .. ".VOL")
+    if not fh then return nil end
+    local ents = vol_entries(fh, file_size(fh))
+    local e = ents[idx + 1]
+    local data = e and file_read(fh, e.offset, e.size) or nil
+    file_close(fh)
+    return data
+end
+
 -- ============================================================================
 -- Public engine API
 -- ============================================================================
@@ -506,10 +630,56 @@ function engine.get_resources(game_path)
             end
         end
     end
+    local scripts, compiled, sounds = {}, {}, {}
+    for _, vn in ipairs({"CODE", "ICP", "PCM1", "PCM2", "PCM3", "PCM4", "PCM5", "PCM6"}) do
+        local fh = file_open(game_path .. "/" .. vn .. ".VOL")
+        if fh then
+            local ents = vol_entries(fh, file_size(fh))
+            local kids = {}
+            for i, e in ipairs(ents) do
+                local id = vn .. ":" .. (i - 1)
+                if vn == "CODE" then
+                    local data = file_read(fh, e.offset, e.size)
+                    local scenes = script_scenes(data)
+                    local leaves = {{id=id, name="Complete script", type="text"}}
+                    for j, scene in ipairs(scenes) do
+                        leaves[#leaves+1] = {id=id .. ":scene:" .. j, name=scene.name, type="text"}
+                    end
+                    scripts[#scripts+1] = {id="code_" .. (i-1),
+                        name="Script " .. (i-1), type="category", children=leaves}
+                elseif vn == "ICP" then
+                    local text, count = compiled_strings(file_read(fh, e.offset, e.size))
+                    if text and count > 0 then
+                        compiled[#compiled+1] = {id=id,
+                            name=string.format("Entry %d (%d strings)", i-1, count), type="text"}
+                    end
+                else
+                    kids[#kids+1] = {id=id, name="Clip " .. (i-1), type="sound"}
+                end
+            end
+            file_close(fh)
+            if #kids > 0 then sounds[#sounds+1] = {id="vol_" .. vn,
+                name=vn .. ".VOL", type="category", children=kids} end
+        end
+    end
+    local texts = {}
+    if #scripts > 0 then texts[#texts+1] = {id="code_scripts", name="CODE.VOL - Dialogue scripts",
+        type="category", children=scripts} end
+    if #compiled > 0 then texts[#texts+1] = {id="icp_strings", name="ICP.VOL - Names, messages and credits",
+        type="category", children=compiled} end
+    if #texts > 0 then tree[#tree+1] = {id="texts", name="Texts", type="category", children=texts} end
+    if #sounds > 0 then tree[#tree+1] = {id="sounds", name="Sounds", type="category", children=sounds} end
     return tree
 end
 
 function engine.load_resource(game_path, resource_id)
+    local script_idx, scene_idx = resource_id:match("^CODE:(%d+):scene:(%d+)$")
+    if script_idx then
+        local data = read_entry(game_path, "CODE", tonumber(script_idx))
+        local scenes = data and script_scenes(data)
+        local scene = scenes and scenes[tonumber(scene_idx)]
+        return {type="text", text=scene and table.concat(scene.lines, "\n") or "Scene not found"}
+    end
     local vn, idx_s = resource_id:match("^(.+):(%d+)$")
     if not vn then
         return { type = "text", text = "Unknown resource: " .. resource_id }
@@ -533,6 +703,19 @@ function engine.load_resource(game_path, resource_id)
     file_close(fh)
     if not data then
         return { type = "text", text = "Failed to read entry data" }
+    end
+
+    if vn == "CODE" then
+        return {type="text", text=dos_text(decode_script(data)),
+            description="Decoded authoring script; original speaker, variable and font markup preserved"}
+    elseif vn == "ICP" then
+        local text = compiled_strings(data)
+        return {type="text", text=text or "Invalid IC constant table"}
+    elseif vn:match("^PCM[1-6]$") then
+        local pcm, rate = decode_voc(data)
+        if pcm then return {type="sound", sound=sound_create_pcm(rate, 8, 1, false, pcm),
+            description=string.format("%s.VOL clip %d - %d Hz, 8-bit mono; loop bodies played once", vn, idx, rate)} end
+        return {type="text", text="Unsupported or invalid VOC sound"}
     end
 
     local img = decode_gc(data)
