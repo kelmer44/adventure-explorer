@@ -144,6 +144,20 @@ the data itself plus the Dark Seed II resource tooling:
 https://github.com/DrMcCoy/darkseed2-tools (see `src/unglue.cpp` for the Glue
 archive container and its LZ variant).
 
+Sprite decoding is verified against the supplied game data: `biCompression=2`
+BMPs store `u16 xOffset, u16 length, byte pixels[length]` rows in BMP order
+(positive height: bottom-up; negative: top-down).
+They carry no palette. Scene sprites borrow the `RMdddd.BMP` palette in their
+archive; shared walking/action/UI archives use `FIX.PAL` (256 BGR0 quads).
+Embedded BMP palettes take precedence unless explicitly overridden. The first
+95 nonzero colour indices are shared in sampled room palettes, while higher
+indices vary by room; `FIX.PAL` alone is insufficient for scene objects.
+The tree lists 83 backgrounds, 3660 sprite/UI frames, 83 thumbnails and 84
+palettes, without decompression during listing. Frames are individual images,
+with index 0 filling cropped areas; no animation sequencing is inferred.
+Regression/optional full-data validation: `lua scripts/tests/darkseed2.lua
+[/path/to/DARKSEED2]`.
+
 game in ags/DARKSEED2
 
 ### CAPSTONE (Genus GXL)

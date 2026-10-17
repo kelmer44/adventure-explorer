@@ -24,14 +24,16 @@
 --
 -- Backgrounds: one 640x480 8bpp uncompressed Windows BMP per room, named
 -- RM%04d.BMP. All 3826 BMP names in the game are unique, so they are used
--- directly as resource ids.
+-- directly as resource ids. Other BMPs are sprites/UI or room thumbnails.
+-- Palette-less sprites use the room BMP in the same archive, or FIX.PAL
+-- (256 BGR0 quads) for the shared walking/action/inventory archives.
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Dark Seed 2"
 engine.id          = "darkseed2"
 engine.description = "Dark Seed 2 (1995, Cyberdreams)"
-engine.version     = "1.0"
+engine.version     = "1.1"
 
 local GFILE_NAME = "GFILE.HDR"
 
@@ -93,8 +95,13 @@ end
 
 -- GFILE.HDR --------------------------------------------------------------
 
+-- Cache the active game's index for frame browsing; rebuilding the tree refreshes it.
+local index_cache
 -- Returns archives (index -> name) and dir (UPPERCASE name -> entry) or nil.
 local function parse_gfile(game_path)
+    if index_cache and index_cache.path == game_path then
+        return index_cache.archives, index_cache.dir
+    end
     local data = read_whole(game_path .. "/" .. GFILE_NAME)
     if not data or #data < 4 then return nil end
 
@@ -125,6 +132,7 @@ local function parse_gfile(game_path)
         end
     end
 
+    index_cache = { path = game_path, archives = archives, dir = dir }
     return archives, dir
 end
 
@@ -133,8 +141,9 @@ end
 -- The reference tool decides by trying to read a resource list straight out of
 -- the file: if that fails the archive is compressed.
 local function glue_is_compressed(data, fsize)
+    if fsize < 2 then return true end
     local nres = u16le(data, 1)
-    if fsize <= nres * 22 then return true end
+    if 2 + nres * 20 > fsize then return true end
 
     local pos = 3
     for _ = 1, nres do
@@ -238,28 +247,29 @@ local function glue_decompress(data, dsize)
     return out, total
 end
 
--- Read one resource out of its archive. Returns a 1-based byte getter.
+-- Keep only the most recently used archive; sprite browsing otherwise repeats
+-- the same decompression for every frame. The game path is part of the key.
+local archive_cache
 local function read_resource(game_path, archives, entry)
     local path = game_path .. "/" .. archives[entry.archive]
-    local raw = read_whole(path)
-    if not raw then return nil, "cannot read " .. path end
-
-    local size = entry.size
-    if size <= 0 then return nil, "empty resource" end
-
-    if not glue_is_compressed(raw, #raw) then
-        local offset = entry.offset
-        if offset + size > #raw then return nil, "resource past end of archive" end
-        local blob = raw:sub(offset + 1, offset + size)
-        return function(i) return blob:byte(i) end, size
+    if not archive_cache or archive_cache.path ~= path then
+        local raw = read_whole(path)
+        if not raw then return nil, "cannot read " .. path end
+        local data, size = raw, #raw
+        if glue_is_compressed(raw, #raw) then
+            data, size = glue_decompress(raw, #raw)
+            if not data then return nil, size end
+        end
+        archive_cache = { path = path, data = data, size = size }
     end
-
-    local out, outsize = glue_decompress(raw, #raw)
-    if not out then return nil, outsize end
-
+    local data, size = archive_cache.data, archive_cache.size
     local base = entry.offset
-    if base + size > outsize then return nil, "resource past end of decompressed data" end
-    return function(i) return out[base + i] end, size
+    if entry.size <= 0 then return nil, "empty resource" end
+    if base + entry.size > size then return nil, "resource past end of archive" end
+    if type(data) == "string" then
+        return function(i) if i >= 1 and i <= entry.size then return data:byte(base + i) end end, entry.size
+    end
+    return function(i) if i >= 1 and i <= entry.size then return data[base + i] end end, entry.size
 end
 
 -- BMP -------------------------------------------------------------------
@@ -281,7 +291,7 @@ end
 
 -- Decode a Windows BMP through the 1-based getter `getb`. Returns an image
 -- table, or nil plus a message.
-local function decode_bmp(getb, len, label)
+local function decode_bmp(getb, len, label, override_palette, palette_label)
     if len < 54 then return nil, "BMP too small" end
     if getb(1) ~= 0x42 or getb(2) ~= 0x4D then
         return nil, "not a Windows BMP"
@@ -289,7 +299,8 @@ local function decode_bmp(getb, len, label)
 
     local dataoff = u32at(getb, 11)
     local hdrsize = u32at(getb, 15)
-    if hdrsize < 40 then return nil, "unsupported BMP header" end
+    if hdrsize < 40 or 14 + hdrsize > len then return nil, "unsupported BMP header" end
+    if dataoff < 14 + hdrsize or dataoff > len then return nil, "invalid BMP data offset" end
 
     local w = i32at(getb, 19)
     local h = i32at(getb, 23)
@@ -323,8 +334,8 @@ local function decode_bmp(getb, len, label)
 
     -- Only palette quads that lie before the pixel data actually exist. A
     -- data offset of 54 (a bare 40-byte header) means the image carries no
-    -- palette at all - the game keeps one shared palette for its scanline
-    -- images - so clamp to what is really there instead of reading colour
+    -- palette at all, so use a room/shared palette supplied by the caller.
+    -- Clamp to what is really there instead of reading colour
     -- tables out of the pixel stream.
     local avail = math.floor((dataoff - 14 - hdrsize) / 4)
     if avail < 0 then avail = 0 end
@@ -341,21 +352,28 @@ local function decode_bmp(getb, len, label)
     end
     for i = ncol * 3 + 1, 768 do palette[i] = 0 end
 
+    if override_palette then palette = override_palette end
     local pixels = {}
+    -- Cropped scanlines leave holes; give them a deterministic background index.
+    for i = 1, w * h do pixels[i] = 0 end
     local rowbytes = math.floor((w * bpp / 8 + 3) / 4) * 4
 
     if scanlines then
         -- Each row is stored as u16 xOffset, u16 length, then `length` raw
-        -- 8bpp pixels, top-down and unpadded. Rows may be cropped, which is how
+        -- 8bpp pixels, unpadded, in BMP row order (bottom-up for h > 0).
+        -- Rows may be cropped, which is how
         -- the game's perspective-projected sprites are stored.
         local pos = dataoff + 1
         local total = w * h
         for y = 0, h - 1 do
-            if pos + 3 > len then break end
+            if pos + 3 > len then return nil, "truncated scanline header" end
             local xoff = u16at(getb, pos)
             local rlen = u16at(getb, pos + 2)
             pos = pos + 4
-            local dst = y * w + xoff
+            if xoff + rlen > w then return nil, "scanline exceeds image width" end
+            if pos + rlen - 1 > len then return nil, "truncated scanline pixels" end
+            local row = topdown and y or (h - 1 - y)
+            local dst = row * w + xoff
             for i = 0, rlen - 1 do
                 local k = dst + i + 1
                 if k >= 1 and k <= total then pixels[k] = getb(pos + i) end
@@ -363,6 +381,7 @@ local function decode_bmp(getb, len, label)
             pos = pos + rlen
         end
     else
+        if dataoff + rowbytes * h > len then return nil, "truncated BMP pixels" end
         for y = 0, h - 1 do
             -- BMP stores rows bottom-up unless the height is negative
             local row = topdown and y or (h - 1 - y)
@@ -387,7 +406,9 @@ local function decode_bmp(getb, len, label)
 
     local img = image_create_indexed(w, h, pixels, palette)
     local colors
-    if ncol == 0 then
+    if override_palette then
+        colors = "palette: " .. (palette_label or "selected")
+    elseif ncol == 0 then
         colors = "no palette in file"
     else
         colors = ncol .. " colors"
@@ -402,6 +423,54 @@ local function decode_bmp(getb, len, label)
     }
 end
 
+-- Palette sources are named resources, so the UI can also select room colours
+-- manually for shared assets. FIX.PAL is BGR0, exactly like a BMP colour table.
+local palette_cache = { path = nil, values = {} }
+local function load_palette(game_path, archives, dir, name)
+    if palette_cache.path ~= game_path then
+        palette_cache = { path = game_path, values = {} }
+    end
+    if palette_cache.values[name] then return palette_cache.values[name] end
+    local entry = dir[name]
+    if not entry then return nil, "palette resource not found: " .. name end
+    local getb, len = read_resource(game_path, archives, entry)
+    if not getb then return nil, len end
+    local start, count = 1, 256
+    if name:match("%.BMP$") then
+        if len < 54 or getb(1) ~= 66 or getb(2) ~= 77 then return nil, "invalid palette BMP" end
+        local hdrsize, dataoff = u32at(getb, 15), u32at(getb, 11)
+        if hdrsize < 40 or dataoff > len then return nil, "invalid palette header" end
+        start = 15 + hdrsize
+        count = math.min(256, math.floor((dataoff - 14 - hdrsize) / 4))
+        local used = u32at(getb, 47)
+        if used > 0 then count = math.min(count, used) end
+    end
+    if count <= 0 or start + count * 4 - 1 > len then return nil, "missing palette data" end
+    local palette = {}
+    for i = 0, 255 do
+        local o = start + i * 4
+        palette[i * 3 + 1] = i < count and getb(o + 2) or 0
+        palette[i * 3 + 2] = i < count and getb(o + 1) or 0
+        palette[i * 3 + 3] = i < count and getb(o) or 0
+    end
+    palette_cache.values[name] = palette
+    return palette
+end
+
+local function room_palettes(dir)
+    local rooms = {}
+    for name, entry in pairs(dir) do
+        if name:match(BG_NAME) then rooms[entry.archive] = name end
+    end
+    return rooms
+end
+
+local function palette_for(dir, rooms, name)
+    local entry = dir[name]
+    if not entry then return nil end
+    return rooms[entry.archive] or (dir["FIX.PAL"] and "FIX.PAL")
+end
+
 -- Engine interface -------------------------------------------------------
 
 function engine.detect(game_path)
@@ -411,72 +480,112 @@ function engine.detect(game_path)
 end
 
 function engine.get_resources(game_path)
-    local resources = {}
+    index_cache, archive_cache = nil, nil
+    palette_cache = { path = game_path, values = {} }
     local archives, dir = parse_gfile(game_path)
-    if not archives then return resources end
-
-    -- Backgrounds are the per-room RM%04d.BMP images. Their 640x480 size is
-    -- only known once the archive is decompressed, so the cheap name pattern
-    -- is used to build the tree; load_resource verifies the geometry.
-    local names = {}
-    for name in pairs(dir) do
-        if name:match(BG_NAME) then names[#names + 1] = name end
-    end
+    if not archives then return {} end
+    local rooms = room_palettes(dir)
+    local backgrounds = { id = "backgrounds", name = "Backgrounds", type = "category", children = {} }
+    local sprites = { id = "sprites", name = "Sprites and UI", type = "category", children = {} }
+    local maps = { id = "thumbnails", name = "Room Thumbnails", type = "category", children = {} }
+    local palettes = { id = "palettes", name = "Palettes", type = "category", children = {} }
+    local groups, names, sprite_count = {}, {}, 0
+    for name in pairs(dir) do names[#names + 1] = name end
     table.sort(names)
-
-    if #names > 0 then
-        local cat = {
-            id = "backgrounds",
-            name = string.format("Backgrounds (%d)", #names),
-            type = "category",
-            children = {}
-        }
-        for _, name in ipairs(names) do
-            local base = name:match("^(.+)%.BMP$")
-            cat.children[#cat.children + 1] = {
-                id = "bg_" .. base,
-                name = base,
-                type = "image"
-            }
+    for _, name in ipairs(names) do
+        local base = name:match("^(.+)%.BMP$")
+        if base then
+            local node = { id = "img_" .. base, name = base, type = "image" }
+            if name:match(BG_NAME) then
+                node.id = "bg_" .. base
+                backgrounds.children[#backgrounds.children + 1] = node
+                palettes.children[#palettes.children + 1] = { id = "pal_" .. name, name = base, type = "palette" }
+            elseif name:match("^RMAP%d%d%d%d%.BMP$") then
+                maps.children[#maps.children + 1] = node
+            else
+                node.id = "spr_" .. base
+                local a = dir[name].archive
+                if not groups[a] then
+                    local label = rooms[a] and ("Room " .. rooms[a]:match("^RM(%d+)")) or archives[a]:upper()
+                    groups[a] = { id = "sprites_" .. a, name = label, type = "category", children = {} }
+                end
+                local children = groups[a].children
+                children[#children + 1] = node
+                sprite_count = sprite_count + 1
+            end
+        elseif name:match("%.PAL$") then
+            palettes.children[#palettes.children + 1] = { id = "pal_" .. name, name = name, type = "palette" }
         end
-        resources[#resources + 1] = cat
     end
-
+    for a = 1, #archives do
+        if groups[a] then sprites.children[#sprites.children + 1] = groups[a] end
+    end
+    sprites.name = string.format("Sprites and UI (%d)", sprite_count)
+    local resources = {}
+    for _, cat in ipairs({ backgrounds, sprites, maps, palettes }) do
+        if #cat.children > 0 then
+            if cat ~= sprites then cat.name = string.format("%s (%d)", cat.name, #cat.children) end
+            resources[#resources + 1] = cat
+        end
+    end
     return resources
 end
 
--- Resource ids are the resource name with its extension dropped, optionally
--- prefixed with "bg_" (the ids get_resources hands out). "img_" is accepted too
--- so any BMP in the game can be loaded by name.
-function engine.load_resource(game_path, resource_id, palette_id)
-    local base = resource_id:match("^bg_(.+)$")
-        or resource_id:match("^img_(.+)$")
-        or resource_id
+function engine.default_palette(game_path, resource_id)
+    local base = resource_id:match("^spr_(.+)$") or resource_id:match("^img_(.+)$")
     if not base then return nil end
-    if base:match("%.BMP$") then base = base:match("^(.+)%.BMP$") end
-    if not base:match("^[%w_]+$") then return nil end
-    local want = base:upper() .. ".BMP"
-
     local archives, dir = parse_gfile(game_path)
-    if not archives then
-        return { type = "text", text = "GFILE.HDR missing or malformed" }
-    end
+    if not archives then return nil end
+    local name = base:upper()
+    if not name:match("%.BMP$") then name = name .. ".BMP" end
+    if not dir[name] then return nil end
+    local getb, size = read_resource(game_path, archives, dir[name])
+    if not getb or size < 54 or u32at(getb, 11) ~= 54 then return nil end
+    local pal = palette_for(dir, room_palettes(dir), name)
+    return pal and ("pal_" .. pal)
+end
 
+-- Keep the existing bg_/img_/bare-name ids usable.
+function engine.load_resource(game_path, resource_id, palette_id)
+    local archives, dir = parse_gfile(game_path)
+    if not archives then return { type = "text", text = "GFILE.HDR missing or malformed" } end
+    local palname = resource_id:match("^pal_(.+)$")
+    if palname then
+        local palette, err = load_palette(game_path, archives, dir, palname)
+        if not palette then return { type = "text", text = tostring(err) } end
+        local pixels = {}
+        for y = 0, 127 do
+            for x = 0, 127 do pixels[y * 128 + x + 1] = math.floor(y / 8) * 16 + math.floor(x / 8) end
+        end
+        return { type = "image", image = image_create_indexed(128, 128, pixels, palette),
+            width = 128, height = 128, description = "Palette: " .. palname }
+    end
+    local base = resource_id:match("^bg_(.+)$") or resource_id:match("^img_(.+)$")
+        or resource_id:match("^spr_(.+)$") or resource_id
+    base = base:upper():gsub("%.BMP$", "")
+    if not base:match("^[%w_]+$") then return nil end
+    local want = base .. ".BMP"
     local entry = dir[want]
-    if not entry then
-        return { type = "text", text = "Resource not found: " .. want }
-    end
+    if not entry then return { type = "text", text = "Resource not found: " .. want } end
 
+    -- Embedded palettes remain authoritative unless the user selects an override.
     local getb, size = read_resource(game_path, archives, entry)
-    if not getb then
-        return { type = "text", text = "Failed to read " .. want .. ": " .. tostring(size) }
+    if not getb then return { type = "text", text = "Failed to read " .. want .. ": " .. tostring(size) } end
+    local palette, palette_label
+    if palette_id then
+        palette_label = palette_id:match("^pal_(.+)$")
+        if not palette_label then return { type = "text", text = "Invalid palette: " .. palette_id } end
+    elseif size >= 54 and u32at(getb, 11) == 54 then
+        palette_label = palette_for(dir, room_palettes(dir), want)
     end
-
+    if palette_label then
+        local err
+        palette, err = load_palette(game_path, archives, dir, palette_label)
+        if not palette then return { type = "text", text = "Failed to load palette: " .. tostring(err) } end
+    end
     local label = string.format("%s (%s)", want, archives[entry.archive])
-    local res, err = decode_bmp(getb, size, label)
-    if not res then
-        return { type = "text", text = "Failed to decode " .. want .. ": " .. tostring(err) }
-    end
+    local res, err = decode_bmp(getb, size, label, palette, palette_label)
+    if not res then return { type = "text", text = "Failed to decode " .. want .. ": " .. tostring(err) } end
     return res
 end
 

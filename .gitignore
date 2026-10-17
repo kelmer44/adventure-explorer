@@ -22,3 +22,5 @@ SKILLS.md
 
 # other
 bin/
+scripts/tests/__pycache__
+scripts/__pycache__

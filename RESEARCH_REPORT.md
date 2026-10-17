@@ -1398,7 +1398,8 @@ u16 length       -- number of pixel bytes that follow, 1..w
 byte pixels[length]   -- raw 8bpp, no padding
 ```
 
-repeated for all `h` rows, top-down. This was derived from `002BTN01.BMP`
+repeated for all `abs(h)` rows in BMP row order (bottom-up for positive
+heights, top-down for negative heights). This was derived from `002BTN01.BMP`
 (340x55, 18,920 pixel bytes, exactly 55 uniform 344-byte rows of
 `00 00 54 01` + 340 raw pixels) and confirmed on cropped rows by `101CHR01.BMP`,
 a perspective-projected chair whose rows run from `xOffset = 6, length = 68` at
@@ -1407,11 +1408,16 @@ the top to `xOffset = 0, length = 86` in the middle and back down to
 row; the format exists precisely to store those trapezoids compactly.
 
 Because `dataoff = 54` leaves no room before the pixel data, those 3,614 images
-carry **no palette whatsoever**. The game keeps a single shared palette (the one
-`.PAL` resource in `GFILE.HDR`), and its indices are game-wide, so a decoder
-must not read colour tables out of the pixel stream: only palette quads that
-lie before `dataoff` are real. Decoding clamped this way, both variants match an
-independent decoder exactly.
+carry **no palette whatsoever**. Only palette quads before `dataoff` are real;
+reading the pixel stream as a colour table is incorrect. Scene sprites use
+the embedded palette of the room background in the same archive. Shared
+walking/action sprites use `FIX.PAL` (1024 bytes of BGR0 quads, 8-bit channels).
+Comparisons with RM0101/RM0102/RM0802 show indices 1..95 agree with FIX.PAL,
+while higher colours vary by room. Therefore FIX.PAL is insufficient for scene
+objects such as `101CHR01.BMP`, which uses indices up to 236. This corrects
+the earlier assumption of a single game-wide palette for all sprites.
+The earlier top-down scanline assumption was also incorrect: the walking
+character is inverted unless positive-height rows are reversed, as in BI_RGB.
 
 The `RM*.BMP` files (one per room archive) are the room backgrounds: 640x480,
 8bpp, uncompressed, with the palette in the header. One asset, `RM0816.BMP`, is
@@ -1429,10 +1435,27 @@ and `GL00_816.000` at 640x481. The engine selects them by name (`RM%04d.BMP`)
 rather than by geometry, because the geometry is only knowable after
 decompressing each archive, and listing must stay cheap.
 
-All 83 are `biCompression = 0`, so background decoding never touches the
-scanline format of 5.4. That format is implemented and verified (against 30
-sampled scanline images plus 11 `BI_RGB` ones, pixels and palettes matching a
-separate decoder byte for byte), but the engine only lists backgrounds for now.
+All 83 are `biCompression = 0`. The engine also lists 3,660 sprite/UI images,
+grouped by their source archive, 83 `RMAPdddd.BMP` room thumbnails, and 84
+palette resources (83 background palettes plus FIX.PAL). Listing reads only
+GFILE.HDR. Individual frames are exposed without inferring animation order or
+timing. Cropped regions are filled with index 0; images use the existing indexed
+image output with no alpha channel.
+
+Palette-less images automatically borrow their room background palette, falling
+back to FIX.PAL in shared archives. Embedded palettes remain authoritative
+(including the 4bpp grayscale IBCARD.BMP), unless a user explicitly selects
+another palette. The default-palette hook returns a palette only for images
+without an embedded colour table. Palette previews and manual overrides are
+available through the standard palette selector.
+
+A bounded single-archive cache avoids decompressing the same archive for every
+sprite; palette tables are cached separately for the active game folder. BMP
+decoding validates header/pixel bounds and rejects cropped rows extending past
+the width or truncated scanlines. Synthetic regressions cover cropped and empty
+rows, palette overrides, bottom-up/top-down BMPs, 4bpp pixels and malformed
+input. `scripts/tests/darkseed2.lua` optionally checks every exposed resource
+against the supplied media.
 
 ---
 

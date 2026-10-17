@@ -36,7 +36,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
-| Dark Seed 2 | 1995 | `darkseed2` | Backgrounds | ✅ Working |
+| Dark Seed 2 | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
@@ -303,6 +303,14 @@ Bink cutscenes are not previewed.
 > in-game also depend on the active room palette, and cell objects/sounds/music are
 > not decoded yet.
 
+> \* Dark Seed 2 exposes 83 room backgrounds, 3,660 sprite/UI images grouped by
+> archive, 83 room thumbnails and 84 palettes in the supplied release. Cropped
+> scanline sprites use their room background's palette; shared walking/action
+> sprites use `FIX.PAL`. Images with embedded palettes retain them, including
+> the 4-bit inventory icon. Palettes can also be selected manually. Frames are
+> shown individually; cropped areas use palette index 0 and animation playback
+> is not yet available.
+>
 > \* Lure of the Temptress character sprites are stored as nibble-packed animation
 > streams whose dimensions live in `lure.dat` (the engine support file in the game's
 > own executable). That data is not part of the `.VGA` disk images, so sprites are not
