@@ -24,8 +24,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.awt.FileDialog
 import java.awt.Frame
+import java.awt.BorderLayout
+import java.awt.Component
 import java.util.prefs.Preferences
 import javax.swing.JFileChooser
+import javax.swing.JDialog
+import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JLabel
 import javax.swing.JRadioButton
@@ -313,7 +318,41 @@ private suspend fun showOpenFolderDialog(appState: AppState) {
 private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode? = null, category: ExportCategory? = null) {
     val chosen = withContext(Dispatchers.IO) {
         onEdt {
-            val chooser = JFileChooser()
+            val useSameFolder = prefs.get("exportLayout", ExportLayout.RESOURCE_TREE.name) == ExportLayout.SAME_FOLDER.name
+            val treeLayout = JRadioButton("Resource tree path", !useSameFolder)
+            val sameFolder = JRadioButton("Same folder", useSameFolder)
+            val imageScale = JComboBox(arrayOf("1× (original size)", "2×", "3×")).apply {
+                selectedIndex = prefs.getInt("exportScale", 1).coerceIn(1, 3) - 1
+            }
+            ButtonGroup().apply {
+                add(treeLayout)
+                add(sameFolder)
+            }
+            val exportOptions = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                border = BorderFactory.createEmptyBorder(8, 12, 8, 8)
+                add(JLabel("Export folder layout"))
+                add(treeLayout)
+                add(sameFolder)
+                add(JLabel("Animations keep their own frame folders."))
+                add(JLabel("Image / animation scale"))
+                add(imageScale)
+                components.filterIsInstance<JComponent>().forEach {
+                    it.alignmentX = Component.LEFT_ALIGNMENT
+                }
+            }
+            val chooser = object : JFileChooser() {
+                override fun createDialog(parent: Component?): JDialog {
+                    return super.createDialog(parent).apply {
+                        val fileExplorer = contentPane
+                        contentPane = JPanel(BorderLayout()).apply {
+                            add(fileExplorer, BorderLayout.CENTER)
+                            add(exportOptions, BorderLayout.SOUTH)
+                        }
+                        pack()
+                    }
+                }
+            }
             chooser.dialogTitle = when {
                 folder != null -> "Export folder: ${folder.name}"
                 category != null -> "Export category: ${category.label}"
@@ -321,31 +360,20 @@ private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode
             }
             chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
             chooser.isAcceptAllFileFilterUsed = false
-            val treeLayout = JRadioButton("Resource tree path", true)
-            val sameFolder = JRadioButton("Same folder")
-            ButtonGroup().apply {
-                add(treeLayout)
-                add(sameFolder)
-            }
-            chooser.accessory = JPanel().apply {
-                layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                border = BorderFactory.createEmptyBorder(8, 12, 8, 8)
-                add(JLabel("Export folder layout"))
-                add(treeLayout)
-                add(sameFolder)
-                add(JLabel("Animations keep their own frame folders."))
-            }
-            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION)
-                chooser.selectedFile.absolutePath to
-                    if (sameFolder.isSelected) ExportLayout.SAME_FOLDER else ExportLayout.RESOURCE_TREE
-            else null
+            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                val selectedLayout = if (sameFolder.isSelected) ExportLayout.SAME_FOLDER else ExportLayout.RESOURCE_TREE
+                val selectedScale = imageScale.selectedIndex + 1
+                prefs.put("exportLayout", selectedLayout.name)
+                prefs.putInt("exportScale", selectedScale)
+                Triple(chooser.selectedFile.absolutePath, selectedLayout, selectedScale)
+            } else null
         }
     } ?: return
     withContext(Dispatchers.Main) {
         when {
-            folder != null -> appState.exportFolder(chosen.first, folder, chosen.second)
-            category != null -> appState.exportCategory(chosen.first, category, chosen.second)
-            else -> appState.exportAll(chosen.first, chosen.second)
+            folder != null -> appState.exportFolder(chosen.first, folder, chosen.second, chosen.third)
+            category != null -> appState.exportCategory(chosen.first, category, chosen.second, chosen.third)
+            else -> appState.exportAll(chosen.first, chosen.second, chosen.third)
         }
     }
 }

@@ -6,6 +6,9 @@ import adventureexplorer.model.ExportLayout
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
+import java.awt.AlphaComposite
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.util.Locale
 import javax.imageio.ImageIO
 import javax.sound.sampled.AudioFileFormat
@@ -25,8 +28,10 @@ class ResourceExporter(
         nodes: List<ResourceNode>,
         directory: File,
         layout: ExportLayout = ExportLayout.RESOURCE_TREE,
+        scale: Int = 1,
         onProgress: suspend (Int, Int, ResourceNode) -> Unit = { _, _, _ -> }
     ): Result {
+        require(scale in 1..3) { "Export scale must be 1, 2, or 3" }
         require(directory.isDirectory || directory.mkdirs()) { "Cannot create ${directory.path}" }
         usedNames.clear()
         val failures = mutableListOf<String>()
@@ -53,7 +58,7 @@ class ResourceExporter(
             try {
                 val data = load(node) ?: error("Could not decode resource")
                 currentCoroutineContext().ensureActive()
-                writeResource(node, data, parent)
+                writeResource(node, data, parent, scale)
                 exported++
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -74,22 +79,22 @@ class ResourceExporter(
         return Result(exported, failures, errorLog)
     }
 
-    private suspend fun writeResource(node: ResourceNode, data: ResourceData, parent: File) {
+    private suspend fun writeResource(node: ResourceNode, data: ResourceData, parent: File, scale: Int) {
         val name = safeName(node.name)
         when {
-            data.modelData != null -> check(ImageIO.write(adventureexplorer.models.ModelRenderer.render(data.modelData),
-                "PNG", availableFile(parent, name, ".png")))
+            data.modelData != null -> writePng(adventureexplorer.models.ModelRenderer.render(data.modelData),
+                availableFile(parent, name, ".png"), scale)
             !data.frames.isNullOrEmpty() -> {
                 val folder = availableFile(parent, name)
                 check(folder.mkdir()) { "Cannot create ${folder.path}" }
                 data.frames.forEachIndexed { i, frame ->
                     currentCoroutineContext().ensureActive()
-                    check(ImageIO.write(frame, "PNG", File(folder, "frame_%04d.png".format(Locale.ROOT, i))))
+                    writePng(frame, File(folder, "frame_%04d.png".format(Locale.ROOT, i)), scale)
                 }
                 File(folder, "animation.txt").writeText("Frames: ${data.frames.size}\nFrame delay: ${data.frameDelayMs} ms\n")
             }
             data.image != null -> {
-                check(ImageIO.write(data.image, "PNG", availableFile(parent, name, ".png")))
+                writePng(data.image, availableFile(parent, name, ".png"), scale)
                 if (node.type == "palette") {
                     val image = data.image
                     val colors = data.paletteColors.coerceIn(1, 256)
@@ -116,6 +121,24 @@ class ResourceExporter(
             data.description != null -> availableFile(parent, name, ".txt").writeText(data.description)
             else -> error("No decoded content available (${data.type})")
         }
+    }
+
+    private fun writePng(image: BufferedImage, file: File, scale: Int) {
+        val output = if (scale == 1) image else {
+            BufferedImage(Math.multiplyExact(image.width, scale), Math.multiplyExact(image.height, scale),
+                BufferedImage.TYPE_INT_ARGB).also { scaled ->
+                val graphics = scaled.createGraphics()
+                try {
+                    graphics.composite = AlphaComposite.Src
+                    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+                    graphics.drawImage(image, 0, 0, scaled.width, scaled.height, null)
+                } finally {
+                    graphics.dispose()
+                }
+            }
+        }
+        check(ImageIO.write(output, "PNG", file))
     }
 
     private fun safeName(name: String): String = name

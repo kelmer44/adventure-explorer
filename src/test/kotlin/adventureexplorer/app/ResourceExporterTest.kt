@@ -19,6 +19,59 @@ import javax.sound.sampled.AudioSystem
 class ResourceExporterTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun `export scales PNGs and animation frames with sharp pixels and preserves transparency`() = runBlocking {
+        val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB)
+        val pixels = intArrayOf(0xffff0000.toInt(), 0x8000ff00.toInt(), 0x00000000, 0xff0000ff.toInt())
+        image.setRGB(0, 0, 2, 2, pixels, 0, 2)
+        val tree = listOf(ResourceNode("room", "Room", "category", listOf(
+            ResourceNode("image", "Background", "image"),
+            ResourceNode("animation", "Animation", "animation"),
+            ResourceNode("palette", "Palette", "palette"),
+            ResourceNode("text", "Text", "text")
+        )))
+        for (scale in 1..3) {
+            for (layout in ExportLayout.values()) {
+                val directory = temporary.newFolder("scale-$scale-$layout")
+                val result = ResourceExporter({ node ->
+                    when (node.type) {
+                        "animation" -> ResourceData("animation", image, null, frames = listOf(image, image), frameDelayMs = 75)
+                        "text" -> ResourceData("text", null, null, textContent = "Original text")
+                        else -> ResourceData("image", image, null, paletteColors = 1)
+                    }
+                }).export(tree, directory, layout, scale)
+                assertEquals(4, result.exported)
+                assertTrue(result.failures.toString(), result.failures.isEmpty())
+                val folder = if (layout == ExportLayout.RESOURCE_TREE) File(directory, "Room") else directory
+                for (path in listOf("Background.png", "Animation/frame_0000.png", "Animation/frame_0001.png", "Palette.png")) {
+                    val output = ImageIO.read(File(folder, path))
+                    assertEquals(2 * scale, output.width)
+                    assertEquals(2 * scale, output.height)
+                    for (y in 0 until output.height) {
+                        for (x in 0 until output.width) {
+                            assertEquals(pixels[(y / scale) * 2 + x / scale], output.getRGB(x, y))
+                        }
+                    }
+                }
+                assertArrayEquals(byteArrayOf(0xff.toByte(), 0, 0), File(folder, "Palette.bin").readBytes())
+                assertEquals("Original text", File(folder, "Text.txt").readText())
+                assertTrue(File(folder, "Animation/animation.txt").readText().contains("75 ms"))
+            }
+        }
+        assertArrayEquals(pixels, image.getRGB(0, 0, 2, 2, null, 0, 2))
+    }
+
+    @Test fun `rejects unsupported export scales before creating output`() = runBlocking {
+        for (scale in listOf(0, 4)) {
+            val directory = File(temporary.root, "invalid-$scale")
+            try {
+                ResourceExporter({ error("Should not load") }).export(emptyList(), directory, scale = scale)
+                fail("Expected invalid scale to be rejected")
+            } catch (_: IllegalArgumentException) {
+                assertFalse(directory.exists())
+            }
+        }
+    }
+
     @Test fun `same folder exports backgrounds across rooms without overwriting duplicate names`() = runBlocking {
         val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)
         File(temporary.root, "Background.png").writeText("existing")

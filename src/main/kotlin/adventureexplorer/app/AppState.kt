@@ -298,20 +298,20 @@ class AppState {
     val canExportFolder: Boolean
         get() = canExportAll && selectedNode?.isCategory == true
 
-    fun exportAll(outputDir: String, layout: ExportLayout = ExportLayout.RESOURCE_TREE) {
+    fun exportAll(outputDir: String, layout: ExportLayout = ExportLayout.RESOURCE_TREE, scale: Int = 1) {
         if (!canExportAll) return
-        exportResources(outputDir, resourceTree, layout)
+        exportResources(outputDir, resourceTree, layout, scale)
     }
 
-    fun exportFolder(outputDir: String, folder: ResourceNode? = selectedNode, layout: ExportLayout = ExportLayout.RESOURCE_TREE) {
+    fun exportFolder(outputDir: String, folder: ResourceNode? = selectedNode, layout: ExportLayout = ExportLayout.RESOURCE_TREE, scale: Int = 1) {
         if (!canExportAll || folder?.isCategory != true) return
-        exportResources(outputDir, listOf(folder), layout)
+        exportResources(outputDir, listOf(folder), layout, scale)
     }
 
-    fun exportCategory(outputDir: String, category: ExportCategory, layout: ExportLayout = ExportLayout.RESOURCE_TREE) {
+    fun exportCategory(outputDir: String, category: ExportCategory, layout: ExportLayout = ExportLayout.RESOURCE_TREE, scale: Int = 1) {
         if (!canExportAll) return
         val filtered = ResourceCategories.filter(resourceTree, category)
-        if (filtered.isNotEmpty()) exportResources(outputDir, filtered, layout)
+        if (filtered.isNotEmpty()) exportResources(outputDir, filtered, layout, scale)
     }
 
     fun stopExport() {
@@ -321,7 +321,7 @@ class AppState {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun exportResources(outputDir: String, tree: List<ResourceNode>, layout: ExportLayout) {
+    private fun exportResources(outputDir: String, tree: List<ResourceNode>, layout: ExportLayout, scale: Int) {
         val path = gamePath ?: return
         val companions = paletteCompanionOf.toMap()
         val palettes = allPalettes.toList()
@@ -342,7 +342,7 @@ class AppState {
                     } else null
                     manager.loadResource(path, node.id, paletteId)
                 }, release = manager::releaseDecodedResources)
-                val result = exporter.export(tree, File(outputDir), layout) { index, total, node ->
+                val result = exporter.export(tree, File(outputDir), layout, scale) { index, total, node ->
                     withContext(Dispatchers.Main) {
                         statusMessage = "Exporting $index / $total: ${node.name}"
                     }
