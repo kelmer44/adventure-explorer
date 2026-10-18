@@ -1832,10 +1832,16 @@ through a different input-buffering path: `SCENE01.LBM` (66,012 in, 66,012 out)
 and `UNIVERSE.EXE` itself (81,707 in, 94,392 out). Both are treated identically
 in a flat-memory port, since the bit reader only ever walks the buffer forward.
 
-# Part 8: SCUMM V5-V7 Resource Layout
+# Part 8: SCUMM V5-V8 Resource Layout
 
 Source: ScummVM `engines/scumm/` — `resource.cpp`, `resource.h`, `object.h`,
 `object.cpp`, `gfx.h`, `gfx.cpp`, `detection_tables.h`.
+
+Current coverage includes room backgrounds and palettes, object sprites, actor
+costumes and animation previews, NUT fonts, MIDI music, digital iMUSE music,
+sound effects and speech. The room-directory findings and resource counts below
+describe the earlier V5-V7 background/object-sprite validation; they are not
+totals for the expanded resource tree.
 
 ## 8.1 Data File Conventions
 
@@ -1943,6 +1949,22 @@ total leaf resources: 823
   leaf resources. `MANIAC` is still correctly *not* detected by the V5-V7 engine
   while `scummv2` still detects it with 53 resources, so there is no
   cross-detection between the two engines.
+
+## 8.5 Actor Sprites and Music
+
+- `scumm_cost.lua` decodes V5/V6 `COST` and V7/V8 `AKOS` actor costumes.
+  The resource tree exposes cel sheets and animation/chore previews under
+  `Costumes / actor sprites`, alongside the existing per-room object sprites.
+- `scumm_snd.lua` extracts standard MIDI from sound-resource device chunks and
+  decodes digital samples and resident `iMUS` streams. Indexed audio appears
+  under `Sounds / music`.
+- External `.BUN` bundles expose digital iMUSE music and speech, including
+  The Dig and The Curse of Monkey Island. Bundle decompression uses the host's
+  `ImuseBundleCodecs.kt`; V6 `.SOU` speech archives contain VOC clips.
+- Format references: ScummVM `costume.cpp`, `base-costume.cpp`, `akos.cpp`,
+  `bomp.cpp`, `sound.cpp`, `imuse_digi/dimuse_bndmgr.cpp` and
+  `imuse_digi/dimuse_codecs.cpp`. These additions apply to the `scumm` engine;
+  the separate `scummv2` engine still exposes backgrounds only.
 
 # Part 9: Drascula — The Vampire Strikes Back
 
