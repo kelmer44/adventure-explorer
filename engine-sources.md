@@ -158,6 +158,16 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 
 games in ags/darkseed and ags/DSEED35
 
+Room palettes are `ROOMn.PAL` in both releases; the PAL/NSP fields inside
+`ROOMn.ROM` are stale editor metadata. The PIC field still identifies the
+background. Named CD backgrounds are matched to their owning ROM, and standalone
+NSP animations inherit their room or fullscreen picture palette. Shared world
+sprites/documents use a representative room palette and retain manual overrides.
+Rooms 20/22 use room 19's palette; the 61A walk-map variant uses room 61's.
+
+Regression/full-data validation: `lua scripts/tests/darkseed.lua
+[/path/to/DSEED35] [/path/to/DARKSEED]`.
+
 ### Dark Seed 2
 No ScummVM engine exists for this game, so the format was reverse engineered from
 the data itself plus the Dark Seed II resource tooling:
