@@ -994,3 +994,42 @@ Local test data: `/Users/gabriel/Desktop/ags/AGOS/SIMON/` and `SIMON2/`.
   `GmfToMidiConverter.kt`: GMF to standard MIDI; XMIDI uses the existing converter.
 - Run `SIMON1_TEST_PATH=... SIMON2_TEST_PATH=... ./gradlew test --tests '*Agos*'
   --tests '*SimonAudio*'` for real-data coverage and synthetic regressions.
+
+
+### ANOTHER WORLD / OUT OF THIS WORLD (original DOS)
+
+Data: `~/Desktop/ags/AW`. Script: `scripts/engines/anotherworld/engine.lua`.
+Reference: local `../scummvm-fork/engines/awe/`; upstream interpreter reference:
+[rawgl](https://github.com/cyxx/rawgl).
+
+- `resource.cpp::MemEntry::load`: status/type, ignored 32-bit runtime pointer,
+  rank/bank bytes, BE offset/packed/unpacked sizes; 20 bytes/record, FF sentinel.
+  `MEMLIST_PARTS` associates palette, bytecode and two shape segments per part.
+- `unpack.cpp`: backward ByteKiller; trailer words = bit accumulator, checksum,
+  output size. LSB extraction, MSB-first multi-bit values, sentinel refill;
+  checksum XOR includes every consumed source word. Validate sizes and refs.
+- `video.cpp::decode_amiga` / `copyBitmapPtr`: DOS uses 4 sequential planes,
+  8000 bytes each, 320x200 pixels, plane zero is the low bit.
+- `readPaletteAmiga` / `readPaletteEGA`: 32 palettes of 16 BE words in each
+  1024-byte half. VGA is 12-bit RGB; EGA takes the word's high nibble.
+- `script.cpp::executeTask`, `static_res.cpp::OPCODE_TABLE`: static reachable
+  disassembly for normal and compact drawing opcodes, branching/calls/tasks.
+  Extract shape roots only from valid decoded instructions; no offset guessing.
+- `video.cpp::drawShape`, `fillPolygon`, `drawShapeParts`: native-scale polygon
+  vertices and composite child coordinates, word-addressed references and
+  optional child colors. Explorer uses an independent scanline rasterizer;
+  full VM page effects, built-in head masks and animation are outside scope.
+- `sound.cpp`, `script.cpp::getSoundFreq`, `static_res.cpp::PERIOD_TABLE`:
+  8-byte header, signed 8-bit PCM, initial and loop lengths are BE words.
+  Script pitches are integer 7159092 / (period * 2). Otherwise label the 9943 Hz
+  preview assumption. Loop portions play once. `sfx_player.cpp` supplies the
+  module delay/order metadata; music rendering is not implemented.
+
+Validated 146 indexed records: 103 sound records (six empty; 97 nonempty),
+12 bitmaps, 9 palette banks, 9 bytecode banks, 9 part-shape banks, 1 common
+shape bank and 3 music modules. The tree has 5,042 polygon previews, 12 bitmaps,
+576 palettes, 313 pitched samples, 9 disassemblies and 146 metadata views:
+6,098 leaves. Native Lua full sweep and malformed-input regressions live in
+`scripts/tests/anotherworld.lua`; `AnotherWorldIntegrationTest.kt` exercises
+real LuaJ decoding and image output when ANOTHER_WORLD_TEST_PATH is set.
+Only the supplied DOS release was verified; no alternate-edition claims.

@@ -3663,3 +3663,43 @@ malformed resources and mirrored references; the LuaJ integration test decodes
 and renders all 2,812 polygon poses across the installed CR256 D1-D5 volumes.
 The existing 2,345 bitmap frames still pass the Lua resource sweep. Scripted
 animation, scene placement, clipping masks and palette changes are not replayed.
+
+
+## Another World: original DOS resource support
+
+The supplied `~/Desktop/ags/AW` has a 2940-byte MEMLIST (146 twenty-byte
+big-endian records plus a final sentinel record) and thirteen BANK files.
+Cross-checked layouts against the local ScummVM `engines/awe` implementation;
+see `engine-sources.md` for function-level references and limitations.
+
+The DOS bitmap format is planar despite the engine's 4bpp terminology:
+four 8000-byte planes at 320x200. Palette banks contain two independent halves,
+32 VGA palettes followed by 32 EGA palettes, rather than 64 RGB palettes.
+Palette zero often represents a fade to black; previews must choose a visible
+palette. Protection/title script 0x15 uses resource 0x12 for the Interplay logo
+(the supplied data differs from the title description in the reference comment).
+Its gold palette is slot 4 in resource 0x14. The visible ends of the scripted fades use slot 9 for the title resources
+0x13/0x53 and slot 15 for the Delphine logo 0x47; the earlier script palette
+assignments (14/23) are black fade endpoints. All can be overridden.
+
+ByteKiller decompression validates trailer output length, backward reference
+bounds and XOR checksum. The shipped compressed streams all pass. Empty
+sound records remain visible as metadata without creating empty audio clips.
+Sample headers describe initial and loop lengths in words; all 97 nonempty
+samples fit their payloads. There are 313 previews after retaining unique
+script-referenced playback rates (or explicitly labeled fallback rates).
+
+Static control-flow traversal of nine bytecode banks finds 5,042 distinct
+part/palette/shape-root combinations, including the shared 0x11 bank. Polygon
+hierarchies validate without guessing record starts. Native-scale previews
+retain child placements and colors on black; the standalone rasterizer does
+not claim pixel-exact game scan conversion, VM animation, scene composition,
+built-in head masks or page-copy effects. Music modules, font/text in the EXE,
+and alternate editions are outside decoded playback support.
+
+Validation commands: `lua scripts/tests/anotherworld.lua ~/Desktop/ags/AW`
+and `ANOTHER_WORLD_TEST_PATH=... ./gradlew --offline test --tests
+'*AnotherWorldIntegrationTest'`. The former loads all 6098 leaves and tests
+malformed compression, directory bounds, palette/bitplane interpretation,
+polygon recursion and truncated instructions. The latter checks the actual
+LuaJ host and representative exports, including all twelve bitmap resources.

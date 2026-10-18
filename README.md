@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-56 game engines are currently supported via Lua scripts — no recompilation needed.
+57 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -28,6 +28,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Alfred Pelrock | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | Amazon: Guardians of Eden | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
 | Alone in the Dark series | 1992-95 | `aitd` | Backgrounds, 3D Models | ✅ Working |
+| Another World / Out of This World (DOS) | 1991 | `anotherworld` | Bitmaps, Polygon Artwork, VGA/EGA Palettes, Sound Samples, Scripts, Data | ✅ Working* |
 | Beneath a Steel Sky | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
@@ -84,6 +85,22 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> \* **Another World** opens the original DOS `MEMLIST.BIN` + `BANK01`...`BANK0D`
+> folder directly (tested with `~/Desktop/ags/AW`). It exposes all 12 planar
+> bitmaps, 5,042 script-referenced polygon artwork previews across nine parts,
+> 576 VGA/EGA palettes, and 97 nonempty signed PCM samples (313 pitch previews).
+> All 146 resource records have decompressed metadata/hex views; the nine
+> scripts also have static disassembly. ByteKiller streams are checksum checked.
+> Polygon previews retain composite child positions at native scale, with a
+> standalone scanline rasterizer and black backdrop. They do not reproduce
+> the game's scene composition, page-copy effects, built-in head masks, VM
+> animation, zoom or timing. Default artwork palettes use the part's first
+> visible VGA palette; logos have explicit palettes and every palette can be
+> selected manually. Samples use script-referenced pitches when available,
+> otherwise a labeled 9943 Hz preview rate; loop segments play once. The three
+> music modules have metadata/hex previews only. Text/fonts embedded in the
+> executable, other platforms, demos and anniversary editions are unsupported.
 
 SCUMM V5-V8 supports per-room object sprites and actor costumes (`COST` for
 V5/V6, `AKOS` for V7/V8), with cel sheets and animation previews. Music includes
@@ -640,8 +657,9 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 41 engine scripts (Lua)
+│   └── engines/                  # 57 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
+│       ├── anotherworld/engine.lua # Another World (original DOS)
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
