@@ -1283,6 +1283,37 @@ A 256 colour palette therefore occupies DAC entries 1..255, and pixel value
 `n` maps to palette entry `n-1`. Forgetting this shift costs exactly one
 palette entry and visibly darkens/misaligns every image.
 
+## 4.7 FILM Reel Animations
+
+Both games retain animation data in `CHUNK_FILM (0x33340008)` and frame lists in
+`CHUNK_ANI_FRAME (0x33340007)`. FILM chunks mix several structures, so their
+payload is not a flat array. FILM headers contain `i32 fps, i32 numReels` followed
+by `(SCNHANDLE mobj, SCNHANDLE script)` pairs. Each MULTI_INIT begins with the
+initial multipart shape handle (24 bytes in DW1, 28 bytes in DW2).
+
+A script's ordinary DWORDs reference null-terminated lists of IMAGE handles,
+not IMAGE records directly. Control words are 0=end, 1=jump (signed DWORD offset
+in words, relative to the operand itself), 2/3/4=horizontal/vertical/both flips,
+5/6/7=relative X/Y/XY adjustment, 8=nosleep, 9=unsupported CALL, and 10=hide.
+Opcode 11 belongs to sound reels. DW1 reverses adjustments along flipped axes;
+DW2 does not. DW1 skips NOSLEEP without consuming a display interval; DW2
+consumes an interval with the current shape. Flip state starts clear.
+
+Frame parts share an animation origin; each IMAGE is placed at
+`position - anioff`. When flipped, its origin becomes `dimension - 1 - anioff`.
+A shared canvas over the sequence preserves alignment, transparent index 0
+leaves underlying parts visible, and each part resolves its own palette handle.
+Playback uses `floor(24/fps)` game ticks per frame, converted to milliseconds.
+The explorer exposes each animated reel independently inside its Sprites file
+group. Repeated bytecode states end preview cycles; static/sound reels,
+unsupported calls, and invalid or excessive scripts are excluded.
+
+Validated against local ScummVM `film.h`, `anim.cpp`, `multiobj.cpp`, `object.cpp`,
+`play.cpp`, and `timers.h`, plus the installed DW1/DW2 data. Catalog discovery
+finds 2,311 animated reels in DW1 and 1,078 in DW2. Regression fixtures cover
+both versions, multipart frames, offsets, flips, hide, loops and invalid scripts;
+100 evenly distributed real animations per game were decoded successfully.
+
 # Part 5: Dark Seed 2 Resource Format
 
 No ScummVM engine exists for Dark Seed 2, so the format was derived from the

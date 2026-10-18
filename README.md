@@ -39,7 +39,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
-| Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites | ✅ Working |
+| Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites, Animations | ✅ Working |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
@@ -71,7 +71,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
-| Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
+| Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
 | The Beverly Hillbillies | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
@@ -85,6 +85,12 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> **Discworld 1 & 2:** open **Sprites → file name → Animation** to play or
+> step through a stored animation reel. Sequences follow the game's frame order,
+> timing, flips and offsets, including multipart sprites and transparent frames.
+> Individual sprite images remain in the same file groups. Reels are previewed
+> independently; full scene composition and sound scripts are not replayed.
 
 > \* **Another World** opens the original DOS `MEMLIST.BIN` + `BANK01`...`BANK0D`
 > folder directly. It exposes all 12 planar
@@ -105,6 +111,14 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > otherwise a labeled 9943 Hz preview rate; loop segments play once. The three
 > music modules have metadata/hex previews only. Text/fonts embedded in the
 > executable, other platforms, demos and anniversary editions are unsupported.
+
+SCI supports the tested Spanish Gabriel Knight 1 release (`VERSION` 1.0,
+April 6, 1995). Open its folder containing `RESOURCE.MAP` and `RESOURCE.000`.
+All 1,789 mapped resources decompress; previews cover 152 backgrounds,
+825 sprite/animation resources, 11 fonts and seven palettes, including embedded
+picture palettes. Sounds, messages and scripts currently show metadata only.
+Run `lua scripts/tests/sci.lua /path/to/GK` for a complete resource scan, or
+`lua scripts/tests/sci.lua` for synthetic map/header regression tests.
 
 SCUMM V5-V8 supports per-room object sprites and actor costumes (`COST` for
 V5/V6, `AKOS` for V7/V8), with cel sheets and animation previews. Music includes

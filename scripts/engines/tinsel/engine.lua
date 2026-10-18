@@ -30,14 +30,15 @@
 -- and colour n maps to palette entry n-1. That shift is applied when the
 -- 768 entry lookup table is built.
 --
--- Tinsel has no animation container, so every image is exposed on its own.
+-- FILM records link reels to animation bytecode and multipart frame lists.
+-- Expose those sequences alongside the original individual images.
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Discworld"
 engine.id          = "tinsel"
 engine.description = "Discworld 1 & 2 (1995/1996, Perfect Entertainment)"
-engine.version     = "3.0"
+engine.version     = "3.1"
 
 -- ============================================================================
 -- Binary helpers (positions are 1 based, matching Lua string indexing)
@@ -238,7 +239,7 @@ local function read_image_records(f)
 
         if w > 0 and h > 0 and hBits ~= 0 and w <= 4096 and h <= 4096 then
             out[#out + 1] = {
-                record   = start + pos - 1,   -- 1 based position in the data file
+                record   = start + pos - 1,   -- 0 based position in the data file
                 width    = w,
                 height   = h,
                 c16      = math.floor(raw_h / 16384) % 4,
@@ -560,7 +561,7 @@ end
 -- Decoding a single image record
 -- ============================================================================
 
-local function decode_image(game_path, handles, fmt, file_name, record)
+local function decode_pixels(game_path, handles, fmt, file_name, record)
     local bits_index, bits_off = handle_parts(record.hImgBits, fmt.shift)
     local owner = handles[bits_index]
 
@@ -588,7 +589,229 @@ local function decode_image(game_path, handles, fmt, file_name, record)
 
     if not pixels then return nil end
 
-    return image_create_indexed(w, h, pixels, rgb and palette_table(rgb) or grayscale_table())
+    return pixels, rgb and palette_table(rgb) or grayscale_table()
+end
+
+local function decode_image(game_path, handles, fmt, file_name, record)
+    local pixels, palette = decode_pixels(game_path, handles, fmt, file_name, record)
+    if not pixels then return nil end
+    return image_create_indexed(record.width, record.height, pixels, palette)
+end
+
+-- FILM chunks contain mixed MULTI_INIT, script and variable-length FILM data,
+-- with no directory. Validate candidate headers against real IMAGE/frame handles
+-- rather than treating consecutive IMAGE records as an animation.
+local function animation_reader(game_path, handles, fmt)
+    local ctx = { files = {}, images = {}, shapes = {} }
+    function ctx:file(index)
+        local entry = handles[index]
+        if not entry then return nil end
+        if self.files[index] == nil then
+            self.files[index] = open_data(game_path, entry.name) or false
+        end
+        return self.files[index] or nil
+    end
+    function ctx:read(handle, length)
+        local index, offset = handle_parts(handle, fmt.shift)
+        local raw = read_at(self:file(index), offset, length)
+        if not raw or #raw ~= length then return nil end
+        return raw
+    end
+    function ctx:image(handle)
+        local index, offset = handle_parts(handle, fmt.shift)
+        if not self.images[index] then
+            local records = {}
+            local f = self:file(index)
+            if f then
+                for _, img in ipairs(read_image_records(f)) do
+                    img.file_name = handles[index].name
+                    records[img.record] = img
+                end
+            end
+            self.images[index] = records
+        end
+        return self.images[index][offset]
+    end
+    function ctx:shape(handle)
+        if self.shapes[handle] ~= nil then return self.shapes[handle] or nil end
+        local parts = {}
+        for i = 0, 63 do
+            local raw = self:read(handle + i * 4, 4)
+            if not raw then break end
+            local h = u32le(raw, 1)
+            if h == 0 then
+                if #parts > 0 then self.shapes[handle] = parts; return parts end
+                break
+            end
+            local img = self:image(h)
+            if not img then break end
+            parts[#parts + 1] = img
+        end
+        self.shapes[handle] = false
+        return nil
+    end
+    function ctx:close()
+        for _, f in pairs(self.files) do if f then close_data(f) end end
+    end
+    return ctx
+end
+
+local function signed32(v) return v < 2147483648 and v or v - 4294967296 end
+
+local function read_sequence(ctx, script, initial, fmt)
+    local frames, seen = {}, {}
+    local pc, x, y, flip_h, flip_v = script, 0, 0, false, false
+    local current = initial
+    for _ = 1, 16384 do
+        -- Terminate a loop at its bytecode address and flip state; adjustments may accumulate
+        -- across cycles, so including position here could make loops unbounded.
+        local state = tostring(pc) .. tostring(flip_h) .. tostring(flip_v)
+        if seen[state] then return #frames > 1 and frames or nil end
+        seen[state] = true
+        local raw = ctx:read(pc, 4)
+        if not raw then return nil end
+        local op = u32le(raw, 1)
+        pc = pc + 4
+        if op == 0 then return #frames > 1 and frames or nil
+        elseif op == 1 then
+            raw = ctx:read(pc, 4)
+            if not raw then return nil end
+            pc = pc + signed32(u32le(raw, 1)) * 4
+        elseif op >= 2 and op <= 4 then
+            if op ~= 3 then flip_h = not flip_h end
+            if op ~= 2 then flip_v = not flip_v end
+        elseif op >= 5 and op <= 7 then
+            raw = ctx:read(pc, op == 7 and 8 or 4)
+            if not raw then return nil end
+            if op ~= 6 then
+                local dx = signed32(u32le(raw, 1))
+                x = x + ((fmt == DW1 and flip_h) and -dx or dx)
+            end
+            if op ~= 5 then
+                local dy = signed32(u32le(raw, op == 7 and 5 or 1))
+                y = y + ((fmt == DW1 and flip_v) and -dy or dy)
+            end
+            pc = pc + (op == 7 and 8 or 4)
+        elseif op == 9 or op == 11 then
+            -- CALL is unsupported in ScummVM too; STOP belongs to sound reels.
+            return nil
+        elseif op == 8 and fmt == DW1 then
+            -- V1 immediately advances again, without a displayed frame.
+        else
+            if op == 10 then current = {}
+            elseif op ~= 8 then
+                current = ctx:shape(op)
+                if not current then return nil end
+            end
+            frames[#frames + 1] = { parts = current, x = x, y = y,
+                flip_h = flip_h, flip_v = flip_v }
+            if #frames >= 2048 then return nil end
+        end
+    end
+    return nil
+end
+
+local function read_reel(ctx, raw, pos, fmt)
+    local mobj, script = u32le(raw, pos), u32le(raw, pos + 4)
+    local init = ctx:read(mobj, fmt == DW2 and 28 or 24)
+    if not init or script == 0 then return nil end
+    local initial = ctx:shape(u32le(init, 1))
+    if not initial then return nil end
+    return read_sequence(ctx, script, initial, fmt)
+end
+
+local function read_animations(ctx, f, fmt)
+    local out = {}
+    local start, size = find_chunk(f, 0x33340008)
+    if not start then return out end
+    local raw = read_at(f, start, size)
+    if not raw then return out end
+    local pos = 1
+    while pos + 15 <= #raw do
+        local fps, reels = u32le(raw, pos), u32le(raw, pos + 4)
+        if fps >= 1 and fps <= 24 and reels >= 1 and reels <= 256
+            and pos + 7 + reels * 8 <= #raw then
+            local valid, sequences = true, {}
+            for reel = 1, reels do
+                local rp = pos + 8 + (reel - 1) * 8
+                local init = ctx:read(u32le(raw, rp), fmt == DW2 and 28 or 24)
+                if not init or not ctx:shape(u32le(init, 1))
+                    or not ctx:read(u32le(raw, rp + 4), 4) then
+                    valid = false; break
+                end
+                sequences[reel] = read_reel(ctx, raw, rp, fmt) or false
+            end
+            if valid then
+                for reel, frames in ipairs(sequences) do
+                    if frames then out[#out + 1] = { record = start + pos - 1,
+                        reel = reel, fps = fps, frames = frames } end
+                end
+                pos = pos + 8 + reels * 8
+            else pos = pos + 4 end
+        else pos = pos + 4 end
+    end
+    return out
+end
+
+-- Compose all parts on a common canvas using IMAGE animation origins. Each
+-- frame keeps its own palette, including cross-file palette references.
+local function render_sequence(game_path, handles, fmt, sequence)
+    local left, top, right, bottom = math.huge, math.huge, -math.huge, -math.huge
+    for _, frame in ipairs(sequence.frames) do
+        frame.placed = {}
+        for _, img in ipairs(frame.parts) do
+            local ax = frame.flip_h and (img.width - 1 - img.anioffX) or img.anioffX
+            local ay = frame.flip_v and (img.height - 1 - img.anioffY) or img.anioffY
+            local x, y = frame.x - ax, frame.y - ay
+            left, top = math.min(left, x), math.min(top, y)
+            right, bottom = math.max(right, x + img.width), math.max(bottom, y + img.height)
+            frame.placed[#frame.placed + 1] = { img = img, x = x, y = y }
+        end
+    end
+    local w, h = right - left, bottom - top
+    if left == math.huge or w < 1 or h < 1 or w > 4096 or h > 4096
+        or w * h * #sequence.frames > 64000000 then return nil end
+    local decoded, frames = {}, {}
+    for _, frame in ipairs(sequence.frames) do
+        local pixels, palette, colors, count = {}, grayscale_table(), {}, 0
+        for i = 1, w * h do pixels[i] = 0 end
+        for _, part in ipairs(frame.placed) do
+            local img = part.img
+            local key = img.file_name .. ':' .. img.record
+            if not decoded[key] then
+                local p, pal = decode_pixels(game_path, handles, fmt, img.file_name, img)
+                if not p then return nil end
+                decoded[key] = { pixels = p, palette = pal }
+            end
+            local data, remap = decoded[key], {}
+            for yy = 0, img.height - 1 do
+                for xx = 0, img.width - 1 do
+                    local sx = frame.flip_h and (img.width - 1 - xx) or xx
+                    local sy = frame.flip_v and (img.height - 1 - yy) or yy
+                    local color = data.pixels[sy * img.width + sx + 1] or 0
+                    if color ~= 0 then
+                        if not remap[color] then
+                            local p = color * 3 + 1
+                            local r, g, b = data.palette[p], data.palette[p + 1], data.palette[p + 2]
+                            local rgb = r * 65536 + g * 256 + b
+                            if not colors[rgb] then
+                                count = count + 1
+                                if count > 255 then return nil end
+                                colors[rgb] = count
+                                palette[count * 3 + 1], palette[count * 3 + 2], palette[count * 3 + 3] = r, g, b
+                            end
+                            remap[color] = colors[rgb]
+                        end
+                        pixels[(part.y - top + yy) * w + part.x - left + xx + 1] = remap[color]
+                    end
+                end
+            end
+        end
+        frames[#frames + 1] = image_create_indexed(w, h, pixels, palette, 0)
+    end
+    -- The engine quantizes each frame to 24 Hz game ticks.
+    local delay = math.floor(1000 * math.floor(24 / sequence.fps) / 24 + 0.5)
+    return animation_create(frames, delay), #frames, delay
 end
 
 -- ============================================================================
@@ -629,9 +852,21 @@ function engine.get_resources(game_path)
         if f then
             local images = read_image_records(f)
             local entry_size = f.size
+
+            local ctx = animation_reader(game_path, handles, fmt)
+            local animations = read_animations(ctx, f, fmt)
+            ctx:close()
             close_data(f)
 
             local seen, sprites = {}, {}
+            for _, sequence in ipairs(animations) do
+                sprites[#sprites + 1] = {
+                    id = string.format("anim_%s_%d_%d", entry.name, sequence.record, sequence.reel),
+                    name = string.format("Animation @%X reel %d (%d frames)",
+                        sequence.record, sequence.reel, #sequence.frames),
+                    type = "animation",
+                }
+            end
             for _, img in ipairs(images) do
                 -- Many records point at identical pixel data, list it once.
                 if not seen[img.hImgBits] then
@@ -698,6 +933,36 @@ end
 
 function engine.load_resource(game_path, resource_id)
     if not engine.detect(game_path) then return nil end
+
+    local anim_file, film_pos, reel = tostring(resource_id):match("^anim_(.+)_(%d+)_(%d+)$")
+    if anim_file and tonumber(reel) >= 1 and tonumber(reel) <= 256 then
+        local fmt = is_dw2(game_path) and DW2 or DW1
+        local handles = parse_index(game_path, fmt)
+        if not handles then return nil end
+        local ctx = animation_reader(game_path, handles, fmt)
+        local f = open_data(game_path, anim_file)
+        local raw = read_at(f, tonumber(film_pos), 8 + tonumber(reel) * 8)
+        close_data(f)
+        local sequence
+        if raw and #raw == 8 + tonumber(reel) * 8 then
+            local fps, reels = u32le(raw, 1), u32le(raw, 5)
+            if fps >= 1 and fps <= 24 and tonumber(reel) >= 1 and tonumber(reel) <= reels then
+                local frames = read_reel(ctx, raw, 9 + (tonumber(reel) - 1) * 8, fmt)
+                if frames then sequence = { fps = fps, frames = frames } end
+            end
+        end
+        ctx:close()
+        if sequence then
+            local ok, anim, count, delay = pcall(render_sequence, game_path, handles, fmt, sequence)
+            if ok and anim then
+                return { type = "animation", animation = anim, delay_ms = delay,
+                    description = string.format("%s - %s reel %d: %d frames (%d ms)",
+                        fmt == DW2 and "Discworld 2" or "Discworld 1", anim_file:upper(),
+                        tonumber(reel), count, delay) }
+            end
+        end
+        return { type = "text", text = "Cannot decode animation: " .. resource_id }
+    end
 
     local file_name, record_pos = tostring(resource_id):match("^img_(.+)_(%d+)$")
     if not file_name or not record_pos then

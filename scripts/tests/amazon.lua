@@ -53,7 +53,64 @@ function list_files() return {'AMAZON.EXE','C00.AP','S00.AP'} end
 assert(engine.detect('fixture') and not engine.detect('missing'))
 assert(#engine.get_resources('fixture')==3)
 assert(engine.load_resource('fixture','amazon/C00.AP/0').text:match('ABAB'))
-print('Amazon DBE, AP directories, padded sprites, video deltas and detection regressions passed')
+-- Palette association fixtures: character 0 is called from room 5, not 0.
+-- Distinct colours expose wrong defaults and stale palette selector overrides.
+local function ap(entries)
+    local off,header=2+#entries*4,{le16(#entries)}
+    for _,value in ipairs(entries) do header[#header+1]=le32(off);off=off+#value end
+    return table.concat(header)..table.concat(entries)
+end
+local function pal(value) return string.rep("\0",3)..string.rep(string.char(value),765) end
+local function room(value)
+    return string.char(1,1,1)..string.rep("\0",13)..pal(value)..string.rep(string.char(1),256).."\0"
+end
+local function screen(value) return pal(value)..string.rep(string.char(1),64000) end
+local bank=ap({le16(1)..le16(1)..string.char(0,1,1)})
+local many={};for i=1,19 do many[i]=le16(1)..le16(1)..string.char(0,1,1) end
+local chapter={};for i=1,17 do chapter[i]='text' end
+chapter[16]=screen(8);chapter[17]=screen(9);chapter[18]=ap(many)
+local fixture={
+    ['S00.AP']=ap({room(2),bank,bank,screen(3),screen(4)}),
+    ['S05.AP']=ap({room(5)}), ['C00.AP']=ap({'text',bank}),
+    ['C03.AP']=ap({'text',screen(6),screen(7),screen(10),movie,movie,movie}),
+    ['CHAPTER.AP']=ap(chapter), ['AMAZON.EXE']='',
+    ['S19.AP']=ap({room(11)}), ['C05.AP']=ap({'text',bank}),
+    ['S14.AP']=ap({'text',screen(12),screen(13),screen(14),screen(15),ap({many[1],many[2]}),movie,movie,movie}),
+    ['S64.AP']=ap({'text',screen(16),screen(17),screen(18),bank,bank,movie,movie,movie}),
+}
+for name,value in pairs(fixture) do fs['pal-fixture/'..name]=value end
+function list_files(path)
+    local result={}
+    for name in pairs(fixture) do if path=='pal-fixture' then result[#result+1]=name end end
+    if path=='fixture' then return {'AMAZON.EXE','C00.AP','S00.AP'} end
+    return result
+end
+function image_create_indexed(w,h,p,palette) return {palette=palette} end
+function animation_create(frames) return frames end
+local function check(id,expected,value)
+    assert(engine.default_palette('pal-fixture',id)=='amazon/'..expected..'/palette',id)
+    local result=engine.load_resource('pal-fixture',id)
+    assert(result.image.palette[4]==math.floor(value*255/63),id..' rendered wrong palette')
+    local override=engine.load_resource('pal-fixture',id,'amazon/S00.AP/0/palette')
+    assert(override.image.palette[4]==math.floor(2*255/63),id..' ignored override')
+end
+check('amazon/C00.AP/1/frame/1','S05.AP/0',5)
+check('amazon/C05.AP/1/frame/1','S19.AP/0',11)
+check('amazon/S14.AP/5/frame/1','S14.AP/1',12)
+check('amazon/S14.AP/5/frame/2','S14.AP/4',15)
+check('amazon/S14.AP/6/video/1/2','S14.AP/2',13)
+check('amazon/S64.AP/4/frame/1','S64.AP/3',18)
+check('amazon/S64.AP/5/frame/1','S64.AP/2',17)
+check('amazon/S64.AP/8/video/1/2','S64.AP/1',16)
+check('amazon/S00.AP/1/frame/1','S00.AP/0',2)
+check('amazon/S00.AP/2/frame/1','S00.AP/4',4)
+check('amazon/S00.AP/3','S00.AP/3',3)
+check('amazon/C03.AP/4/video/1/2','C03.AP/1',6)
+check('amazon/C03.AP/5/video/1/2','C03.AP/2',7)
+check('amazon/C03.AP/6/video/1/2','C03.AP/3',10)
+check('amazon/CHAPTER.AP/17/frame/14','CHAPTER.AP/15',8)
+check('amazon/CHAPTER.AP/17/frame/15','CHAPTER.AP/16',9)
+print('Amazon decoding and scene/sprite/video palette regressions passed')
 if not arg[1] then return end
 function file_open(path) return io.open(path,'rb') end
 function file_exists(path) local f=io.open(path,'rb');if not f then return false end;f:close();return true end
@@ -83,6 +140,10 @@ local function walk(nodes)
         assert(not seen[n.id],n.id);seen[n.id]=true
         if n.children then walk(n.children)
         else
+            if n.type=='image' or n.type=='animation' then
+                local selected=engine.default_palette(arg[1],n.id)
+                assert(selected,'Missing default palette: '..n.id)
+            end
             local ok,result=pcall(engine.load_resource,arg[1],n.id)
             assert(ok,n.id..': '..tostring(result));assert(result and result.type)
             counts[n.type]=(counts[n.type] or 0)+1;loaded=loaded+1

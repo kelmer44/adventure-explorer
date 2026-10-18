@@ -3,11 +3,12 @@
 -- ============================================================================
 -- Sierra On-Line, 1988-1996. DOS. SCI resource system.
 --
--- Supports the DOS resource formats of SCI0 (EGA), SCI1 (EGA/VGA) and SCI1.1:
+-- Supports DOS resource formats from SCI0 (EGA) through SCI32:
 --   SCI0:   RESOURCE.MAP with 6-byte entries; LZW (LSB) / Huffman compression
 --   SCI1:   directory + 6-byte entries; Huffman / LZW1 (MSB) / view+pic LZW
 --   SCI1.1: directory + 5-byte entries; DCL (implode) compression
---   SCI2.1: RESMAP.000 + RESSCI.000, 32-bit sizes, LZS compression, 640x480
+--   SCI2:   RESOURCE.MAP + RESOURCE.NNN, SCI1-style map + SCI32 headers (GK1)
+--   SCI2.1/3: RESMAP.000 + RESSCI.000, 32-bit sizes, LZS compression,
 --           cels with per-row RLE and "hunk" palettes (Larry 7, ...)
 --
 -- Graphics: SCI0/SCI1 EGA + VGA views (sprites), vector pictures (EGA dithered
@@ -19,7 +20,7 @@ local engine = {}
 engine.name        = "Sierra SCI"
 engine.id          = "sci"
 engine.description = "Sierra SCI games (1988-1996)"
-engine.version     = "5.0"
+engine.version     = "5.1"
 
 -- ============================================================================
 -- Binary helpers
@@ -232,7 +233,7 @@ local function huffman_unpack(data, expected)
 end
 
 -- ============================================================================
--- LZS (STACpack) decompressor (SCI2.1+), MSB-first
+-- LZS (STACpack) decompressor (SCI2+), MSB-first
 -- Port of ScummVM DecompressorLZS.
 -- ============================================================================
 
@@ -741,7 +742,7 @@ local function parse_map_sci1(data)
         local rtype = dir[di].type
         local p = dir[di].offset + 1  -- 1-indexed
         local stop = (di < #dir) and dir[di + 1].offset or last_end
-        while p + 5 <= #data and p <= stop do
+        while p + 5 <= #data and p + 5 <= stop do
             local rnum = u16le(data, p)
             if rnum == 0xFFFF then break end
             local off_data = u32le(data, p + 2)
@@ -764,7 +765,7 @@ local function parse_map_sci11(data)
         local rtype = dir[di].type
         local p = dir[di].offset + 1  -- 1-indexed
         local stop = (di < #dir) and dir[di + 1].offset or last_end
-        while p + 4 <= #data and p <= stop do
+        while p + 4 <= #data and p + 4 <= stop do
             local rnum = u16le(data, p)
             if rnum == 0xFFFF then break end
             -- 3-byte offset: actual_offset = raw * 2
@@ -873,7 +874,7 @@ local function decompress_resource(raw, method, unpack_sz, numbering)
 end
 
 local function read_resource(game_path, info, res)
-    local vol_name = info.ver == "sci2" and "RESSCI.000"
+    local vol_name = info.resmap and "RESSCI.000"
         or string.format("RESOURCE.%03d", res.volume)
     local fh = file_open(game_path .. "/" .. vol_name)
     if not fh then return nil end
@@ -914,9 +915,35 @@ local function get_info(game_path)
         resources = parse_map_sci0(data)
     end
 
+    -- SCI2 retains the SCI1 directory/map entries, but has 13-byte volume
+    -- headers with 32-bit sizes. The map alone cannot distinguish them.
+    -- Validate several mapped headers, including their resource identities,
+    -- compression and bounds, before choosing the SCI32 graphics path.
+    if ver == "sci1" then
+        local checked = 0
+        for _, r in ipairs(resources) do
+            local vol = file_open(game_path .. string.format("/RESOURCE.%03d", r.volume))
+            if vol then
+                local hdr = file_read(vol, r.offset, 13)
+                local size = file_size(vol)
+                file_close(vol)
+                if not hdr or #hdr < 13 then break end
+                local packed, unpacked = u32le(hdr, 4), u32le(hdr, 8)
+                local method = u16le(hdr, 12)
+                if hdr:byte(1) % 128 ~= r.type or u16le(hdr, 2) ~= r.number
+                   or packed == 0 or unpacked == 0 or r.offset + 13 + packed > size
+                   or not (method == 32 or (method == 0 and packed == unpacked)) then
+                    break
+                end
+                checked = checked + 1
+                if checked == 3 then ver = "sci2"; break end
+            end
+        end
+    end
+
     -- Some maps list a resource once per disk volume; like the interpreter,
     -- keep the first entry only.
-    local info = { ver = ver, resources = {}, numbering = "new", vga = true,
+    local info = { ver = ver, resmap = is_sci2, resources = {}, numbering = "new", vga = true,
                    index = {} }
     for _, r in ipairs(resources) do
         local key = r.type * 65536 + r.number
@@ -2377,7 +2404,7 @@ local function load_pic(data, rnum, info, game_pal, override)
         if img then
             return {
                 type = "image", image = img,
-                description = string.format("Pic %d (SCI2.1, %dx%d, %d cels)", rnum, w, h, n),
+                description = string.format("Pic %d (SCI32, %dx%d, %d cels)", rnum, w, h, n),
             }
         end
         return { type = "text", text = string.format("Pic %d: %d bytes (%s)", rnum, #data, err or "render failed") }

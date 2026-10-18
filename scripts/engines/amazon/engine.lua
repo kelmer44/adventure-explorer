@@ -1,5 +1,5 @@
 -- Amazon: Guardians of Eden. Format reference: ScummVM engines/access.
-local engine={id="amazon",name="Amazon: Guardians of Eden",version="1.0",
+local engine={id="amazon",name="Amazon: Guardians of Eden",version="1.1",
     description="Amazon: Guardians of Eden (1992, Access Software)"}
 local floor=math.floor
 local function u16(s,p) return s:byte(p)+s:byte(p+1)*256 end
@@ -143,6 +143,62 @@ local function classify(e)
     local vid=video(s)
     if vid then e.kind="video";e.image=vid end
 end
+-- Conversation cells inherit the calling room's palette. Cxx is a character
+-- number, NOT a room number. These links follow CHARTBL and cmdConverse in
+-- the room scripts (ScummVM access/char.cpp and Amazon's game scripts).
+local character_rooms = {
+    [0]=5, [5]=19, [6]=17, [7]=18, [8]=18, [9]=27, [12]=27,
+    [13]=32, [14]=31, [16]=9, [17]=45, [25]=54, [29]=44,
+    [30]=25, [32]=9, [33]=61, [34]=25,
+}
+-- Multi-background cutscenes change palettes with loadBackground (special 2).
+-- Keys are archive/subfile; values are the screen whose palette is active.
+local scene_palettes = {
+    ["C03.AP/4"]="C03.AP/1", ["C03.AP/5"]="C03.AP/2", ["C03.AP/6"]="C03.AP/3",
+    ["C19.AP/1"]="S14.AP/4", ["S14.AP/5"]="S14.AP/1",
+    ["S14.AP/6"]="S14.AP/2", ["S14.AP/7"]="S14.AP/3",
+    ["S14.AP/8"]="S14.AP/4", ["S14.AP/9"]="S14.AP/4",
+    ["S28.AP/4"]="S28.AP/1", ["S28.AP/5"]="S28.AP/2", ["S28.AP/6"]="S28.AP/3",
+    ["S64.AP/4"]="S64.AP/3", ["S64.AP/5"]="S64.AP/2",
+    ["S64.AP/6"]="S64.AP/2", ["S64.AP/7"]="S64.AP/3", ["S64.AP/8"]="S64.AP/1",
+    ["S64.AP/9"]="S64.AP/2", ["S64.AP/10"]="S64.AP/2",
+    -- Opening::doTitle draws the countdown over screen 4, not the playfield.
+    ["S00.AP/1"]="S00.AP/0", ["S00.AP/2"]="S00.AP/4",
+}
+-- Shared sheets use a representative scene where the game draws them.
+local shared_palettes = {
+    ["MAN.LZ"]="S04.AP/0", ["JMAN.LZ"]="S00.AP/0",
+    ["OVERHEAD.LZ"]="S37.AP/0", ["MAYA.LZ"]="S29.AP/0",
+    ["ICONS.LZ"]="INV.AP/0", ["SUMMARY.AP"]="CHAPTER.AP/15",
+    ["CREDITS.AP"]="S58.AP/1", ["DEAD.AP"]="DEAD.AP/1", ["EST.AP"]="EST.AP/2",
+}
+local function assign_palettes(c)
+    local function available(key)
+        local e=key and c.byid["amazon/"..key]
+        return e and e.palpos and e.id.."/palette" or nil
+    end
+    for _,e in ipairs(c.entries) do
+        if e.kind=="sprites" or e.kind=="frame" or e.kind=="video" then
+            local key=e.file.."/"..e.index
+            local target=scene_palettes[key] or shared_palettes[e.file]
+            local char=tonumber(e.file:match("^C(%d+)%.AP$"))
+            if not target and char and character_rooms[char] then
+                target=string.format("S%02d.AP/0",character_rooms[char])
+            end
+            -- Chapter videos use the shared low colours. Chapter illustrations
+            -- use screen 15; heading frames in bank 17 use screen 16 (hook below).
+            if e.file=="CHAPTER.AP" or e.file:match("%.BLK$") then target="CHAPTER.AP/15" end
+            e.palette=available(target)
+            if not e.palette then
+                local candidate,count=nil,0
+                for _,p in ipairs(c.palettes) do
+                    if p.file==e.file then candidate=p;count=count+1 end
+                end
+                if count==1 then e.palette=candidate.id.."/palette" end
+            end
+        end
+    end
+end
 local cache
 local function catalog(path)
     if cache and cache.path==path then return cache end
@@ -163,15 +219,7 @@ local function catalog(path)
             end
         end
     end
-    -- Sprites and videos inherit a runtime palette. Suggest the only picture in
-    -- their archive; users can override this choice.
-    for _,e in ipairs(c.entries) do
-        if e.kind=="sprites" or e.kind=="frame" or e.kind=="video" then
-            local candidates={}
-            for _,p in ipairs(c.palettes) do if p.file==e.file then candidates[#candidates+1]=p end end
-            if #candidates==1 then e.palette=candidates[1].id.."/palette" end
-        end
-    end
+    assign_palettes(c)
     cache=c;return c
 end
 function engine.detect(path)
@@ -214,7 +262,15 @@ local function palette(c,id)
     return pal
 end
 function engine.default_palette(path,id)
-    local e=catalog(path).byid[id:match("^(amazon/[^/]+/%d+)")]
+    local c=catalog(path)
+    local key=id:match("^(amazon/[^/]+/%d+)")
+    local e=c.byid[key]
+    local frame=tonumber(id:match("/frame/(%d+)$"))
+    local target
+    if key=="amazon/CHAPTER.AP/17" and frame and frame>=15 then target="CHAPTER.AP/16"
+    elseif key=="amazon/S14.AP/5" and frame and frame>=2 then target="S14.AP/4" end
+    local p=target and c.byid["amazon/"..target]
+    if p and p.palpos then return p.id.."/palette" end
     return e and (e.palpos and e.id.."/palette" or e.palette)
 end
 function engine.load_resource(path,id,palette_id)
@@ -225,7 +281,9 @@ function engine.load_resource(path,id,palette_id)
         -- ScummVM passes flags=0: signed 8-bit mono samples.
         return {type="sound",sound=sound_create_pcm(rates[s:byte(6)],8,1,true,s:sub(33,32+n)),description=desc}
     elseif e.kind=="music" then return {type="midi",midi=midi_create_auto(s),description=desc} end
-    local pal=palette(c,palette_id or engine.default_palette(path,id))
+    local selected_palette=palette_id or engine.default_palette(path,id)
+    local pal=palette(c,selected_palette)
+    local pal_desc=selected_palette and selected_palette:gsub("^amazon/", ""):gsub("/palette$", "") or "grayscale fallback"
     if id:match("/palette$") or e.kind=="palette" then
         local p={};for y=0,127 do for x=0,127 do p[#p+1]=floor(y/8)*16+floor(x/8) end end
         return {type="image",image=image_create_indexed(128,128,p,pal),description=desc}
@@ -246,7 +304,7 @@ function engine.load_resource(path,id,palette_id)
             assert(i>=1 and i<#e.offsets,"Unknown frame");a=e.offsets[i]+1;b=e.offsets[i+1]
         end
         local pixels,w,h=sprite(s,a,b,true)
-        return {type="image",image=image_create_indexed(w,h,pixels,pal),description=desc.."; runtime palette suggested where available; select a palette to override"}
+        return {type="image",image=image_create_indexed(w,h,pixels,pal),description=desc.."; palette: "..pal_desc}
     elseif e.kind=="video" then
         local a,b=id:match("/video/(%d+)/(%d+)$");a=assert(tonumber(a));b=assert(tonumber(b))
         local vid=e.image
@@ -258,7 +316,7 @@ function engine.load_resource(path,id,palette_id)
             else video_delta(s,frame.a,frame.b,pixels,vid.w*vid.h) end
             if i>=a then handles[#handles+1]=image_create_indexed(vid.w,vid.h,pixels,pal) end
         end
-        return {type="animation",animation=animation_create(handles,100),image=handles[1],frames=handles,description=desc.."; all stored video packets at 100 ms; runtime palette suggested where available"}
+        return {type="animation",animation=animation_create(handles,100),image=handles[1],frames=handles,description=desc.."; all stored video packets at 100 ms; palette: "..pal_desc}
     end
     local lines={desc,"Scripts, animation commands and driver data are not interpreted.","Hex/ASCII preview (first 8192 bytes):"}
     for p=1,math.min(#s,8192),16 do
