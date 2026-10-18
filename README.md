@@ -66,7 +66,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
 | Runaway: A Road Adventure | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
-| SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object Sprites, Actor Costumes (animated), Fonts (NUT), Music (MIDI + iMUSE), Sound Effects, Speech | ✅ Working |
+| SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
@@ -83,6 +83,13 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+SCUMM V5-V8 supports per-room object sprites and actor costumes (`COST` for
+V5/V6, `AKOS` for V7/V8), with cel sheets and animation previews. Music includes
+MIDI tracks from sound resources and digital iMUSE audio, including `.BUN`
+music bundles for The Dig and The Curse of Monkey Island. Sound effects and
+speech are also available when present in the game data. SCUMM V2 support
+remains limited to backgrounds.
 
 > \* Fable opens the original PC CD folder directly, detected by `DECORS.DAT`
 > containing `101DECOR.RAW` and `101DECOR.PAL`. The supplied edition exposes
