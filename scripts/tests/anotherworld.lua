@@ -56,6 +56,39 @@ assert(#draws==1 and draws[1].offset==0 and text:find('drawShape',1,true))
 reject(disassemble,string.char(0x40))
 reject(disassemble,string.char(27))
 reject(disassemble,string.char(7)..be16(65535))
+-- Palette contexts must follow branches/calls rather than the byte order of
+-- unrelated routines. Palettes chosen after drawing apply to that display too.
+local infer=up(up(engine.get_resources,'index'),'infer_palettes')
+local choose=up(up(engine.get_resources,'index'),'choose_palette')
+local function pal(n) return string.char(11,n,255) end
+local draw=string.char(128,0,0,0)
+local display=string.char(16,255)
+local stop=string.char(17)
+local function contexts(code)
+    local _,_,_,_,instructions=disassemble(code)
+    return infer(instructions)
+end
+local cs=contexts(pal(1)..draw..display..pal(2)..draw..display..stop)
+assert(cs[3][1] and not cs[3][2] and cs[12][2] and not cs[12][1])
+cs=contexts(pal(1)..draw..pal(2)..display..stop)
+assert(cs[3][2]>cs[3][1], 'Palette selected before display must outrank the old palette')
+cs=contexts(draw..display..pal(2)..stop)
+assert(not cs[0], 'Do not borrow a palette from the following display')
+cs=contexts(pal(2)..string.char(4)..be16(11)..draw..stop..pal(5)..string.char(5))
+assert(cs[6][5] and not cs[6][2], 'Callee palette must reach its caller after return')
+cs=contexts(pal(3)..string.char(8,1)..be16(8)..stop..draw..stop)
+assert(cs[8][3], 'Installed tasks inherit candidate palette context')
+cs=contexts(string.char(10,0,0,0)..be16(12)..pal(1)..string.char(7)..be16(15)..pal(2)..draw..display..stop)
+assert(cs[15][1] and cs[15][2], 'Keep both branch palette candidates')
+local function rgb(c) local out={};for i=1,768 do out[i]=0 end;out[4]=c;return out end
+local pals={a=rgb(17),b=rgb(34),black=rgb(0)}
+assert(choose({b=1,a=1},pals,{[1]=true},'b')=='a', 'Ties must be deterministic')
+assert(choose({black=10,b=1},pals,{[1]=true},'a')=='b', 'Reject black fade candidates')
+assert(choose({},pals,{[1]=true},'b')=='b', 'Retain visible fallback when context is missing')
+-- A palette can have nonblack entries which this image never uses.
+local unrelated=rgb(0);unrelated[7]=255;pals.unrelated=unrelated
+assert(choose({unrelated=10,a=1},pals,{[1]=true},'b')=='a')
+print('Another World per-image palette context regressions passed')
 local memory=''
 function file_open() return true end
 function file_size() return #memory end

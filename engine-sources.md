@@ -1015,6 +1015,15 @@ Reference: local `../scummvm-fork/engines/awe/`; upstream interpreter reference:
 - `script.cpp::executeTask`, `static_res.cpp::OPCODE_TABLE`: static reachable
   disassembly for normal and compact drawing opcodes, branching/calls/tasks.
   Extract shape roots only from valid decoded instructions; no offset guessing.
+- Per-image palette inference retains instruction addresses and constructs control
+  flow across branches, calls/returns and installed task entries. Incoming palette
+  definitions stop at another assignment; backward lookup finds palettes selected
+  after drawing but before a display update. Proximity-weighted votes across all
+  uses select a representative VGA palette per image. Black fade candidates are
+  excluded using that image's color indices; ties are stable. Missing visible
+  context uses a palette from the loading part, while verified logo mappings remain
+  explicit. This is conservative static inference: call sites can merge and task
+  scheduling/branch conditions are not simulated. Manual palette overrides remain.
 - `video.cpp::drawShape`, `fillPolygon`, `drawShapeParts`: native-scale polygon
   vertices and composite child coordinates, word-addressed references and
   optional child colors. Explorer uses an independent scanline rasterizer;

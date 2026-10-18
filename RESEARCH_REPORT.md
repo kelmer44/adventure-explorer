@@ -3697,6 +3697,27 @@ not claim pixel-exact game scan conversion, VM animation, scene composition,
 built-in head masks or page-copy effects. Music modules, font/text in the EXE,
 and alternate editions are outside decoded playback support.
 
+Per-image defaults now use static palette contexts rather than one palette for
+an entire part. The decoder records instruction PCs, branch/call/task targets,
+resource loads and palette commands. Call return sites are summarized without
+executing scripts. Multi-source shortest-path passes find preceding palette
+assignments and following assignments before the next display update; another
+assignment stops propagation. The latter receives twice the proximity weight,
+because the displayed image can acquire its palette after its geometry is drawn.
+Votes accumulate across uses of a reused shape or bitmap. Candidate palettes
+must illuminate a color index used by the image; otherwise a visible part palette
+is retained. Deterministic ties choose the lowest palette ID. Verified logo fade
+endpoints remain explicit. Descriptions identify inferred versus fallback palettes.
+
+These defaults are representative, not a reconstruction of runtime scene state:
+call returns are context-insensitive, installed tasks are analyzed conservatively,
+and conditions, scheduling, page copies and palette animation are not executed.
+Synthetic regressions cover palette reassignment, both branch arms, call returns,
+task inheritance, drawing before palette selection, display boundaries, black
+fade rejection and stable fallback/ties. LuaJ checks defaults across all image
+IDs, different palettes within the introduction, and a manual override without
+changing the automatic default.
+
 Validation commands: `lua scripts/tests/anotherworld.lua ~/Desktop/ags/AW`
 and `ANOTHER_WORLD_TEST_PATH=... ./gradlew --offline test --tests
 '*AnotherWorldIntegrationTest'`. The former loads all 6098 leaves and tests

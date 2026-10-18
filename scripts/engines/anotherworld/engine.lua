@@ -1,7 +1,7 @@
 -- Another World, original DOS BANKxx / MEMLIST.BIN edition.
 -- Format reference: ScummVM engines/awe/{resource,unpack,video,script}.cpp.
 local engine = {id='anotherworld', name='Another World',
-    description='Another World / Out of This World (1991, Delphine Software), DOS', version='1.0'}
+    description='Another World / Out of This World (1991, Delphine Software), DOS', version='1.1'}
 local floor = math.floor
 local function u16(s,p)
     assert(p>=1 and p+1<=#s,'Truncated word')
@@ -98,7 +98,7 @@ local opnames={'movConst','mov','add','addConst','call','ret','yield','jmp','ins
 local lengths={4,3,3,4,3,1,1,3,4,4,0,3,4,2,3,3,2,1,6,3,4,4,4,4,6,3,6}
 -- Follow both branch arms, calls and installed tasks. Never execute game code.
 local function disassemble(s)
-    local queue={0};local head=1;local seen={};local rows={};local draws={};local rates={};local loads={}
+    local queue={0};local head=1;local seen={};local rows={};local draws={};local rates={};local loads={};local instructions={}
     while head<=#queue do
         local pc=queue[head];head=head+1
         assert(pc>=0 and pc<#s,'Script target outside bank')
@@ -107,14 +107,14 @@ local function disassemble(s)
             local p=pc+1;local op=s:byte(p);local len,name
             if op>=128 then
                 len=4;name='drawShape';assert(p+len-1<=#s,'Truncated draw')
-                draws[#draws+1]={offset=((op*256+s:byte(p+1))*2)%65536,shared=false}
+                draws[#draws+1]={pc=pc,offset=((op*256+s:byte(p+1))*2)%65536,shared=false}
             elseif op>=64 then
                 len=5
                 if floor(op/32)%2==0 and floor(op/16)%2==0 then len=len+1 end
                 if floor(op/8)%2==0 and floor(op/4)%2==0 then len=len+1 end
                 if op%4==1 or op%4==2 then len=len+1 end
                 name='drawShape';assert(p+len-1<=#s,'Truncated draw')
-                draws[#draws+1]={offset=(u16(s,p+1)*2)%65536,shared=op%4==3}
+                draws[#draws+1]={pc=pc,offset=(u16(s,p+1)*2)%65536,shared=op%4==3}
             else
                 assert(op<=26,'Unknown script opcode');name=opnames[op+1];len=lengths[op+1]
                 if op==10 then
@@ -130,6 +130,13 @@ local function disassemble(s)
                     rates[res]=rates[res] or {};rates[res][floor(7159092/(periods[period+1]*2))]=true
                 elseif op==25 then loads[u16(s,p+1)]=true end
             end
+            local ins={pc=pc,op=op,next=pc+len}
+            if op==4 or op==7 then ins.target=u16(s,p+1)
+            elseif op==8 or op==9 then ins.target=u16(s,p+2)
+            elseif op==10 then ins.target=u16(s,p+len-2)
+            elseif op==11 then ins.palette=s:byte(p+1)
+            elseif op==25 then ins.resource=u16(s,p+1) end
+            instructions[pc]=ins
             local hex={};for i=p,p+len-1 do hex[#hex+1]=string.format('%02X',s:byte(i)) end
             rows[pc]=string.format('%04X  %-23s %s',pc,table.concat(hex,' '),name)
             if op==5 or op==7 or op==17 then break end
@@ -138,7 +145,100 @@ local function disassemble(s)
     end
     local keys={};for k in pairs(rows) do keys[#keys+1]=k end;table.sort(keys)
     local text={};for _,k in ipairs(keys) do text[#text+1]=rows[k] end
-    return draws,rates,loads,table.concat(text,'\n')
+    return draws,rates,loads,table.concat(text,'\n'),instructions
+end
+-- Infer representative palette contexts from decoded control flow, not byte order.
+-- Incoming definitions stop at the next palette assignment. A second, backward
+-- pass sees palettes selected after drawing but before the next display update.
+-- Calls/returns and installed task entries participate conservatively: concurrent
+-- task scheduling and branch conditions are not executed by this analysis.
+local function infer_palettes(instructions)
+    local forward,backward,calls={},{},{}
+    for pc in pairs(instructions) do forward[pc]={};backward[pc]={} end
+    local function edge(a,b)
+        if not instructions[b] then return end
+        forward[a][#forward[a]+1]=b;backward[b][#backward[b]+1]=a
+    end
+    for pc,ins in pairs(instructions) do
+        if ins.op==4 then
+            edge(pc,ins.target);calls[#calls+1]=ins
+        elseif ins.op==7 then edge(pc,ins.target)
+        elseif ins.op~=5 and ins.op~=17 then
+            edge(pc,ins.next)
+            if ins.target then edge(pc,ins.target) end
+        end
+    end
+    -- Find a callee's own returns; nested calls are summarized by their local
+    -- continuation, and task installation does not make the task a callee.
+    local returns={}
+    for _,call in ipairs(calls) do
+        if not returns[call.target] then
+            local found,seen,queue={},{},{call.target};local head=1
+            while head<=#queue do
+                local pc=queue[head];head=head+1
+                if not seen[pc] and instructions[pc] then
+                    seen[pc]=true;local ins=instructions[pc]
+                    if ins.op==5 then found[#found+1]=pc
+                    elseif ins.op==4 or ins.op==8 then queue[#queue+1]=ins.next
+                    else for _,nextpc in ipairs(forward[pc]) do queue[#queue+1]=nextpc end end
+                end
+            end
+            returns[call.target]=found
+        end
+    end
+    for _,call in ipairs(calls) do for _,ret in ipairs(returns[call.target]) do edge(ret,call.next) end end
+    local sources={}
+    for pc,ins in pairs(instructions) do
+        if ins.palette and ins.palette<32 then
+            sources[ins.palette]=sources[ins.palette] or {};table.insert(sources[ins.palette],pc)
+        end
+    end
+    local result={}
+    for slot,starts in pairs(sources) do
+        local function distances(graph,after)
+            local dist,queue={},{};local head=1
+            for _,pc in ipairs(starts) do dist[pc]=0;queue[#queue+1]=pc end
+            while head<=#queue do
+                local pc=queue[head];head=head+1
+                for _,nextpc in ipairs(graph[pc]) do
+                    local ins=instructions[nextpc]
+                    if dist[nextpc]==nil and ins.op~=11 and (not after or ins.op~=16) then
+                        dist[nextpc]=dist[pc]+1;queue[#queue+1]=nextpc
+                    end
+                end
+            end
+            return dist
+        end
+        local before,after=distances(forward,false),distances(backward,true)
+        for pc in pairs(instructions) do
+            local a,b=before[pc],after[pc]
+            if a or b then
+                result[pc]=result[pc] or {}
+                result[pc][slot]=(a and 1/(a+1) or 0)+(b and 2/(b+1) or 0)
+            end
+        end
+    end
+    return result
+end
+-- Exclude fade-to-black candidates using the indices this particular image uses.
+-- Ties are stable, independent of Lua table iteration order.
+local function choose_palette(scores,palettes,used,fallback,fallbackPalettes)
+    local function visible(pal)
+        for c in pairs(used) do
+            if pal[c*3+1]+pal[c*3+2]+pal[c*3+3]>0 then return true end
+        end
+        return false
+    end
+    local best,score=nil,-1
+    for id,v in pairs(scores) do
+        if palettes[id] and visible(palettes[id]) and
+                (v>score or (v==score and (not best or id<best))) then best,score=id,v end
+    end
+    if best then return best,'script palette context' end
+    if fallback and palettes[fallback] and visible(palettes[fallback]) then return fallback,'visible part palette fallback' end
+    local candidates={};for id in pairs(fallbackPalettes or palettes) do candidates[#candidates+1]=id end;table.sort(candidates)
+    for _,id in ipairs(candidates) do if visible(palettes[id]) then return id,'visible part palette fallback' end end
+    return fallback,'part palette fallback'
 end
 local cachedPath,entries,tree,items,cache
 local function payload(path,e)
@@ -251,15 +351,20 @@ local function index(path)
         assert(not items[id],'Duplicate resource ID');r=r or {};r.kind=kind;items[id]=r
         parent[#parent+1]={id=id,name=name,type=kind=='palette' and 'palette' or (kind=='bitmap' or kind=='shape') and 'image' or kind=='sound' and 'sound' or 'data'}
     end
-    local rates,bitmapParts={},{}
-    local defaultPals={}
+    local rates,bitmapParts,bitmapScores={},{},{}
+    local defaultPals,palettes,partPalettes={},{},{}
     for _,e in ipairs(entries) do
         if e.kind==3 then
             local data=payload(path,e);local slot=0
+            partPalettes[e.num]={}
+            for candidate=0,31 do
+                local id=string.format('pal_%02x_%02x_vga',e.num,candidate)
+                palettes[id]=palette(data,candidate,false);partPalettes[e.num][id]=palettes[id]
+            end
             -- Palette zero can be a black fade frame. Use the first visible VGA
             -- palette for isolated artwork; the original VM chooses these at runtime.
             for candidate=0,31 do
-                local pal=palette(data,candidate,false);local visible=false
+                local pal=partPalettes[e.num][string.format('pal_%02x_%02x_vga',e.num,candidate)];local visible=false
                 for i=1,48 do if pal[i]~=0 then visible=true;break end end
                 if visible then slot=candidate;break end
             end
@@ -269,10 +374,20 @@ local function index(path)
     for _,part in ipairs(parts) do
         local code=entries[part[2]+1]
         if code and code.kind==4 then
-            local draws,rs,loads,text=disassemble(payload(path,code))
+            local draws,rs,loads,text,instructions=disassemble(payload(path,code))
+            local contexts=infer_palettes(instructions)
             add(cat('scripts','Scripts (static disassembly)'),'script_'..code.num,part[5],'script',{entry=code,text=text})
             for num,rr in pairs(rs) do rates[num]=rates[num] or {};for hz in pairs(rr) do rates[num][hz]=true end end
             for num in pairs(loads) do if not bitmapParts[num] then bitmapParts[num]=part[1] end end
+            for pc,ins in pairs(instructions) do
+                if ins.resource and entries[ins.resource+1] and entries[ins.resource+1].kind==2 then
+                    local scores=bitmapScores[ins.resource] or {};bitmapScores[ins.resource]=scores
+                    for slot,v in pairs(contexts[pc] or {}) do
+                        local id=string.format('pal_%02x_%02x_vga',part[1],slot)
+                        scores[id]=(scores[id] or 0)+v
+                    end
+                end
+            end
             local seen={}
             for _,d in ipairs(draws) do
                 local num=d.shared and part[4] or part[3]
@@ -281,12 +396,29 @@ local function index(path)
                     if not seen[id] then
                         seen[id]=true
                         -- Validate referenced roots only, without guessing bank offsets.
-                        polygons(payload(path,entries[num+1]),d.offset)
+                        local used={}
+                        for _,poly in ipairs(polygons(payload(path,entries[num+1]),d.offset)) do
+                            if poly.color<16 then used[poly.color]=true
+                            elseif poly.color==16 then for c=8,15 do used[c]=true end
+                            else used[0]=true end
+                        end
                         add(cat('shapes_'..part[3],'Polygon Artwork / '..part[5]),id,string.format('Resource %02X / offset %04X',num,d.offset),'shape',
-                            {entry=entries[num+1],offset=d.offset,pal=defaultPals[part[1]]})
+                            {entry=entries[num+1],offset=d.offset,pal=defaultPals[part[1]],used=used,
+                                scores={},paletteBank=part[1]})
+                    end
+                    local r=items[id]
+                    for slot,v in pairs(contexts[d.pc] or {}) do
+                        local palid=string.format('pal_%02x_%02x_vga',part[1],slot)
+                        r.scores[palid]=(r.scores[palid] or 0)+v
                     end
                 end
             end
+        end
+    end
+    for _,r in pairs(items) do
+        if r.kind=='shape' then
+            r.pal,r.paletteSource=choose_palette(r.scores,partPalettes[r.paletteBank],r.used,r.pal)
+            r.scores=nil;r.used=nil
         end
     end
     for _,e in ipairs(entries) do
@@ -298,15 +430,18 @@ local function index(path)
             end end
         elseif e.kind==2 then
             -- Use the visible ends of the protection bytecode's logo fade sequences; other screens
-            -- default to the loading part's first visible palette; all are selectable.
-            local pal=defaultPals[bitmapParts[e.num] or 0x17]
+            -- use their script palette contexts, with a visible part-palette fallback.
+            local bank=bitmapParts[e.num] or 0x17
+            local used={};for _,c in ipairs(bitmap(payload(path,e))) do used[c]=true end
+            local pal,source=choose_palette(bitmapScores[e.num] or {},palettes,used,defaultPals[bank],partPalettes[bank])
             if e.num==0x12 then pal='pal_14_04_vga'
             elseif e.num==0x13 then pal='pal_14_09_vga'
             elseif e.num==0x47 then pal='pal_14_0f_vga'
             elseif e.num==0x53 then pal='pal_14_09_vga' end
+            if e.num==0x12 or e.num==0x13 or e.num==0x47 or e.num==0x53 then source='scripted logo fade endpoint' end
             local labels={[0x12]='Interplay logo',[0x13]='Out of This World title',
                 [0x47]='Delphine Software logo',[0x53]='Another World title'}
-            add(cat('bitmaps','Bitmaps and Screens'),'bitmap_'..e.num,(labels[e.num] and labels[e.num]..' / ' or '')..name,'bitmap',{entry=e,pal=pal})
+            add(cat('bitmaps','Bitmaps and Screens'),'bitmap_'..e.num,(labels[e.num] and labels[e.num]..' / ' or '')..name,'bitmap',{entry=e,pal=pal,paletteSource=source})
         elseif e.kind==0 and e.size>8 then
             local rr=rates[e.num] or {[9943]=true};local sorted={};for hz in pairs(rr) do sorted[#sorted+1]=hz end;table.sort(sorted)
             for _,hz in ipairs(sorted) do
@@ -338,6 +473,9 @@ function engine.load_resource(path,id,override)
     local pr=r.kind=='palette' and r or items[override or r.pal]
     assert(pr and pr.kind=='palette','Invalid palette selection')
     local pal=palette(payload(path,pr.entry),pr.slot,pr.ega)
+    if r.kind~='palette' then
+        desc=desc..' / palette '..(override or r.pal)..' ('..(override and override~=r.pal and 'manual override' or r.paletteSource)..')'
+    end
     local w,h,px
     if r.kind=='palette' then
         w,h=256,16;px={};for y=0,15 do for x=0,255 do px[#px+1]=floor(x/16) end end

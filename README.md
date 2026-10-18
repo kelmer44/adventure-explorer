@@ -95,9 +95,13 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 > Polygon previews retain composite child positions at native scale, with a
 > standalone scanline rasterizer and black backdrop. They do not reproduce
 > the game's scene composition, page-copy effects, built-in head masks, VM
-> animation, zoom or timing. Default artwork palettes use the part's first
-> visible VGA palette; logos have explicit palettes and every palette can be
-> selected manually. Samples use script-referenced pitches when available,
+> animation, zoom or timing. Each image now gets a default inferred from palette
+> commands along script control flow, including palettes selected between drawing
+> and display. Reused shapes get a representative palette from their uses; missing
+> usable contexts retain a visible part-palette fallback. Logos keep their
+> verified fade endpoints, and every palette can still be selected manually.
+> Preview descriptions identify inferred defaults, fallbacks and manual overrides.
+> Samples use script-referenced pitches when available,
 > otherwise a labeled 9943 Hz preview rate; loop segments play once. The three
 > music modules have metadata/hex previews only. Text/fonts embedded in the
 > executable, other platforms, demos and anniversary editions are unsupported.

@@ -26,18 +26,28 @@ class AnotherWorldIntegrationTest {
                 all.filter { it.type == "palette" }.let { it.take(2) + it.takeLast(2) } +
                 all.filter { it.type == "sound" }.let { it.take(3) + it.takeLast(3) } +
                 game.resources.filter { it.id.startsWith("shapes_") }.flatMap { it.children.take(2) + it.children.takeLast(2) }
+            // Defaults must vary within a part, rather than all sharing its first
+            // visible palette. Shared artwork still gets one stable representative.
+            val intro = all.filter { it.id.startsWith("shape_19_") }
+            assertTrue("Expected per-image palette contexts within the introduction",
+                intro.map { manager.defaultPaletteFor(path, it.id) }.toSet().size > 3)
+            val defaults = all.filter { it.type == "image" }.associate { it.id to manager.defaultPaletteFor(path, it.id) }
+            assertTrue(defaults.values.all { it != null })
+            val paletteIds = all.filter { it.type == "palette" }.map { it.id }.toSet()
+            assertTrue(defaults.values.all { it in paletteIds })
             val out = File("build/anotherworld-previews").apply { mkdirs() }
+            var contextualImages = 0
             for (node in selected) {
-                val resource = manager.loadResource(path, node.id)
-                assertNotNull(node.id, resource)
+                val resource = manager.loadResource(path, node.id) ?: error("Failed to decode ${node.id}")
+                if (resource.description?.contains("script palette context") == true) contextualImages++
                 when (node.type) {
-                    "image", "palette" -> assertNotNull(node.id, resource!!.image)
+                    "image", "palette" -> assertNotNull(node.id, resource.image)
                     "sound" -> {
-                        val sound = resource!!.soundData!!
+                        val sound = resource.soundData!!
                         assertTrue(node.id, sound.samples.isNotEmpty())
                         assertTrue(node.id, sound.signed)
                     }
-                    else -> assertNotNull(node.id, resource!!.textContent)
+                    else -> assertNotNull(node.id, resource.textContent)
                 }
                 if (node.id.startsWith("bitmap_")) {
                     val image = resource.image!!
@@ -49,6 +59,16 @@ class AnotherWorldIntegrationTest {
                 }
                 manager.releaseDecodedResources()
             }
+            assertTrue("Expected script-inferred defaults in exported previews", contextualImages > 10)
+            val originalDefault = manager.defaultPaletteFor(path, "bitmap_68")
+            val automatic = manager.loadResource(path, "bitmap_68")!!.image!!
+            val manual = manager.loadResource(path, "bitmap_68", "pal_20_01_vga")!!
+            assertTrue(manual.description!!.contains("manual override"))
+            assertTrue((0 until automatic.height).any { y -> (0 until automatic.width).any { x -> automatic.getRGB(x, y) != manual.image!!.getRGB(x, y) } })
+            val explicitDefault = manager.loadResource(path, "bitmap_68", originalDefault)!!
+            assertTrue(explicitDefault.description!!.contains("script palette context"))
+            assertEquals(originalDefault, manager.defaultPaletteFor(path, "bitmap_68"))
+            manager.releaseDecodedResources()
             val title = manager.loadResource(path, "bitmap_18")!!.image!!
             assertTrue("Interplay logo must have a visible default palette",
                 (0 until title.height).any { y -> (0 until title.width).any { x -> title.getRGB(x, y) and 0xFFFFFF != 0 } })
