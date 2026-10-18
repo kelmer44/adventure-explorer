@@ -470,27 +470,27 @@ end
 -- palette or a type-3 palette resource).
 local SCENE_PALETTE = require("neverhood_palette")
 
-local scene_pal_cache = {}
-
 local function load_mapped_palette(idx, hash)
     local m = SCENE_PALETTE[hash]
     if not m then return nil end
-    local cached = scene_pal_cache[m]
+    -- Palettes belong to a particular installation (retail/demo/localization).
+    idx.palette_cache = idx.palette_cache or {}
+    local cached = idx.palette_cache[m]
     if cached ~= nil then return cached or nil end
     local pal = nil
-    local e = idx.map[m]
+    local e = resolve_entry(idx, m)
     if e then
         local d = read_resource(idx, m, nil)
         if d then
             if e.entry.type == 3 then
                 if #d >= 1024 then pal = palette_from_1024(d) end
-            else
+            elseif e.entry.type == 2 then
                 local b = parse_bitmap(d)
                 if b and b.palette then pal = palette_from_1024(b.palette) end
             end
         end
     end
-    scene_pal_cache[m] = pal or false
+    idx.palette_cache[m] = pal or false
     return pal
 end
 
@@ -513,8 +513,10 @@ local function load_bitmap(idx, hash, palette_id)
     if b.rle then pixels = unpack_rle(d, b.pixofs, b.w, b.h)
     else pixels = unpack_normal(d, b.pixofs, b.w, b.h) end
 
-    local pal, palnote
-    if b.palette then
+    local pal, palnote = load_override_palette(idx, palette_id), "external palette"
+    if pal then
+        -- An explicit viewer selection takes precedence over embedded colours.
+    elseif b.palette then
         pal = palette_from_1024(b.palette)
         palnote = "embedded palette"
     else
@@ -586,13 +588,15 @@ local function load_animation(idx, hash, palette_id)
     local truncated = false
     if frameCount > MAX_ANIM_FRAMES then frameCount = MAX_ANIM_FRAMES truncated = true end
 
-    local pal, palnote
-    if paletteDataOfs > 0 and paletteDataOfs + 1024 <= #d then
+    local pal, palnote = load_override_palette(idx, palette_id), "external palette"
+    if pal then
+        -- Match bitmap palette override behaviour.
+    elseif paletteDataOfs > 0 and paletteDataOfs + 1024 <= #d then
         pal = palette_from_1024(d:sub(paletteDataOfs + 1, paletteDataOfs + 1024))
         palnote = "embedded palette"
     else
-        pal = load_override_palette(idx, palette_id)
-        if pal then palnote = "external palette" else pal = grayscale_palette() palnote = "grayscale" end
+        pal = load_mapped_palette(idx, hash)
+        if pal then palnote = "scene palette" else pal = grayscale_palette() palnote = "grayscale" end
     end
 
     local frames = {}
@@ -797,8 +801,14 @@ function engine.get_resources(game_path)
         else
             list = groups[t] or {}
         end
-        if #list > 0 then
+        if #list > 0 or t == 3 then
             local children = build_children(list, KIND[t], ntype)
+            -- The viewer falls back to the first palette when no companion
+            -- exists. Preserve automatic colours instead of applying an
+            -- unrelated type-3 palette just by opening a sprite.
+            if t == 3 then
+                table.insert(children, 1, { id = "pal_auto", name = "Automatic (embedded / scene palette)", type = "palette" })
+            end
             resources[#resources + 1] = {
                 id = cid,
                 name = string.format("%s (%d)", cname, #children),
@@ -810,8 +820,15 @@ function engine.get_resources(game_path)
     return resources
 end
 
+function engine.default_palette(game_path, resource_id)
+    if resource_id:match("^bmp_") or resource_id:match("^anim_") then return "pal_auto" end
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
     if type(resource_id) ~= "string" then return nil end
+    if resource_id == "pal_auto" then
+        return { type = "text", text = "Use the resource's embedded palette, scene palette, or grayscale when neither is available." }
+    end
     local kind, hex = resource_id:match("^(%a+)_(%x%x%x%x%x%x%x%x)$")
     if not kind then return nil end
     local idx = get_index(game_path)

@@ -34,7 +34,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Bud Tucker in Double Trouble | 1996 | `tucker` | Background Tiles, Sprite Sheets/Frames, Animation Previews, Inventory Sprites, Masks, Palettes, Speech, Sound, Music, Text, Data | ✅ Working* |
 | The City of Lost Children | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
-| Cruise for a Corpse | 1991 | `cruise` | Backgrounds | ✅ Working |
+| Cruise for a Corpse | 1991 | `cruise` | Backgrounds, Sprite Frames, Polygon Actors, Palettes | ✅ Working |
 | Curse of Enchantia | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
@@ -45,7 +45,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Fable | 1996 | `fable` | Backgrounds, Sprite Frames, Frame Bank Previews, Palettes, Dialogue, Speech, PCM Sound | ✅ Working* |
 | Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
-| Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds | ✅ Working |
+| Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds, Sprite Frames, Palettes | ✅ Working |
 | Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
 | Grim Fandango | 1998 | `grim` | RGB565 Bitmaps, Depth Masks, Textures, Palettes, Speech, Sound, Music, Dialogue, Scene Data | ✅ Working* |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
@@ -66,11 +66,12 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Ripley's Believe It or Not!: The Riddle of Master Lu | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
 | Runaway: A Road Adventure | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
+| SCUMM V3 EGA (tested: Loom) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2.1 — tested: Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
-| Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds | ✅ Working |
+| Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
 | The Beverly Hillbillies | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -90,6 +91,37 @@ MIDI tracks from sound resources and digital iMUSE audio, including `.BUN`
 music bundles for The Dig and The Curse of Monkey Island. Sound effects and
 speech are also available when present in the game data. SCUMM V2 support
 remains limited to backgrounds.
+
+> \* SCUMM V3 EGA opens the original Loom `00.LFL` + numbered `.LFL` files
+> directly. Verified 76 backgrounds, 594 object sprites, 159 costume sheets and
+> 2,521 animation previews. Invisible interaction rectangles sharing an image
+> pointer are omitted from the sprite list. Object previews use a black backdrop
+> where the image copies pixels from the surrounding scene. V3 music/sound,
+> fonts, VGA/small-header releases and other platform variants are not decoded.
+> V4 is still unsupported.
+
+> Simon 1 & 2: fixed room composition, palette banks, sprite transparency and
+> Simon 2 scrolling backgrounds (full-width images are also available separately).
+> Includes inventory icons, script-derived sprite animation previews, sound effects
+> and speech from VOC/WAV/MP3 banks, Simon 1 GMF music and Simon 2 GM/MT-32 XMIDI
+> music. Audio entries with identical offsets appear once. Animation previews
+> explore static script branches and use a common frame delay; runtime variables,
+> actor placement, and every scene-dependent palette variant are not simulated.
+> XMIDI banks preview their first sequence. Verified with the local DOS data;
+> Amiga/Atari/PC-98 graphics and Ogg/FLAC audio are not supported by this decoder.
+
+> Future Wars / Operation Stealth expose ANI/ANM frames and SET bitmaps; Cruise
+> exposes SET/SEC bitmap frames (1/4/5/8-bit encodings). Each volume has separate
+> Backgrounds, Sprites and Palettes groups. Sprite colours default to a matching
+> scene-name background, or an archive background fallback; choose another palette
+> for actors reused across scenes. Previews preserve all palette indices on an
+> opaque canvas. Cruise also exposes **Polygon Actors and Vector Art** with 2,812
+> stored poses, including mirrored references, through the model viewer. These are
+> flat vector shapes, shown front-on with zoom, wireframe, palette selection and PNG
+> export; authored colours, concave boundaries and drawing order are preserved.
+> Script-driven palette changes and animation timing are not replayed. Validated
+> locally with 1,989 Future Wars and 2,345 Cruise bitmap frames, plus every Cruise
+> polygon pose; Operation Stealth formats have synthetic tests.
 
 > \* Fable opens the original PC CD folder directly, detected by `DECORS.DAT`
 > containing `101DECOR.RAW` and `101DECOR.PAL`. The supplied edition exposes
@@ -642,7 +674,7 @@ adventure-explorer/
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
 │       ├── saga/engine.lua       # I Have No Mouth, and I Must Scream
-│       ├── scumm/engine.lua      # SCUMM V5-V8 (+ scumm_cost/snd/nut/util.lua modules)
+│       ├── scumm/engine.lua      # SCUMM V3 EGA / V5-V8 (+ scumm_v3/cost/snd/nut/util.lua modules)
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)

@@ -7,7 +7,7 @@ import kotlin.math.*
 /** Small orthographic software renderer: no GPU/native dependency, usable in headless exports. */
 object ModelRenderer {
     fun render(model: ModelData, width: Int = 800, height: Int = 600,
-               yaw: Double = 25.0, pitch: Double = 10.0, zoom: Double = 1.0,
+               yaw: Double = if (model.planar) 0.0 else 25.0, pitch: Double = if (model.planar) 0.0 else 10.0, zoom: Double = 1.0,
                wireframe: Boolean = false): BufferedImage {
         require(width in 1..2048 && height in 1..2048)
         require(yaw.isFinite() && pitch.isFinite() && zoom.isFinite() && zoom > 0)
@@ -24,6 +24,24 @@ object ModelRenderer {
             val xx = cos(a)*x-sin(a)*y; val yy = sin(a)*x+cos(a)*y
             doubleArrayOf(width/2.0+xx*scale*radius,
                 height/2.0-(cos(b)*z-sin(b)*yy)*scale*radius, cos(b)*yy+sin(b)*z)
+        }
+        if (model.planar) {
+            // Cruise poses are painter-ordered vector artwork. Java2D preserves
+            // concave boundaries, exact colours and line/polygon interleaving.
+            val image=BufferedImage(width,height,BufferedImage.TYPE_INT_RGB)
+            val g=image.createGraphics()
+            try {
+                g.color=java.awt.Color(0x1A1D24);g.fillRect(0,0,width,height)
+                for (face in model.faces) {
+                    val xs=face.indices.map { points[it][0].roundToInt() }.toIntArray()
+                    val ys=face.indices.map { points[it][1].roundToInt() }.toIntArray()
+                    g.color=java.awt.Color(if (wireframe) 0xA6D8F5 else face.rgb ?: 0xFFFFFF)
+                    if (xs.size==2) g.drawLine(xs[0],ys[0],xs[1],ys[1])
+                    else if (wireframe) g.drawPolygon(xs,ys,xs.size)
+                    else g.fillPolygon(xs,ys,xs.size)
+                }
+            } finally { g.dispose() }
+            return image
         }
         val pixels = IntArray(width*height) { 0xFF1A1D24.toInt() }
         val depth = DoubleArray(pixels.size) { Double.POSITIVE_INFINITY }

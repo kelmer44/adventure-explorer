@@ -11,4 +11,6 @@ data class ModelData(val vertices: List<ModelVertex>, val faces: List<ModelFace>
                      val materialNames: List<String> = emptyList(),
                      val textures: Map<Int, java.awt.image.BufferedImage> = emptyMap(),
                      val textureOptions: List<ResourceNode> = emptyList(),
-                     val selectedTextureId: String? = null)
+                     val selectedTextureId: String? = null,
+                     /** Ordered flat artwork; two-index faces are vector lines. */
+                     val planar: Boolean = false)

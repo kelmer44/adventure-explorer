@@ -10,7 +10,7 @@ local engine = {}
 engine.name        = "Future Wars / Operation Stealth"
 engine.id          = "cine"
 engine.description = "Future Wars (1989) / Operation Stealth (1990) - Delphine Software"
-engine.version     = "2.0"
+engine.version     = "3.0"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -47,6 +47,10 @@ local function cine_unpack(src_data, unpacked_size)
     -- Read 12-byte trailer from end of source (three BE uint32 words)
     local read_pos = src_len - 3   -- last 4-byte word (1-based start)
     local datasize = u32be(src_data, read_pos)
+    -- The trailer is authoritative: some directory sizes include a padding byte
+    -- (for example Cruise LOGOFIN.SET). Decode from its true end, not that padding.
+    assert(datasize > 0 and datasize <= unpacked_size and datasize <= 16777216, "Invalid unpacked size")
+    unpacked_size = datasize
     read_pos = read_pos - 4
     local crc = u32be(src_data, read_pos)
     read_pos = read_pos - 4
@@ -316,106 +320,11 @@ end
 -- Resource tree
 -- ============================================================================
 
-function engine.get_resources(game_path)
-    local files = list_files(game_path)
-    if not files then return {} end
-
-    local is_fw = is_future_wars(game_path)
-    local game_label = is_fw and "Future Wars" or "Operation Stealth"
-
-    local resources = {}
-
-    -- Find bundle files
-    local bundles = {}
-    for _, fname in ipairs(files) do
-        local lower = fname:lower()
-        -- FW: part01, part02...  OS: rscNN or any bundle
-        if lower:match("^part%d+$") or lower:match("^rsc%d+$") then
-            bundles[#bundles + 1] = fname
-        end
-    end
-    table.sort(bundles, function(a, b) return a:lower() < b:lower() end)
-
-    for _, bundle_name in ipairs(bundles) do
-        local f = file_open(game_path .. "/" .. bundle_name)
-        if f then
-            local fsize = file_size(f)
-            local raw = file_read(f, 0, math.min(fsize, 4 + 10000 * 30))  -- header only
-            file_close(f)
-
-            if raw then
-                local entries = parse_bundle(raw)
-                if entries then
-                    -- Filter for likely background files
-                    local bg_entries = {}
-                    for _, e in ipairs(entries) do
-                        local lower = e.name:lower()
-                        -- Backgrounds typically have extensions like .PI1, .SET, .BG or are > 10KB
-                        if lower:match("%.pi1$") or lower:match("%.set$") or lower:match("%.bg$")
-                           or lower:match("%.ct$") or e.unpacked_size > 10000 then
-                            bg_entries[#bg_entries + 1] = e
-                        end
-                    end
-
-                    if #bg_entries > 0 then
-                        local cat = {
-                            id = "bundle_" .. bundle_name,
-                            name = string.format("%s (%d resources)", bundle_name, #bg_entries),
-                            type = "category", children = {}
-                        }
-                        for _, e in ipairs(bg_entries) do
-                            local base = e.name:match("^(.+)%.") or e.name
-                            cat.children[#cat.children + 1] = {
-                                id   = "res_" .. bundle_name .. "_" .. e.name,
-                                name = string.format("%s (%dB)", e.name, e.unpacked_size),
-                                type = "image"
-                            }
-                        end
-                        resources[#resources + 1] = cat
-                    end
-                end
-            end
-        end
-    end
-
-    if #resources == 0 then
-        -- Show all bundles with all entries
-        for _, bundle_name in ipairs(bundles) do
-            local f = file_open(game_path .. "/" .. bundle_name)
-            if f then
-                local fsize = file_size(f)
-                local raw = file_read(f, 0, math.min(fsize, 4 + 10000 * 30))
-                file_close(f)
-                if raw then
-                    local entries = parse_bundle(raw)
-                    if entries and #entries > 0 then
-                        local cat = {
-                            id = "bundle_" .. bundle_name,
-                            name = string.format("%s (%d files)", bundle_name, #entries),
-                            type = "category", children = {}
-                        }
-                        for _, e in ipairs(entries) do
-                            cat.children[#cat.children + 1] = {
-                                id   = "res_" .. bundle_name .. "_" .. e.name,
-                                name = string.format("%s (%dB)", e.name, e.unpacked_size),
-                                type = "image"
-                            }
-                        end
-                        resources[#resources + 1] = cat
-                    end
-                end
-            end
-        end
-    end
-
-    return resources
-end
-
 -- ============================================================================
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id, palette_id)
+local function load_background(game_path, resource_id, palette_id)
     -- Parse: res_BUNDLENAME_FILENAME
     local bundle_name, file_name = resource_id:match("^res_([^_]+)_(.+)$")
     if not bundle_name or not file_name then return nil end
@@ -500,11 +409,201 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local img = image_create_indexed(w, h, pixels, palette)
     local colors = is_fw and "16" or (u16be(data, 1) == 8 and "256" or "16")
     return {
-        type = "image", image = img,
+        type = "image", image = img, palette = palette,
         description = string.format("%s - %s - %dx%d, %s colors",
             is_fw and "Future Wars" or "Operation Stealth",
             file_name, w, h, colors)
     }
+end
+
+
+-- Sprite records are indexed separately from full-screen artwork. Offsets below
+-- are 1-based into the decompressed resource; archive offsets remain 0-based.
+local function sprite_frames(data)
+    local frames = {}
+    local function add(p, bw, h, mode, stride, visible)
+        local w = visible or (mode == 1 and bw * 8 or (mode == 4 or mode == 5) and bw * 2 or bw)
+        assert(w > 0 and w <= 4096 and h > 0 and h <= 4096 and w*h <= 4194304, "Invalid sprite dimensions")
+        local size = stride or bw * h + (mode == 5 and 16 or 0)
+        assert(p >= 1 and p + size - 1 <= #data, "Truncated sprite pixels")
+        frames[#frames + 1] = {pos=p, bw=bw, w=w, h=h, mode=mode, stride=stride}
+    end
+    if data:sub(1,3) == "SET" then
+        assert(#data >= 6, "Truncated SET header")
+        local count = u16be(data,5)
+        assert(count <= 4096 and 6 + count*16 <= #data, "Invalid SET table")
+        local start = 7 + count*16
+        for i=0,count-1 do
+            local p = 7 + i*16
+            local off,bw,h,mode = u32be(data,p),u16be(data,p+4),u16be(data,p+6),u16be(data,p+8)
+            assert(mode==1 or mode==4 or mode==5 or mode==8, "Unsupported SET encoding")
+            if mode==4 then assert(bw%8==0,"Unaligned planar sprite") end
+            if mode==8 then assert(bw*h%16==0,"Unaligned 8-bit sprite") end
+            add(start+off,bw,h,mode)
+        end
+    else
+        assert(#data>=22,"Truncated ANI header")
+        local bw,h,count=u16be(data,5),u16be(data,7),u16be(data,15)
+        assert(bw>0 and bw%8==0 and count>0 and count<=4096,"Invalid ANI header")
+        assert(22+bw*h*count<=#data,"Truncated ANI frames")
+        for i=0,count-1 do add(23+i*bw*h,bw,h,4) end
+    end
+    return frames
+end
+
+local function sprite_pixels(data, f)
+    local px = {}
+    local p,bw,w,h,mode = f.pos,f.bw,f.w,f.h,f.mode
+    if mode == 4 then
+        px = decode_bitplanes(data,p,w,h)
+    elseif mode == 1 then
+        for i=0,w*h-1 do
+            px[i+1] = math.floor(data:byte(p+math.floor(i/8)) / 2^(7-i%8))%2
+        end
+    elseif mode == 5 then
+        for i=0,bw*h-1 do
+            local b=data:byte(p+16+i)
+            px[i*2+1]=data:byte(p+math.floor(b/16))
+            px[i*2+2]=data:byte(p+b%16)
+        end
+    else
+        -- Cine 8-bit SET: blocks of eight 16-bit plane words, even then odd pixels.
+        for block=0,w*h/16-1 do for half=0,1 do for bit=0,7 do
+            local color=0
+            for plane=0,7 do
+                local b=data:byte(p+block*16+plane*2+half)
+                color=color+math.floor(b/2^(7-bit))%2*2^plane
+            end
+            px[block*16+half*8+bit+1]=color
+        end end end
+    end
+    return px
+end
+
+local catalog_path, catalog, records, palette_cache
+local payload_key, payload_data
+local function payload(path, r)
+    local key = path .. "/" .. r.bundle .. ":" .. r.entry.name
+    if payload_key == key then return payload_data end
+    local f = assert(file_open(path .. "/" .. r.bundle), "Missing volume")
+    local packed = file_read(f,r.entry.offset,r.entry.packed_size)
+    file_close(f)
+    assert(packed and #packed == r.entry.packed_size, "Truncated archive entry")
+    local data = packed
+    if r.entry.unpacked_size > 0 and r.entry.packed_size ~= r.entry.unpacked_size then
+        assert(r.entry.unpacked_size <= 16777216, "Oversized resource")
+        local bytes = cine_unpack(packed,r.entry.unpacked_size)
+        local chars = {}; for i=1,#bytes do chars[i]=string.char(bytes[i]) end
+        data = table.concat(chars)
+    end
+    payload_key,payload_data=key,data
+    return data
+end
+
+local function index(path)
+    if catalog_path == path then return end
+    catalog_path=nil; catalog={}; records={}; palette_cache={}; payload_key=nil; payload_data=nil
+    local names = {}
+    for _,name in ipairs(list_files(path) or {}) do
+        if name:lower():match("^part%d+%a*$") or name:lower():match("^rsc%d+$") then names[#names+1]=name end
+    end
+    table.sort(names,function(a,b) return a:lower()<b:lower() end)
+    for _,name in ipairs(names) do
+        local f=file_open(path.."/"..name)
+        local entries
+        if f then
+            local size=file_size(f)
+            entries=parse_bundle(file_read(f,0,math.min(size,300004)))
+            file_close(f)
+            if entries then
+                for _,e in ipairs(entries) do
+                    assert(e.offset >= 4+#entries*30 and e.offset+e.packed_size<=size, "Invalid archive range")
+                end
+            end
+        end
+        if entries then
+            local bg={id="bg_"..name,name="Backgrounds",type="category",children={}}
+            local sp={id="sprites_"..name,name="Sprites",type="category",children={}}
+            local pal={id="palettes_"..name,name="Palettes (backgrounds)",type="category",children={}}
+            local backgrounds={}
+            for _,e in ipairs(entries) do
+                if e.name:lower():match("%.pi1$") or e.name:lower():match("%.bg$") then
+                    local id="res_"..name.."_"..e.name
+                    local pid="pal_"..name.."_"..e.name
+                    local r={bundle=name,entry=e,pal=pid}
+                    records[id]=r; records[pid]={background=id}
+                    backgrounds[#backgrounds+1]={name=e.name:upper(),id=pid}
+                    bg.children[#bg.children+1]={id=id,name=e.name,type="image"}
+                    pal.children[#pal.children+1]={id=pid,name=e.name,type="palette"}
+                end
+            end
+            local previous=backgrounds[1] and backgrounds[1].id
+            for _,e in ipairs(entries) do
+                local bgid="pal_"..name.."_"..e.name
+                if records[bgid] then previous=bgid end
+                if e.name:lower():match("%.ani$") or e.name:lower():match("%.anm$") or e.name:lower():match("%.set$") then
+                    local r={bundle=name,entry=e,pal=previous}
+                    -- Prefer the background sharing the sprite's scene prefix.
+                    local stem=e.name:upper():gsub("%.[^.]+$","")
+                    local best=0
+                    for _,b in ipairs(backgrounds) do
+                        local base=b.name:gsub("%.[^.]+$","")
+                        if stem:sub(1,#base)==base and #base>best then r.pal=b.id;best=#base end
+                    end
+                    local ok,frames=pcall(sprite_frames,payload(path,r))
+                    if ok and #frames>0 then
+                        local group={id="sprites_"..name.."_"..e.name,name=e.name,type="category",children={}}
+                        for i,frame in ipairs(frames) do
+                            local id="spr_"..name.."_"..e.name.."_"..i
+                            records[id]={bundle=name,entry=e,frame=frame,pal=r.pal}
+                            group.children[#group.children+1]={id=id,name=string.format("Frame %d (%dx%d)",i,frame.w,frame.h),type="image"}
+                        end
+                        sp.children[#sp.children+1]=group
+                    elseif not ok then
+                        log_warn(e.name..": "..tostring(frames))
+                    end
+                end
+            end
+            local cat={id="bundle_"..name,name=name,type="category",children={}}
+            for _,c in ipairs({bg,sp,pal}) do if #c.children>0 then cat.children[#cat.children+1]=c end end
+            if #cat.children>0 then catalog[#catalog+1]=cat end
+        end
+    end
+    catalog_path=path
+end
+
+function engine.get_resources(path) index(path); return catalog end
+function engine.default_palette(path,id) index(path); return records[id] and records[id].pal end
+
+local function resource_palette(path,id)
+    if palette_cache[id] then return palette_cache[id] end
+    local r=records[id]
+    if not r or not r.background then return nil end
+    local data=payload(path,records[r.background])
+    local pal
+    if #data>=770 and u16be(data,1)==8 then pal=parse_256color_palette(data,3)
+    elseif #data>=34 then pal=parse_16color_palette(data,3) end
+    if pal then palette_cache[id]=pal;return pal end
+end
+
+function engine.load_resource(path,id,palette_id)
+    index(path)
+    local r=records[id]
+    if not r then return nil end
+    if id:sub(1,4)=="res_" then return load_background(path,id,palette_id) end
+    local pal=resource_palette(path,palette_id or (r.background and id or r.pal))
+    local fallback=not pal
+    if not pal then
+        pal={};for i=0,255 do pal[i*3+1]=i;pal[i*3+2]=i;pal[i*3+3]=i end
+    end
+    if r.background then
+        local px={};for i=0,65535 do px[i+1]=math.floor(i/4096)*16+math.floor(i%256/16) end
+        return {type="image",image=image_create_indexed(256,256,px,pal),palette=pal}
+    end
+    local px=sprite_pixels(payload(path,r),r.frame)
+    return {type="image",image=image_create_indexed(r.frame.w,r.frame.h,px,pal),palette=pal,
+        description=string.format("%s - %dx%d; %s. Palette can be changed; script-driven palette changes are not replayed.",
+            r.entry.name,r.frame.w,r.frame.h,fallback and "grayscale fallback" or "background palette")}
 end
 
 return engine

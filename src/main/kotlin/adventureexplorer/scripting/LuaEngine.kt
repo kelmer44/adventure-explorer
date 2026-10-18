@@ -4,6 +4,7 @@ import adventureexplorer.model.ModelData
 import adventureexplorer.models.AitdModelDecoder
 import adventureexplorer.models.CityModelPose
 import adventureexplorer.models.CityModelDecoder
+import adventureexplorer.models.CruiseModelDecoder
 import adventureexplorer.models.GrimModelDecoder
 import adventureexplorer.model.SoundData
 import adventureexplorer.model.MidiData
@@ -11,6 +12,8 @@ import adventureexplorer.audio.GobAdlDecoder
 import adventureexplorer.audio.CmfToMidiConverter
 import adventureexplorer.audio.XmiToMidiConverter
 import adventureexplorer.audio.ImuseBundleCodecs
+import adventureexplorer.audio.EncodedAudioDecoder
+import adventureexplorer.audio.GmfToMidiConverter
 import org.luaj.vm2.*
 import org.luaj.vm2.lib.*
 import org.luaj.vm2.lib.jse.JsePlatform
@@ -99,6 +102,21 @@ class LuaEngine {
                     catch (e: Exception) { throw LuaError(e.message ?: "Invalid AITD model") }
                 val handle=nextModelHandle++
                 models[handle]=model
+                return valueOf(handle)
+            }
+        }
+        globals["model_decode_cruise"] = object : ThreeArgFunction() {
+            override fun call(data: LuaValue, frame: LuaValue, palette: LuaValue): LuaValue {
+                val ls=data.checkstring()
+                val bytes=ByteArray(ls.length()).also { ls.copyInto(0,it,0,it.size) }
+                val colors=if (palette.istable()) IntArray(256) { i ->
+                    (palette.get(i*3+1).checkint().coerceIn(0,255) shl 16) or
+                    (palette.get(i*3+2).checkint().coerceIn(0,255) shl 8) or
+                    palette.get(i*3+3).checkint().coerceIn(0,255)
+                } else null
+                val model=try { CruiseModelDecoder.decode(bytes,frame.checkint(),colors) }
+                    catch(e: Exception) { throw LuaError(e.message ?: "Invalid Cruise polygon pose") }
+                val handle=nextModelHandle++;models[handle]=model
                 return valueOf(handle)
             }
         }
@@ -213,7 +231,8 @@ class LuaEngine {
                 val pixelTable = args.checktable(3)
                 val paletteTable = args.checktable(4)
 
-                val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+                val transparentIndex = args.optint(5, -1)
+                val image = BufferedImage(width, height, if (transparentIndex >= 0) BufferedImage.TYPE_INT_ARGB else BufferedImage.TYPE_INT_RGB)
 
                 // Build palette lookup: index -> 0xRRGGBB
                 val palette = IntArray(256)
@@ -229,7 +248,9 @@ class LuaEngine {
                 val rgbArray = IntArray(totalPixels)
                 for (i in 0 until totalPixels) {
                     val colorIdx = pixelTable.rawget(i + 1).optint(0).coerceIn(0, 255)
-                    rgbArray[i] = palette[colorIdx]
+                    rgbArray[i] = if (transparentIndex >= 0) {
+                        if (colorIdx == transparentIndex) 0 else palette[colorIdx] or (0xFF shl 24)
+                    } else palette[colorIdx]
                 }
                 image.setRGB(0, 0, width, height, rgbArray, 0, width)
 
@@ -292,6 +313,17 @@ class LuaEngine {
     // ── Sound API ───────────────────────────────────────────────────
 
     private fun registerSoundApi() {
+        // Decode one VOC, WAV or MP3 clip from an archive into playable PCM.
+        globals["sound_create_encoded"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val sound = EncodedAudioDecoder.decode(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
         // sound_create_pcm(sample_rate, bits_per_sample, channels, signed, pcm_data) -> sound_handle
         // pcm_data: binary string of raw PCM samples
         globals["sound_create_pcm"] = object : VarArgFunction() {
@@ -379,7 +411,7 @@ class LuaEngine {
                 val bytes = toBytes(data) ?: return NIL
                 if (bytes.size < 4) return NIL
                 val magic = String(bytes, 0, 4, Charsets.US_ASCII)
-                val converted = when (magic) {
+                val converted = if (magic.startsWith("GMF")) GmfToMidiConverter.convert(bytes) else when (magic) {
                     "MThd" -> bytes
                     "CTMF" -> CmfToMidiConverter.convert(bytes)
                     "FORM" -> XmiToMidiConverter.convert(bytes)

@@ -10,7 +10,7 @@ local engine = {}
 engine.name        = "Cruise for a Corpse"
 engine.id          = "cruise"
 engine.description = "Cruise for a Corpse (1991, Delphine Software)"
-engine.version     = "2.0"
+engine.version     = "3.1"
 
 -- Binary helpers
 local function u8(data, pos)   return data:byte(pos) end
@@ -42,6 +42,10 @@ local function delphine_unpack(src_data, unpacked_size)
     -- Read 12-byte trailer: three BE uint32 words at end
     local read_pos = src_len - 3
     local datasize = u32be(src_data, read_pos)
+    -- The trailer is authoritative: some directory sizes include a padding byte
+    -- (for example Cruise LOGOFIN.SET). Decode from its true end, not that padding.
+    assert(datasize > 0 and datasize <= unpacked_size and datasize <= 16777216, "Invalid unpacked size")
+    unpacked_size = datasize
     read_pos = read_pos - 4
     local crc = u32be(src_data, read_pos)
     read_pos = read_pos - 4
@@ -259,10 +263,10 @@ end
 local function rgb_palette(data, offset)
     local palette = {}
     for i = 0, 255 do
-        -- VGA DAC palette is 6-bit (0-63), scale to 8-bit (0-255)
-        palette[i * 3 + 1] = math.min(u8(data, offset + i * 3 + 0) * 4, 255)
-        palette[i * 3 + 2] = math.min(u8(data, offset + i * 3 + 1) * 4, 255)
-        palette[i * 3 + 3] = math.min(u8(data, offset + i * 3 + 2) * 4, 255)
+        -- Cruise stores full 8-bit RGB, passed directly to setPalEntries.
+        palette[i * 3 + 1] = u8(data, offset + i * 3 + 0)
+        palette[i * 3 + 2] = u8(data, offset + i * 3 + 1)
+        palette[i * 3 + 3] = u8(data, offset + i * 3 + 2)
     end
     return palette
 end
@@ -281,74 +285,11 @@ end
 -- Resource tree: scan volume files for background resources
 -- ============================================================================
 
-function engine.get_resources(game_path)
-    local files = list_files(game_path)
-    if not files then return {} end
-
-    -- Find volume files (D1, D2, ...)
-    local volumes = {}
-    for _, fname in ipairs(files) do
-        local lower = fname:lower()
-        if lower:match("^d%d+$") then
-            volumes[#volumes + 1] = fname
-        end
-    end
-    table.sort(volumes, function(a, b) return a:lower() < b:lower() end)
-
-    local resources = {}
-
-    for _, vol_name in ipairs(volumes) do
-        local f = file_open(game_path .. "/" .. vol_name)
-        if f then
-            local fsize = file_size(f)
-            local header_size = math.min(fsize, 4 + 10000 * 30)
-            local raw = file_read(f, 0, header_size)
-            file_close(f)
-
-            if raw then
-                local entries = parse_volume(raw)
-                if entries then
-                    -- Show all entries, mark likely backgrounds
-                    local bg_entries = {}
-                    for _, e in ipairs(entries) do
-                        local lower = e.name:lower()
-                        if lower:match("%.pi1$") or lower:match("%.pix$") or
-                           lower:match("%.bg$") or lower:match("%.bmp$") or
-                           e.unpacked_size >= 32000 then
-                            bg_entries[#bg_entries + 1] = e
-                        end
-                    end
-
-                    if #bg_entries == 0 then bg_entries = entries end
-
-                    if #bg_entries > 0 then
-                        local cat = {
-                            id = "vol_" .. vol_name,
-                            name = string.format("%s (%d resources)", vol_name, #bg_entries),
-                            type = "category", children = {}
-                        }
-                        for _, e in ipairs(bg_entries) do
-                            cat.children[#cat.children + 1] = {
-                                id   = "res_" .. vol_name .. "_" .. e.name,
-                                name = string.format("%s (%dB)", e.name, e.unpacked_size),
-                                type = "image"
-                            }
-                        end
-                        resources[#resources + 1] = cat
-                    end
-                end
-            end
-        end
-    end
-
-    return resources
-end
-
 -- ============================================================================
 -- Resource loading
 -- ============================================================================
 
-function engine.load_resource(game_path, resource_id, palette_id)
+local function load_background(game_path, resource_id, palette_id)
     local vol_name, file_name = resource_id:match("^res_([^_]+)_(.+)$")
     if not vol_name or not file_name then return nil end
 
@@ -418,12 +359,8 @@ function engine.load_resource(game_path, resource_id, palette_id)
                 pixels = decode_mode5(data, 67, 320, 200)
             end
         else
-            -- Mode 0/4: 16-color Atari ST: 2 bytes header + 64 bytes palette + 32000 bytes (4 planes)
-            if #data >= 66 + 32000 then
-                palette = atari_st_palette(data, 3, 32)
-                pixels = decode_mode4(data, 67, 320, 200)
-            elseif #data >= 34 + 32000 then
-                -- Compact: 2 bytes header + 32 bytes palette (16 colors) + 32000 bytes
+            -- Mode 0/4: 2 bytes header + 32 palette bytes + 32000 pixel bytes
+            if #data >= 34 + 32000 then
                 palette = atari_st_palette(data, 3, 16)
                 pixels = decode_mode4(data, 35, 320, 200)
             end
@@ -437,9 +374,241 @@ function engine.load_resource(game_path, resource_id, palette_id)
 
     local img = image_create_indexed(w, h, pixels, palette)
     return {
-        type = "image", image = img,
+        type = "image", image = img, palette = palette,
         description = string.format("Cruise for a Corpse - %s - %dx%d", file_name, w, h)
     }
+end
+
+
+-- Sprite records are indexed separately from full-screen artwork. Offsets below
+-- are 1-based into the decompressed resource; archive offsets remain 0-based.
+local function sprite_frames(data)
+    local frames = {}
+    local function add(p, bw, h, mode, stride, visible)
+        local w = visible or (mode == 1 and bw * 8 or (mode == 4 or mode == 5) and bw * 2 or bw)
+        assert(w > 0 and w <= 4096 and h > 0 and h <= 4096 and w*h <= 4194304, "Invalid sprite dimensions")
+        local size = stride or bw * h + (mode == 5 and 16 or 0)
+        assert(p >= 1 and p + size - 1 <= #data, "Truncated sprite pixels")
+        frames[#frames + 1] = {pos=p, bw=bw, w=w, h=h, mode=mode, stride=stride}
+    end
+    if data:sub(1,3) == "SET" or data:sub(1,3) == "SEC" then
+        assert(#data >= 6, "Truncated SET header")
+        local count = u16be(data,5)
+        assert(count <= 4096 and 6 + count*16 <= #data, "Invalid SET table")
+        local start = 7 + count*16
+        for i=0,count-1 do
+            local p = 7 + i*16
+            local off,bw,h,mode = u32be(data,p),u16be(data,p+4),u16be(data,p+6),u16be(data,p+8)
+            -- Polygon records (type 0) are not bitmap sprites.
+            if mode==1 or mode==4 or mode==5 or mode==8 then
+                local sec=data:sub(1,3)=="SEC"
+                if sec then bw=bw-mode*2 end
+                local stored=bw*h
+                local visible
+                if mode==5 then
+                    visible=math.floor((bw-(sec and 0 or 10))*8/5)
+                    assert(bw%5==0,"Invalid five-plane stride")
+                elseif mode==4 then assert(bw%8==0,"Unaligned planar sprite") end
+                add(start+off,bw,h,mode,stored,visible)
+            end
+        end
+    else
+        error("Missing SET/SEC signature")
+    end
+    return frames
+end
+
+-- Keep the original SET indices: mirrored poses reference relative record slots.
+local function polygon_frames(data)
+    assert(#data>=6 and (data:sub(1,3)=="SET" or data:sub(1,3)=="SEC"),"Missing SET/SEC signature")
+    local count=u16be(data,5)
+    assert(count<=4096 and 6+count*16<=#data,"Invalid SET table")
+    local frames={}
+    for i=0,count-1 do
+        local p=7+i*16
+        if u16be(data,p+8)==0 then
+            local pos=7+count*16+u32be(data,p)
+            local size=u16be(data,p+4)*u16be(data,p+6)
+            assert(size>=2 and pos+size-1<=#data,"Truncated polygon frame")
+            frames[#frames+1]={index=i,mirror=u16be(data,pos)==0}
+        end
+    end
+    return frames
+end
+
+local function sprite_pixels(data, f)
+    local px = {}
+    local p,bw,w,h,mode = f.pos,f.bw,f.w,f.h,f.mode
+    if mode == 4 then
+        px = decode_mode4(data,p,w,h)
+    elseif mode == 1 then
+        for i=0,w*h-1 do
+            px[i+1] = math.floor(data:byte(p+math.floor(i/8)) / 2^(7-i%8))%2
+        end
+    elseif mode == 5 then
+        local stride=bw/5
+        local plane_size=stride*h
+        for y=0,h-1 do for x=0,w-1 do
+            local color=0
+            for plane=0,4 do
+                local b=data:byte(p+plane*plane_size+y*stride+math.floor(x/8))
+                color=color+math.floor(b/2^(7-x%8))%2*2^plane
+            end
+            px[y*w+x+1]=color
+        end end
+    else
+        for i=1,w*h do px[i]=data:byte(p+i-1) end
+    end
+    return px
+end
+
+local catalog_path, catalog, records, palette_cache
+local payload_key, payload_data
+local function payload(path, r)
+    local key = path .. "/" .. r.bundle .. ":" .. r.entry.name
+    if payload_key == key then return payload_data end
+    local f = assert(file_open(path .. "/" .. r.bundle), "Missing volume")
+    local packed = file_read(f,r.entry.offset,r.entry.packed_size)
+    file_close(f)
+    assert(packed and #packed == r.entry.packed_size, "Truncated archive entry")
+    local data = packed
+    if r.entry.unpacked_size > 0 and r.entry.packed_size ~= r.entry.unpacked_size then
+        assert(r.entry.unpacked_size <= 16777216, "Oversized resource")
+        local bytes = delphine_unpack(packed,r.entry.unpacked_size)
+        local chars = {}; for i=1,#bytes do chars[i]=string.char(bytes[i]) end
+        data = table.concat(chars)
+    end
+    payload_key,payload_data=key,data
+    return data
+end
+
+local function index(path)
+    if catalog_path == path then return end
+    catalog_path=nil; catalog={}; records={}; palette_cache={}; payload_key=nil; payload_data=nil
+    local names = {}
+    for _,name in ipairs(list_files(path) or {}) do
+        if name:lower():match("^d%d+$") then names[#names+1]=name end
+    end
+    table.sort(names,function(a,b) return a:lower()<b:lower() end)
+    for _,name in ipairs(names) do
+        local f=file_open(path.."/"..name)
+        local entries
+        if f then
+            local size=file_size(f)
+            entries=parse_volume(file_read(f,0,math.min(size,300004)))
+            file_close(f)
+            if entries then
+                for _,e in ipairs(entries) do
+                    assert(e.offset >= 4+#entries*30 and e.offset+e.packed_size<=size, "Invalid archive range")
+                end
+            end
+        end
+        if entries then
+            local bg={id="bg_"..name,name="Backgrounds",type="category",children={}}
+            local sp={id="sprites_"..name,name="Sprites",type="category",children={}}
+            local models={id="actors_"..name,name="Polygon Actors and Vector Art",type="category",children={}}
+            local pal={id="palettes_"..name,name="Palettes (backgrounds)",type="category",children={}}
+            local backgrounds={}
+            for _,e in ipairs(entries) do
+                if e.name:lower():match("%.pi1$") or e.name:lower():match("%.bg$") then
+                    local id="res_"..name.."_"..e.name
+                    local pid="pal_"..name.."_"..e.name
+                    local r={bundle=name,entry=e,pal=pid}
+                    records[id]=r; records[pid]={background=id}
+                    backgrounds[#backgrounds+1]={name=e.name:upper(),id=pid}
+                    bg.children[#bg.children+1]={id=id,name=e.name,type="image"}
+                    pal.children[#pal.children+1]={id=pid,name=e.name,type="palette"}
+                end
+            end
+            local previous=backgrounds[1] and backgrounds[1].id
+            for _,e in ipairs(entries) do
+                local bgid="pal_"..name.."_"..e.name
+                if records[bgid] then previous=bgid end
+                if e.name:lower():match("%.set$") then
+                    local r={bundle=name,entry=e,pal=previous}
+                    -- Prefer the background sharing the sprite's scene prefix.
+                    local stem=e.name:upper():gsub("%.[^.]+$","")
+                    local best=0
+                    for _,b in ipairs(backgrounds) do
+                        local base=b.name:gsub("%.[^.]+$","")
+                        if stem:sub(1,#base)==base and #base>best then r.pal=b.id;best=#base end
+                    end
+                    local data=payload(path,r)
+                    local ok,frames=pcall(sprite_frames,data)
+                    if ok and #frames>0 then
+                        local group={id="sprites_"..name.."_"..e.name,name=e.name,type="category",children={}}
+                        for i,frame in ipairs(frames) do
+                            local id="spr_"..name.."_"..e.name.."_"..i
+                            records[id]={bundle=name,entry=e,frame=frame,pal=r.pal}
+                            group.children[#group.children+1]={id=id,name=string.format("Frame %d (%dx%d)",i,frame.w,frame.h),type="image"}
+                        end
+                        sp.children[#sp.children+1]=group
+                    elseif not ok then
+                        log_warn(e.name..": "..tostring(frames))
+                    end
+                    local polyok,polygons=pcall(polygon_frames,data)
+                    if polyok and #polygons>0 then
+                        local group={id="actors_"..name.."_"..e.name,name=e.name,type="category",children={}}
+                        for _,frame in ipairs(polygons) do
+                            local id="poly_"..name.."_"..e.name.."_"..frame.index
+                            records[id]={bundle=name,entry=e,polygon=frame.index,pal=r.pal}
+                            group.children[#group.children+1]={id=id,type="model",
+                                name=string.format("Pose %d%s",frame.index+1,frame.mirror and " (mirrored)" or "")}
+                        end
+                        models.children[#models.children+1]=group
+                    elseif not polyok then log_warn(e.name..": "..tostring(polygons)) end
+                end
+            end
+            local cat={id="bundle_"..name,name=name,type="category",children={}}
+            for _,c in ipairs({bg,sp,models,pal}) do if #c.children>0 then cat.children[#cat.children+1]=c end end
+            if #cat.children>0 then catalog[#catalog+1]=cat end
+        end
+    end
+    catalog_path=path
+end
+
+function engine.get_resources(path) index(path); return catalog end
+function engine.default_palette(path,id) index(path); return records[id] and records[id].pal end
+
+local function resource_palette(path,id)
+    if palette_cache[id] then return palette_cache[id] end
+    local r=records[id]
+    if not r or not r.background then return nil end
+    local data=payload(path,records[r.background])
+    local pal
+    if data:sub(1,3)=="PAL" and #data>=772 then pal=rgb_palette(data,5)
+    elseif #data>=2 then
+        local mode=data:byte(2)
+        if mode==8 and #data>=770 then pal=rgb_palette(data,3)
+        elseif mode==5 and #data>=66 then pal=amiga_palette(data,3,32)
+        elseif (mode==0 or mode==4) and #data>=34 then pal=atari_st_palette(data,3,16) end
+    end
+    if pal then palette_cache[id]=pal;return pal end
+end
+
+function engine.load_resource(path,id,palette_id)
+    index(path)
+    local r=records[id]
+    if not r then return nil end
+    if id:sub(1,4)=="res_" then return load_background(path,id,palette_id) end
+    local pal=resource_palette(path,palette_id or (r.background and id or r.pal))
+    local fallback=not pal
+    if not pal then
+        pal={};for i=0,255 do pal[i*3+1]=i;pal[i*3+2]=i;pal[i*3+3]=i end
+    end
+    if r.background then
+        local px={};for i=0,65535 do px[i+1]=math.floor(i/4096)*16+math.floor(i%256/16) end
+        return {type="image",image=image_create_indexed(256,256,px,pal),palette=pal}
+    end
+    if r.polygon~=nil then
+        return {type="model",model=model_decode_cruise(payload(path,r),r.polygon,pal),palette=pal,
+            description=string.format("%s - pose %d; flat polygon artwork at scale 512 with %s. Mirrored references resolved; script animation is not replayed.",
+                r.entry.name,r.polygon+1,fallback and "grayscale fallback" or "background palette")}
+    end
+    local px=sprite_pixels(payload(path,r),r.frame)
+    return {type="image",image=image_create_indexed(r.frame.w,r.frame.h,px,pal),palette=pal,
+        description=string.format("%s - %dx%d; %s. Palette can be changed; script-driven palette changes are not replayed.",
+            r.entry.name,r.frame.w,r.frame.h,fallback and "grayscale fallback" or "background palette")}
 end
 
 return engine

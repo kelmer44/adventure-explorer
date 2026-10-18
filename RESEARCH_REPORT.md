@@ -1832,7 +1832,7 @@ through a different input-buffering path: `SCENE01.LBM` (66,012 in, 66,012 out)
 and `UNIVERSE.EXE` itself (81,707 in, 94,392 out). Both are treated identically
 in a flat-memory port, since the bit reader only ever walks the buffer forward.
 
-# Part 8: SCUMM V5-V8 Resource Layout
+# Part 8: SCUMM V3 EGA / V5-V8 Resource Layout
 
 Source: ScummVM `engines/scumm/` — `resource.cpp`, `resource.h`, `object.h`,
 `object.cpp`, `gfx.h`, `gfx.cpp`, `detection_tables.h`.
@@ -1965,6 +1965,46 @@ total leaf resources: 823
   `bomp.cpp`, `sound.cpp`, `imuse_digi/dimuse_bndmgr.cpp` and
   `imuse_digi/dimuse_codecs.cpp`. These additions apply to the `scumm` engine;
   the separate `scummv2` engine still exposes backgrounds only.
+
+## 8.6 V3 Old-Bundle EGA (Loom)
+
+The supplied DOS EGA Loom uses XOR `0xFF` numbered `.LFL` files. Its decrypted
+`00.LFL` begins with u16 `0x0100`, a u16 global-object count and four bytes per
+global object. Four directories follow (rooms, costumes, scripts, sounds), each
+with a byte count, an array of room bytes and an array of u16 offsets; `0xFFFF`
+marks missing resources. Room resources use their own numbered file. Enhanced
+V2 shares the index magic but stores one byte per global object rather than
+four. Filename-only detection previously confused V3 with V2; detection now
+validates the appropriate global-object layout and all four directories.
+
+V3 room headers retain u16 dimensions at +4/+6 and the image offset at +10.
+The object count at +20 precedes image/code offset arrays at +29. Object code
+records contain the ID at +4, width in strips at +9 and height/direction at +15.
+Invisible interaction objects reuse another image pointer: matching the image's
+strip-table width and encoded height avoids decoding their rectangles as art.
+Some object images copy pixels from outside their left edge; standalone previews
+use black for those pixels.
+
+EGA images have a u16 size and u16 relative offsets per eight-pixel strip. Runs
+advance vertically, then into the next column. A clear high bit selects a solid
+low-nibble colour; `0x80` copies the previous column; `0xC0` alternates the next
+byte's nibbles. Zero run lengths read an extra byte. This differs from V2's
+whole-image dither-table codec and V5's codec-prefixed strips.
+
+Old-bundle costumes share the classic renderer, with an initial base of -2,
+one palette-substitution byte, offsets relative to the resource's size word,
+and **one-byte** limb-command offsets (`0xFF` stops a limb). V5/V6 continue to
+use two-byte limb-command offsets. Cel sheets and animation previews retain
+the existing renderer's uniform timing and key-colour background.
+
+Validation: `lua scripts/tests/scumm_v3.lua /path/to/LOOM` checks the parser,
+truncated data, V2/V3 detection and all exposed graphics. The supplied release
+has 76 backgrounds, 594 object sprites, 159 costume sheets, 2,521 animation
+previews and one palette, all loading successfully. Background and object
+scans also pass through the app's LuaJ developer CLI; exported background and
+costume artwork was inspected visually. V3 sound/music, fonts, VGA/small-header
+and other platform variants remain unsupported; this is not a claim of full
+V3 or V4 coverage.
 
 # Part 9: Drascula — The Vampire Strikes Back
 
@@ -3515,3 +3555,111 @@ children were validated: 176 at 22050/8/mono, eight at 22050/16/mono, five at
 Fonts FNT, cursor MOU, inventory INV, credits ANM, miscellaneous binary data
 and IMAX movies are listed with bounded metadata/hex previews. They are not
 decoded. No original script execution or animation timing is claimed.
+
+
+## Delphine sprite frames (2026-10-18)
+
+Verified against local ScummVM Cine `anim.cpp` / `gfx.cpp` and Cruise
+`dataLoader.cpp` / `background.cpp`. Cine ANI/ANM has a 22-byte header: BE
+byte-width at offset 4, height at 6, frame count at 14. Frames follow sequentially
+as interleaved four-plane 16-pixel groups, each byte-width*height bytes.
+SET has count at offset 4 and 16-byte records from offset 6: BE u32 relative
+payload offset, u16 width, height, encoding, then three u16 metadata values.
+Cine encodings 1/4/5/8 mean 1-bit mask, interleaved four-plane, 16-byte colour
+lookup plus packed nibbles, and blocks of eight 16-bit plane words (even/odd
+bytes provide the first/second eight pixels).
+
+Cruise SET uses encodings 1/4/5/8 for mask, four-plane, five sequential planes
+and raw 8-bit indices. SEC subtracts encoding*2 from byte-width before sizing.
+For non-SEC type 5, display width is (storedWidth-10)*8/5 but plane rows retain
+storedWidth/5 bytes: the last 16 pixels are cropped. Type 0 contains polygon
+data; separate model-viewer listings now expose these flat actor poses and vector
+artwork, including mirrored-frame references.
+
+Cruise LOGOFIN.SET has directory size 2243 but compressed trailer size 2242.
+Using the directory size as the backward decoder's output cursor introduces a
+leading zero and shifts the SET header. Both decoders now use the trailer size,
+bounded by directory size and 16 MiB. Cruise 16-colour backgrounds have 32
+palette bytes, not 64; optional footer data must not change the pixel offset.
+
+Background palette nodes provide explicit colour selection. Defaults prefer a
+matching scene-name prefix, then an archive background; reused actors and
+script-driven palette changes require manual selection. Frames are shown on
+an opaque canvas with their original palette indices. Scripted animation timing
+and transparency compositing are not replayed.
+
+Validation: synthetic ANI, SET 1/4/5/8, SEC, truncated data, invalid dimensions,
+and padded unpack-size regressions in `scripts/tests/delphine.lua`; complete
+local sweeps decode 1,989 Future Wars frames in LVDT (including PART04B) and
+2,345 Cruise frames in CR256 across D1-D5. Operation Stealth formats share the
+Cine decoders and are covered synthetically; its game data is not installed.
+
+
+## Simon 1 & 2 AGOS decoding corrections (2026-10-18)
+
+GME contains heterogeneous resources, not graphics pairs throughout. Simon 1's
+music starts at slot 329, Simon 2's GM banks at 282, and MT-32 banks at 435.
+Simon 2 graphics extend through zone 140 (slots 280/281). Header validation and
+zone bounds prevent XMIDI and script data from becoming bogus images.
+
+Wide-image offsets are relative to each 4-byte offset entry, not the beginning
+of the image. Their signed RLE counts repeat one source byte for nonnegative
+counts and copy literals for negative counts. Ordinary 4bpp sprites use the
+header compression flag; 5bpp packed images are identified by their byte span,
+including non-screen-sized artwork. Transparent nibble zero and draw flip flags
+must be preserved during composition/animation. Palette words use the low byte.
+
+Negative VGA operands reference variables without consuming another word.
+Pathfinder records start after a two-byte slot and end in word 999. Simon 2 long
+delays are words. Palette/start operations must append to the same stream as
+sprite frames rather than being overwritten by a separate frame counter.
+Animation counts now derive from vc24 frames; empty script-only entries are omitted.
+UI palettes persist from zone 0; Simon 1's actor bank 2 is initialized by zone 19.
+Room and animation palette operations override those startup colours.
+
+Sound banks use LE offsets, with a zero slot followed by the table byte size;
+repeated offsets alias a sample. Simon 2 SFX banks start at GME slot 415, with
+sample offsets relative to each bank. External EFFECTS/SIMON/SIMON2 VOC, WAV or
+MP3 banks share that layout. VOC PCM blocks and continuation/silence blocks are
+decoded, and JLayer decodes individual MP3 clips without an external executable.
+GMF music uses seven-byte headers, 192 PPQN, DOS tempo mapping and operandless
+pitch bends. XMIDI banks currently preview their first sequence.
+
+Inventory icons use vertical nibble-pair RLE. Simon 1 has one 24x24 layer in bank
+14; Simon 2 has two 20x20 layers in banks 14 and 13, with zero nibbles preserving
+the previous layer. Both use the persistent UI palette.
+
+
+### Cruise polygon actors and vector poses
+
+Type-0 SET records use width*height as their payload size. Direct poses contain
+anchor x/y at offsets 3/4, unsigned point count at 5, then unsigned byte x/y
+pairs from 6. The remaining stream contains ordered commands: u8 point count,
+u8 colour index, unused u8, BE u16 minimum scale, and point indices when count
+is greater than one. Counts zero/one skip only the five-byte command header.
+A 0xFF byte terminates the stream. The preview uses scale 512 (natural size),
+including commands with minimum scale <=512. Two-point commands draw lines.
+
+A payload starting with two zero bytes is an eight-byte alias: BE signed
+relative frame index, signed x offset, signed y offset. Resolve against the
+original SET record index, reflect the target around its anchor, and apply
+the offsets as `x = -x - offsetX`, `z = z + offsetY`. Bounds checks reject
+invalid, cyclic and nested references, non-polygon targets, invalid point
+indices and unterminated or truncated commands.
+
+These are 2D vector drawings, not volumetric meshes. The shared model viewer
+uses a planar flag, front-facing initial view, unlit palette colours and
+painter-order rendering. Concave polygons retain their full boundaries; lines
+remain interleaved with polygons. Zoom, wireframe, rotation, palette selection
+and PNG export reuse the existing controls. No invented depth is introduced.
+Cruise's RGB palettes are full 8-bit components, passed directly to ScummVM's
+`gfxModuleData_setPalEntries`; the previous VGA multiply-by-four was incorrect.
+Shared actors may need a different scene palette, selectable in the viewer.
+
+Verified against `cruise/mainDraw.cpp` (`flipPoly`, `buildPolyModel`),
+`dataLoader.cpp` (`loadSetEntry`) and `gfxModule.cpp`. Six Kotlin tests cover
+polygon overlap, exact colours, line order, concavity, minimum-scale filtering,
+malformed resources and mirrored references; the LuaJ integration test decodes
+and renders all 2,812 polygon poses across the installed CR256 D1-D5 volumes.
+The existing 2,345 bitmap frames still pass the Lua resource sweep. Scripted
+animation, scene placement, clipping masks and palette changes are not replayed.

@@ -4,6 +4,9 @@
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/scumm folder
 Key references used:
+- `engines/scumm/resource_v3.cpp` - old-bundle V3 index magic `0x0100`, global object table and byte-counted room/costume/script/sound directories with u16 offsets. Implemented in `scumm_v3.lua`; tested with `ags/SCUMM/LOOM` (DOS EGA).
+- `engines/scumm/room.cpp`, `object.cpp` (`resetRoomObjects`, `resetRoomObject`) - V3 room dimensions, image offsets and separate object image/code tables. Invisible interaction rectangles can share the next object's image pointer; validate both strip-table width and encoded height before listing sprites.
+- `engines/scumm/gfx.cpp` (`Gdi::drawStrip`, `drawStripEGA`) - u16 strip offsets, solid/alternating/previous-column EGA runs. `costume.cpp` (`ClassicCostumeLoader`) - V3 single-byte limb command offsets and old-bundle palette/offset adjustments.
 - `engines/scumm/object.h` - ImageHeader (old/v7/v8), CodeHeader, RoomHeader layouts
 - `engines/scumm/object.cpp` - OBIM/OBCD parsing, `getObjectImage` (IMxx state mapping)
 - `engines/scumm/gfx.h` / `gfx.cpp` - BMCOMP_* strip codecs and SMAP decompression
@@ -90,7 +93,23 @@ games in ags/INDARK
 ### CINE
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 
-games in ags/CRUISE
+Local data: `ags/LVDT` (Future Wars), `ags/CR256` (Cruise for a Corpse).
+Operation Stealth data is not installed in these locations.
+
+Sprite references: `scummvm-fork/engines/cine/anim.cpp` (`loadAni`, `loadSet`,
+`convert8BBP`, `convert8BBP2`) and `gfx.cpp` (`gfxConvertSpriteToRaw`);
+`scummvm-fork/engines/cruise/dataLoader.cpp` (`loadSetEntry`, `decodeGfxUnified`).
+Cruise background palette layouts are in `background.cpp`.
+Local validation (2026-10-18): all 1,989 Future Wars and 2,345 Cruise bitmap
+frames decode. Cine ANI/ANM and SET plus Cruise SET/SEC are exposed individually,
+with selectable background palettes. Cruise type-0 polygon records are exposed
+as flat vector poses in the model viewer. All 2,812 poses, including mirrored
+references, decode and render through the LuaJ integration test. Reference:
+`cruise/mainDraw.cpp` (`flipPoly`, `buildPolyModel`, `drawPolyMode2`) and
+`gfxModule.cpp` (`gfxModuleData_setPalEntries`, direct 8-bit RGB). See
+`CruiseModelDecoder.kt` and `CruiseModelDecoderTest.kt`.
+Operation Stealth decoding has synthetic format tests; no real-data validation.
+See `scripts/tests/delphine.lua` and the Delphine sprite section of RESEARCH_REPORT.md.
 
 ### COBRA MISSION
 https://moddingwiki.shikadi.net/wiki/Cobra_Mission
@@ -957,3 +976,21 @@ AVX movies remain metadata/hex. Original CD only; Director's Cut is unverified.
 - Movie, font, cursor, inventory and credits formats remain metadata only.
   Headerless palette blocks in CLOSEUP/MISCDAT banks retain shared palettes;
   script timing/placement and room composition are not emulated.
+
+### AGOS: Simon the Sorcerer 1 & 2
+
+Local source: `/Users/gabriel/Desktop/source/scummvm-fork/engines/agos/`.
+Local test data: `/Users/gabriel/Desktop/ags/AGOS/SIMON/` and `SIMON2/`.
+- `agos.cpp`, `res.cpp`: VGA zone ranges and GME slot layout (S1 music 329,
+  S2 GM music 282, MT-32 music 435, SFX tables 415).
+- `gfx.cpp::decodeColumn`: scrolling offsets are relative to each table word,
+  positive runs repeat a byte, negative runs copy literal bytes.
+- `debug.cpp::dumpBitmap`, `vga.cpp`, `vga_s1.cpp`, `vga_s2.cpp`: packed images,
+  palette low byte, fixed-width variable operands, opcode sizes and frame delays.
+- `icons.cpp::decompressIcon`: S1 24x24 icons, S2 dual-layer 20x20 icons.
+- `sound.cpp::BaseSound`, `subroutine.cpp`: LE clip offsets and embedded SFX banks.
+- `midiparser_gmf.cpp`: GMF header, DOS tempo mapping, operandless pitch bends.
+- `EncodedAudioDecoder.kt`: bounded PCM VOC/WAV and bundled JLayer MP3 decoding.
+  `GmfToMidiConverter.kt`: GMF to standard MIDI; XMIDI uses the existing converter.
+- Run `SIMON1_TEST_PATH=... SIMON2_TEST_PATH=... ./gradlew test --tests '*Agos*'
+  --tests '*SimonAudio*'` for real-data coverage and synthetic regressions.

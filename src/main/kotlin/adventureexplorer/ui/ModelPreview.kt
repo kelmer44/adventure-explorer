@@ -25,8 +25,8 @@ fun ModelPreview(model: ModelData, description: String?, onExport: (BufferedImag
                  paletteOptions: List<adventureexplorer.model.ResourceNode> = emptyList(), selectedPalette: Int = -1,
                  onPalette: (Int) -> Unit = {}, onTexture: (String?) -> Unit = {}) {
     key(model.vertices, model.faces) {
-        var yaw by remember { mutableStateOf(25.0) }
-        var pitch by remember { mutableStateOf(10.0) }
+        var yaw by remember { mutableStateOf(if (model.planar) 0.0 else 25.0) }
+        var pitch by remember { mutableStateOf(if (model.planar) 0.0 else 10.0) }
         var zoom by remember { mutableStateOf(1.0) }
         var wireframe by remember { mutableStateOf(false) }
         val rendered by produceState<BufferedImage?>(null, model, listOf(yaw,pitch,zoom,wireframe)) {
@@ -42,12 +42,12 @@ fun ModelPreview(model: ModelData, description: String?, onExport: (BufferedImag
                 TextButton(onClick={ zoom=(zoom/1.2).coerceAtLeast(0.1) }) { Text("−") }
                 Text("${(zoom*100).toInt()}%", color=Color.White)
                 TextButton(onClick={ zoom=(zoom*1.2).coerceAtMost(5.0) }) { Text("+") }
-                TextButton(onClick={ yaw=25.0; pitch=10.0; zoom=1.0 }) { Text("Reset view") }
+                TextButton(onClick={ yaw=if (model.planar) 0.0 else 25.0; pitch=if (model.planar) 0.0 else 10.0; zoom=1.0 }) { Text("Reset view") }
                 TextButton(onClick={ rendered?.let(onExport) }, enabled=rendered!=null) { Text("Export PNG") }
             }
-            if (model.textureOptions.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            if (model.textureOptions.isNotEmpty() || paletteOptions.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 val textureChoices=listOf("" to "Automatic textures", "__none__" to "Untextured") + model.textureOptions.map { it.id to it.name }
-                ModelChoice("Texture", textureChoices, model.selectedTextureId ?: "") { onTexture(it.ifEmpty { null }) }
+                if (model.textureOptions.isNotEmpty()) ModelChoice("Texture", textureChoices, model.selectedTextureId ?: "") { onTexture(it.ifEmpty { null }) }
                 if (paletteOptions.isNotEmpty()) ModelChoice("Palette", paletteOptions.mapIndexed { i,n -> i.toString() to n.name }, selectedPalette.toString()) { onPalette(it.toInt()) }
             }
             Box(Modifier.weight(1f).fillMaxWidth()

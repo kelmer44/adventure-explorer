@@ -1,50 +1,11 @@
--- ============================================================================
--- Adventure Explorer - Engine Script: Simon the Sorcerer 1 & 2 (AGOS)
--- ============================================================================
--- Adventure Soft, 1993 / 1995. AGOS engine.
---
--- Verified against ScummVM (engines/agos): zones.cpp (loadZone),
--- res.cpp (loadVGAVideoFile slot formula), vga.cpp (setImage / animate /
--- vc10_draw / drawImage_init / vc10_depackColumn / vc10_uncompressFlip),
--- vga_s1.cpp (vc22_setPalette), vga.h (header structs) and debug.cpp
--- (dumpBitmap - the reference decoder used by ScummVM's -d agos-dump-bitmaps).
---
--- ── GME archive ────────────────────────────────────────────────────────────
--- u32le table size, then that many u32le offsets. Slot i is
--- [offsets[i], offsets[i+1]). vgaFile1 = slot zone*2, vgaFile2 = slot zone*2+1
--- (id = id*2 + (type-1) in res.cpp loadVGAVideoFile).
---
--- ── vgaFile1 ───────────────────────────────────────────────────────────────
--- All big-endian. A u16 at offset 4 points to VgaFile1Header_Common:
---   [+0] x_1  [+2] imageCount  [+4] x_2  [+6] animationCount
---   [+8] x_3  [+10] imageTable [+12] x_4 [+14] animationTable [+16] x_5
--- ImageHeader_Simon  (8 bytes): id, color, x_2, scriptOffs
--- AnimationHeader_Simon (6 bytes): id, x_2, scriptOffs
--- Palette blocks: 96 bytes each at offset 6 + block*96, 32 RGB triples,
--- 6-bit VGA scaled to 8-bit by *4.
---
--- ── vgaFile2 image table ───────────────────────────────────────────────────
--- 8-byte entries, image N at N*8 (entry 0 is a sentinel):
---   [+0..+3] u32be data offset   [+4] u8 flags
---   [+5] u8 height               [+6..+7] u16be width (PIXELS)
--- The table is self-terminating: it ends where image 2's data offset begins.
--- Each entry's byte span runs to the next entry's offset, which identifies
--- the encoding exactly (this is what makes decoding unambiguous):
---   width > 320            -> column table: (w/8) BE u32 relative offsets,
---                             then per 8-column group an RLE column block
---   span == w/8*5*h        -> 5bpp, uncompressed, 8 pixels per 5 bytes
---   span == w/2*h          -> 4bpp, uncompressed, 2 pixels per byte
---   otherwise              -> 4bpp RLE, w/2 RLE columns of h bytes,
---                             2 pixels per byte (vc10_depackColumn)
---
--- ── Palettes ───────────────────────────────────────────────────────────────
--- vc22_setPalette(a, b) loads block b into display bank a: 32 colours when
--- a == 0, otherwise 16, at display entries a*16.. . vc10_draw's palette
--- argument is the bank, and pixels are emitted as (nibble | bank*16).
--- Backgrounds are 5bpp so they use bank 0 (32 colours) directly.
--- ============================================================================
-
-local engine = {}
+-- Simon the Sorcerer 1 & 2 (DOS/Windows VGA data).
+-- Formats checked against ScummVM engines/agos: debug.cpp, gfx.cpp, vga*.cpp,
+-- agos.cpp, sound.cpp and subroutine.cpp. GME contains graphics, music,
+-- scripts and sound banks; only the graphics range is a sequence of VGA pairs.
+local engine = {
+    id = "agos", name = "Simon the Sorcerer 1 & 2",
+    description = "AGOS backgrounds, sprite frames and animations, music, sound effects and speech",
+}
 
 -- ============================================================================
 -- Binary helpers (1-based Lua string positions)
@@ -56,7 +17,7 @@ end
 
 local function u16be(data, pos)
     local a, b = data:byte(pos, pos + 1)
-    if not a then return 0 end
+    if not b then return 0 end
     return a * 256 + b
 end
 
@@ -67,13 +28,13 @@ end
 
 local function u32be(data, pos)
     local a, b, c, d = data:byte(pos, pos + 3)
-    if not a then return 0 end
+    if not d then return 0 end
     return ((a * 256 + b) * 256 + c) * 256 + d
 end
 
 local function u32le(data, pos)
     local a, b, c, d = data:byte(pos, pos + 3)
-    if not a then return 0 end
+    if not d then return 0 end
     return a + b * 256 + c * 65536 + d * 16777216
 end
 
@@ -220,7 +181,7 @@ local function parse_img_table(f2)
         local off    = u32be(f2, p)
         local height = u8(f2, p + 5)
         local width  = u16be(f2, p + 6)
-        if width > 0 and height > 0 and off > 0 and off < #f2 then
+        if width > 0 and height > 0 and off > 0 and off < #f2 and width <= 4096 then
             return { index = i, offset = off, width = width, height = height,
                      flags = u8(f2, p + 4) }
         end
@@ -260,10 +221,10 @@ local function parse_img_table(f2)
             e.kind = "coltable"
         elseif w % 8 == 0 and math.floor(w / 8) * 5 * h == span then
             e.kind = "5bpp"
-        elseif math.ceil(w / 2) * h == span then
-            e.kind = "4bpp"
-        else
+        elseif e.flags >= 128 then
             e.kind = "rle"
+        else
+            e.kind = "4bpp"
         end
         e.compressed = (e.kind == "rle")
         e.is_background = (e.kind == "5bpp" or e.kind == "coltable")
@@ -447,10 +408,12 @@ local function run_vga_script(f1, script_off, game)
     -- registration, and the Simon 1 override in vga_s1.cpp reads TWO words
     -- (bank a, block b).
     local p = script_off + 1                 -- 0-based -> 1-based
-    local guard = 0
+    local guard, visited = 0, {}
 
     while p <= #f1 and guard < 40000 do
         guard = guard + 1
+        if p < 1 or visited[p] then break end
+        visited[p] = true
         if p + alen - 1 > #f1 then break end
         local op = (game == 1) and u16be(f1, p) or u8(f1, p)
         if op == 0 then break end
@@ -462,24 +425,21 @@ local function run_vga_script(f1, script_off, game)
         if n == -1 then
             -- vc17_setPathfinderItem: a slot index followed by 4-byte pairs
             -- terminated by the sentinel 999 (9999 for FF/PP, not Simon).
-            local e = q + 1
+            local e = q + 2
             while e + 1 <= #f1 and u16be(f1, e) ~= 999 do e = e + 4 end
-            n = (e + 1) - q
+            n = (e + 2) - q
         elseif op == 22 then                                  -- vc22_setPalette
             if q + 3 > #f1 then break end
             local a = u16be(f1, q)
             local b = u16be(f1, q + 2)
             if a <= 15 then ops[#ops + 1] = { op = "pal", bank = a, block = b } end
         elseif op == 10 then                                -- vc10_draw
-            -- vc10_draw: image(2) | <byte 1 of 2> = palette | x(2, signed) |
+            -- vc10_draw: image(2) | palette(2, low byte) | x(2, signed) |
             --            y(2, signed) | flags(2 for Simon 1, 1 for Simon 2)
             if q + 7 > #f1 then break end
-            local pal = u8(f1, q + 2)                -- _vcPtr[1], both games
-            -- Signed: a negative image number names a variable (vcReadVarOrWord),
-            -- which costs one extra word inside this instruction and cannot be
-            -- resolved without the game's variable array.
+            local pal = u8(f1, q + 3)                -- _vcPtr[1], both games
+            -- Negative image ids reference runtime variables; still one word.
             local image = s16be(f1, q)
-            if image < 0 then n = n + 2 end
             if image > 0 and pal <= 15 then
                 ops[#ops + 1] = {
                     op    = "draw",
@@ -487,11 +447,15 @@ local function run_vga_script(f1, script_off, game)
                     bank  = pal,
                     x     = s16be(f1, q + 4),
                     y     = s16be(f1, q + 6),
+                    flags = (game == 1) and u16be(f1, q + 8) or u8(f1, q + 8),
                 }
             end
         end
 
-        p = p + alen + n
+        if q + n - 1 > #f1 then break end
+        if op == 18 then p = q + n + s16be(f1, q)
+        elseif op == 19 or op == 25 then break
+        else p = p + alen + n end
     end
 
     return ops
@@ -552,38 +516,38 @@ local function run_anim_script(f1, script_off, game)
             local q = p + alen                  -- 1-based first param byte
 
             if n == -1 then                    -- vc17_setPathfinderItem
-                local e = q + 1
+                local e = q + 2
                 while e + 1 <= #f1 and u16be(f1, e) ~= 999 do e = e + 4 end
-                n = (e + 1) - q
+                n = (e + 2) - q
             end
+
+            if q + n - 1 > #f1 then break end
 
             if op == 24 then                                       -- vc24_setSpriteXY
                 if q + 6 > #f1 then break end
-                -- vcReadVarOrWord reads a SIGNED word: a negative value is a
-                -- variable number, and reading the variable costs one extra
-                -- word inside this same instruction. The result is not
-                -- knowable statically, so only a real index is a frame.
+                -- A negative operand references a variable, without extra bytes.
                 local image = s16be(f1, q)
-                if image < 0 then n = n + 2 end
                 if image > 0 then
                     nframes = nframes + 1
-                    ops[nframes] = {
+                    ops[#ops + 1] = {
                         op = "sprite", image = image,
                         dx  = s16be(f1, q + 2),
                         dy  = s16be(f1, q + 4),
+                        flags = (game == 1) and u16be(f1, q + 6) or u8(f1, q + 6),
                         delay = pending_delay,
                     }
                     pending_delay = nil
                 end
             elseif op == 10 then                                   -- vc10_draw
                 if q + 7 > #f1 then break end
-                local image = u16be(f1, q)
-                if image ~= 0 then
+                local image = s16be(f1, q)
+                if image > 0 then
                     nframes = nframes + 1
-                    ops[nframes] = {
+                    ops[#ops + 1] = {
                         op = "sprite", image = image,
-                        bank = u8(f1, q + 2),
+                        bank = u8(f1, q + 3),
                         dx = s16be(f1, q + 4), dy = s16be(f1, q + 6),
+                        flags = (game == 1) and u16be(f1, q + 8) or u8(f1, q + 8),
                         delay = pending_delay,
                     }
                     pending_delay = nil
@@ -596,18 +560,19 @@ local function run_anim_script(f1, script_off, game)
                 end
             elseif op == 3 then                                    -- vc3_loadSprite
                 -- Starts another animation; keep the palette it starts with.
-                if q + 9 <= #f1 then
+                if q + n - 1 <= #f1 then
                     local sprite = (game == 2) and u16be(f1, q + 4) or u16be(f1, q + 2)
                     local pal    = u16be(f1, q + ((game == 2) and 10 or 8))
                     if pal <= 15 then
-                        ops[#ops + 1] = { op = "start", sprite = sprite, bank = pal }
+                        ops[#ops + 1] = { op = "start", sprite = sprite, bank = pal,
+                            zone = (game == 2) and u16be(f1, q + 2) or math.floor(sprite / 100) }
                     end
                 end
             elseif op == 12 or op == 56 then                       -- delay
                 if q <= #f1 then
                     -- Remember it: the delay that runs just before a frame is
                     -- that frame's interval.
-                    pending_delay = (game == 1) and u16be(f1, q) or u8(f1, q)
+                    pending_delay = (op == 56 or game == 1) and u16be(f1, q) or u8(f1, q)
                 end
             elseif op == 18 then                                   -- vc18_jump
                 if q + 1 > #f1 then break end
@@ -615,7 +580,7 @@ local function run_anim_script(f1, script_off, game)
                 local target = q + n + offs
                 if target >= 1 and target <= #f1 then stack[#stack + 1] = target end
                 break                        -- unconditional: no fall-through
-            elseif op == 19 then                                   -- vc19_loop
+            elseif op == 19 or op == 25 then                                   -- vc19_loop
                 break                           -- restarts the animation
             end
 
@@ -624,7 +589,10 @@ local function run_anim_script(f1, script_off, game)
                 -- instruction after it is a second path worth exploring.
                 local skip = q + n
                 if skip >= 1 and skip + alen - 1 <= #f1 and not visited[skip] then
-                    stack[#stack + 1] = skip
+                    local skipped_op = (game == 1) and u16be(f1, skip) or u8(f1, skip)
+                    local skip_table = (game == 1) and SKIP_SIMON1 or SKIP_SIMON2
+                    local target = skip + alen + (skip_table[skipped_op + 1] or 0)
+                    if target <= #f1 then stack[#stack + 1] = target end
                 end
             end
 
@@ -638,8 +606,8 @@ local function run_anim_script(f1, script_off, game)
     -- the most common per-frame interval.
     local best, bestn = nil, 0
     local counts = {}
-    for i = 1, nframes do
-        local v = ops[i].delay
+    for _, frame in ipairs(ops) do
+        local v = frame.delay
         if v and v > 0 then
             counts[v] = (counts[v] or 0) + 1
             if counts[v] > bestn then bestn, best = counts[v], v end
@@ -657,16 +625,18 @@ end
 -- Build the 256-entry display palette (768 bytes) from a script's
 -- vc22_setPalette calls. Bank a holds 32 colours when a == 0, else 16,
 -- loaded from vgaFile1 at offset 6 + block*96, scaled by 4.
-local function build_palette(f1, ops)
+local function build_palette(f1, ops, initial)
     local pal = {}
     for i = 0, 255 do
-        pal[i * 3 + 1] = 0
-        pal[i * 3 + 2] = 0
-        pal[i * 3 + 3] = 0
+        pal[i * 3 + 1] = initial and initial[i * 3 + 1] or 0
+        pal[i * 3 + 2] = initial and initial[i * 3 + 2] or 0
+        pal[i * 3 + 3] = initial and initial[i * 3 + 3] or 0
     end
     if not f1 then return pal end
 
-    for _, o in ipairs(ops) do
+    local palette_ops = {{op = "pal", bank = 0, block = 0}}
+    for _, o in ipairs(ops or {}) do palette_ops[#palette_ops + 1] = o end
+    for _, o in ipairs(palette_ops) do
         if o.op == "pal" then
             local num  = (o.bank == 0) and 32 or 16
             local base = 7 + o.block * 96        -- 0-based offset 6
@@ -679,23 +649,6 @@ local function build_palette(f1, ops)
                 pal[d + 3] = math.min(255, u8(f1, p + 2) * 4)
             end
         end
-    end
-    return pal
-end
-
--- Grey ramp fallback so an image is never fully black.
-local function grey_palette()
-    local pal = {}
-    for i = 0, 255 do
-        pal[i * 3 + 1] = 0
-        pal[i * 3 + 2] = 0
-        pal[i * 3 + 3] = 0
-    end
-    for i = 0, 255 do
-        local v = math.floor(i * 255 / 255)
-        pal[i * 3 + 1] = v
-        pal[i * 3 + 2] = v
-        pal[i * 3 + 3] = v
     end
     return pal
 end
@@ -826,13 +779,9 @@ local function decode_rle(f2, offset, w, h, bank)
     return pixels
 end
 
--- Wide images (w > 320, 8bpp): a table of (w/8) big-endian u32 offsets relative
--- to the table start, one per 8-pixel group. Each group is an independent RLE
--- stream of 8 columns x h bytes, one byte per pixel (gfx.cpp decodeColumn).
--- Wide images (w > screen width) are a table of w/8 big-endian u32 offsets;
--- each points at an independently compressed 8-column block of 8-bit pixels.
--- This is AGOSEngine::decodeColumn, NOT vc10_depackColumn: the run counter is
--- re-read for every run and there is no state carried between columns.
+-- Wide scrolling images: each table entry contains an offset relative to
+-- itself, pointing to one 8-column RLE stream. Positive counts repeat one
+-- colour; negative counts copy literals. Runs may cross column boundaries.
 local function decode_coltable(f2, offset, w, h, bank)
     local pixels = {}
     for i = 1, w * h do pixels[i] = 0 end
@@ -841,7 +790,7 @@ local function decode_coltable(f2, offset, w, h, bank)
     for g = 0, math.floor(w / 8) - 1 do
         local tp = offset + g * 4 + 1
         if tp + 3 > #f2 then break end
-        local p = offset + u32be(f2, tp) + 1
+        local p = tp + u32be(f2, tp)
         local col, row = 0, 0
 
         while col < 8 do
@@ -851,13 +800,16 @@ local function decode_coltable(f2, offset, w, h, bank)
             p = p + 1
             local n = (reps >= 0) and (reps + 1) or -reps
 
+            local repeated
+            if reps >= 0 then
+                if p > #f2 then break end
+                repeated = u8(f2, p); p = p + 1
+            end
             for _ = 1, n do
                 if col >= 8 then break end
                 local v
                 if reps >= 0 then
-                    if p > #f2 then return pixels end
-                    v = u8(f2, p)
-                    p = p + 1
+                    v = repeated
                 else
                     if p > #f2 then return pixels end
                     v = u8(f2, p)
@@ -980,6 +932,31 @@ local function cache_key(game_path, zone)
     return game_path .. "\0" .. tostring(zone)
 end
 
+-- UI colours and Simon's bank persist between rooms in the running game.
+-- Seed them from their startup scripts, then apply each room's palette.
+local GLOBAL_PALETTE = {}
+local function global_palette(game_path, game)
+    if GLOBAL_PALETTE.path == game_path then return GLOBAL_PALETTE.palette end
+    local pal
+    for _, zone in ipairs(game == 1 and {0, 19} or {0}) do
+        local f1 = get_zone_data(game_path, zone, 1)
+        local images = parse_vga1_images(f1, parse_vga1_header(f1))
+        local bg
+        for _, im in ipairs(images) do if not bg or im.id < bg.id then bg = im end end
+        if bg then
+            local ops = run_vga_script(f1, bg.scriptOffs, game)
+            if zone == 19 then
+                local simon = {}
+                for _, o in ipairs(ops) do if o.op == "pal" and o.bank == 2 then simon[#simon + 1] = o end end
+                ops = simon
+            end
+            pal = build_palette(f1, ops, pal)
+        end
+    end
+    GLOBAL_PALETTE = {path = game_path, palette = pal}
+    return pal
+end
+
 local function load_zone(game_path, zone, game)
     if ZONE_CACHE_KEY ~= game_path then invalidate_cache(); ZONE_CACHE_KEY = game_path end
     local ck = cache_key(game_path, zone)
@@ -993,10 +970,12 @@ local function load_zone(game_path, zone, game)
         return nil
     end
     local hdr = parse_vga1_header(f1)
+    if not hdr then ZONE_CACHE[ck] = false; return nil end
     local images = parse_vga1_images(f1, hdr)
     local ctx = {
         zone  = zone,
         game  = game,
+        global_pal = global_palette(game_path, game),
         f1    = f1,
         f2    = f2,
         hdr   = hdr,
@@ -1013,6 +992,25 @@ local function load_zone(game_path, zone, game)
     end
     if bg and bg.scriptOffs and bg.scriptOffs < (f1 and #f1 or 0) then
         ctx.pal_ops = run_vga_script(f1, bg.scriptOffs, game)
+    end
+    ctx.anim_ops, ctx.banks, ctx.image_banks = {}, {}, {}
+    for _, im in ipairs(images) do
+        for _, o in ipairs(run_anim_script(f1, im.scriptOffs, game)) do
+            if o.op == "start" and o.zone == zone then ctx.banks[o.sprite] = o.bank end
+            if o.op == "sprite" and o.bank then ctx.image_banks[o.image] = o.bank end
+        end
+    end
+    for _, an in ipairs(ctx.anims) do
+        local ops = run_anim_script(f1, an.scriptOffs, game)
+        ctx.anim_ops[an.index] = ops
+        for _, o in ipairs(ops) do
+            if o.op == "start" and o.zone == zone then ctx.banks[o.sprite] = o.bank end
+        end
+    end
+    for _, an in ipairs(ctx.anims) do
+        for _, o in ipairs(ctx.anim_ops[an.index]) do
+            if o.op == "sprite" then ctx.image_banks[o.image] = o.bank or ctx.banks[an.id] or ctx.image_banks[o.image] end
+        end
     end
     ZONE_CACHE[ck] = ctx
     return ctx
@@ -1057,7 +1055,12 @@ local function composite(ctx, ops, screen_w, screen_h)
                         for col = 0, e.width - 1 do
                             local X = o.x + col
                             if X >= 0 and X < screen_w then
-                                canvas[Y * screen_w + X + 1] = px[srow + col + 1] or 0
+                                local sx = ((o.flags or 0) % 2 == 1) and (e.width - col - 1) or col
+                                local color = px[srow + sx + 1] or 0
+                                local transparent = e.is_background and color == 0 or (not e.is_background and color % 16 == 0)
+                                if math.floor((o.flags or 0) / 2) % 2 == 1 or not transparent then
+                                    canvas[Y * screen_w + X + 1] = color
+                                end
                             end
                         end
                     end
@@ -1069,6 +1072,119 @@ local function composite(ctx, ops, screen_w, screen_h)
     return canvas
 end
 
+-- DOS inventory icons: column-major RLE of vertical nibble pairs.
+-- Simon 2 combines two 20x20 layers in banks 14 and 13; S1 is 24x24.
+local function decode_icon(data, offset, width, half_height, bank, pixels)
+    pixels = pixels or {}
+    local height = half_height * 2
+    for i = 1, width * height do if not pixels[i] then pixels[i] = 0 end end
+    local p, pair = offset + 1, 0
+    while pair < width * half_height and p <= #data do
+        local count = s8(u8(data, p)); p = p + 1
+        local n = count < 0 and (1 - count) or (count + 1)
+        local repeated
+        if count < 0 then repeated = u8(data, p); p = p + 1 end
+        for _ = 1, n do
+            if pair >= width * half_height or (count >= 0 and p > #data) then break end
+            local v = repeated
+            if count >= 0 then v = u8(data, p); p = p + 1 end
+            local x, y = math.floor(pair / half_height), (pair % half_height) * 2
+            local hi, lo = math.floor(v / 16), v % 16
+            if hi ~= 0 then pixels[y * width + x + 1] = bank + hi end
+            if lo ~= 0 then pixels[(y + 1) * width + x + 1] = bank + lo end
+            pair = pair + 1
+        end
+    end
+    return pixels
+end
+
+local function icon_data(game_path, game)
+    local f = file_open(game_path .. "/ICON.DAT")
+    if not f then return nil end
+    local data = file_read(f, 0, file_size(f)); file_close(f)
+    if not data or #data < 2 then return nil end
+    local first = u8(data, 1) + u8(data, 2) * 256
+    local stride = game == 1 and 2 or 4
+    if first < stride or first > #data or first % stride ~= 0 then return nil end
+    return data, first / stride
+end
+
+-- Audio tables have a zero slot followed by the table byte size, then LE
+-- clip offsets. Equal offsets alias a clip; expose each distinct clip once.
+local AUDIO_CACHE = {}
+local function audio_clips(path, base, size)
+    local f = file_open(path)
+    if not f then return {} end
+    local head = file_read(f, base, 8) or ""
+    local bytes = u32le(head, 5)
+    if bytes < 8 or bytes % 4 ~= 0 or bytes > size or bytes > 1024 * 1024 then
+        file_close(f); return {}
+    end
+    local table_data = file_read(f, base, bytes)
+    file_close(f)
+    if not table_data or #table_data ~= bytes then return {} end
+    local unique, offsets = {}, {}
+    for i = 1, bytes / 4 - 1 do
+        local off = u32le(table_data, i * 4 + 1)
+        if off >= bytes and off < size and not unique[off] then
+            unique[off] = true
+            offsets[#offsets + 1] = {index = i, offset = off}
+        end
+    end
+    table.sort(offsets, function(a, b) return a.offset < b.offset end)
+    local clips = {}
+    for i, e in ipairs(offsets) do
+        local last = offsets[i + 1] and offsets[i + 1].offset or size
+        clips[e.index] = {path = path, offset = base + e.offset, size = last - e.offset}
+    end
+    return clips
+end
+
+local function audio_catalog(game_path, game)
+    if AUDIO_CACHE.path == game_path then return AUDIO_CACHE end
+    local cat = {path = game_path, clips = {}, groups = {}}
+    local function add_group(id, name, clips)
+        local children, ids = {}, {}
+        for i in pairs(clips) do ids[#ids + 1] = i end
+        table.sort(ids)
+        for _, i in ipairs(ids) do
+            local rid = id .. "_" .. i
+            cat.clips[rid] = clips[i]
+            children[#children + 1] = {id = rid, name = name .. " " .. i, type = "sound"}
+        end
+        if #children > 0 then cat.groups[#cat.groups + 1] = {
+            id = id, name = name .. " (" .. #children .. " clips)", type = "category", children = children}
+        end
+    end
+    for _, entry in ipairs({{"sfx", "Sound effect", "EFFECTS"},
+                             {"speech", "Speech", game == 2 and "SIMON2" or "SIMON"}}) do
+        for _, ext in ipairs({"mp3", "voc", "wav"}) do
+            local path = game_path .. "/" .. entry[3] .. "." .. ext
+            local f = file_open(path)
+            if f then
+                local size = file_size(f); file_close(f)
+                add_group(entry[1], entry[2], audio_clips(path, 0, size))
+                break
+            end
+        end
+    end
+    if game == 2 then
+        local info = gme_info(game_path)
+        if info.offsets then
+            -- setupGame: _soundIndexBase = 1660 / 4, table number is 1-based.
+            for slot = 415, info.nslots - 1 do
+                local base, last = info.offsets[slot], info.offsets[slot + 1]
+                if last and last > base then
+                    add_group("sfxbank_" .. (slot - 414), "SFX bank " .. (slot - 414),
+                              audio_clips(info.path, base, last - base))
+                end
+            end
+        end
+    end
+    AUDIO_CACHE = cat
+    return cat
+end
+
 -- ============================================================================
 -- Resource tree
 -- ============================================================================
@@ -1077,12 +1193,12 @@ local SCREEN_W, SCREEN_H = 320, 200
 
 function engine.get_resources(game_path)
     local info    = gme_info(game_path)
-    local max_zone = 200
+    local game = is_simon2(game_path) and 2 or 1
+    local max_zone = (game == 2) and 140 or 163
     if info.offsets then
-        max_zone = math.floor(info.nslots / 2)
+        max_zone = math.min(max_zone, math.floor(info.nslots / 2) - 1)
     end
 
-    local game  = is_simon2(game_path) and 2 or 1
     local label = (game == 2) and "Simon 2" or "Simon 1"
 
     local zones_cat = {
@@ -1140,27 +1256,27 @@ function engine.get_resources(game_path)
 
                 -- Animations
                 for _, an in ipairs(ctx.anims) do
-                    local ops = run_vga_script(f1, an.scriptOffs, game)
+                    local ops = ctx.anim_ops[an.index]
                     local ndraw, seen = 0, {}
                     for _, o in ipairs(ops) do
-                        if o.op == "draw" and o.image ~= 0 and not seen[o.image] then
+                        if o.op == "sprite" and byindex[o.image] and not seen[o.image] then
                             seen[o.image] = true
                             ndraw = ndraw + 1
                         end
                     end
-                    children[#children + 1] = {
+                    if ndraw > 0 then children[#children + 1] = {
                         id   = string.format("anim_%d_%d", zone, an.index),
-                        name = string.format("Animation %d (%d frames)", an.id, ndraw),
+                        name = string.format("Sprite animation %d (%d unique frames)", an.id, ndraw),
                         type = "animation",
                     }
-                    total_anim = total_anim + 1
+                    total_anim = total_anim + 1 end
                 end
 
                 -- Individual images
                 for _, e in ipairs(ctx.raw) do
                     children[#children + 1] = {
                         id   = string.format("img_%d_%d", zone, e.index),
-                        name = string.format("Image %d (%dx%d, %s)", e.index,
+                        name = string.format((e.is_background and "Background image %d (%dx%d, %s)" or "Sprite image %d (%dx%d, %s)"), e.index,
                                     e.width, e.height, e.kind),
                         type = "image",
                     }
@@ -1187,6 +1303,32 @@ function engine.get_resources(game_path)
     if #zones_cat.children > 0 then
         resources[#resources + 1] = zones_cat
     end
+    local icons, nicons = icon_data(game_path, game)
+    if icons then
+        local category = {id = "icons", name = "Inventory sprites", type = "category", children = {}}
+        for i = 0, nicons - 1 do category.children[#category.children + 1] = {
+            id = "icon_" .. i, name = "Inventory icon " .. i, type = "image"}
+        end
+        resources[#resources + 1] = category
+    end
+    for _, group in ipairs(audio_catalog(game_path, game).groups) do resources[#resources + 1] = group end
+    -- Music slots are independent of graphics: S1 GMF; S2 GM and MT-32 XMIDI.
+    if info.offsets then
+        local music = {id = "music", name = "Music", type = "category", children = {}}
+        local ranges = game == 2 and {{282, 374, "General MIDI"}, {435, 527, "MT-32"}}
+            or {{329, 362, "GMF"}}
+        for _, range in ipairs(ranges) do
+            for slot = range[1], math.min(range[2], info.nslots - 1) do
+                local data = read_slot_file(info.path, info.offsets, info.nslots, slot)
+                if data and (data:sub(1, 3) == "GMF" or data:sub(1, 4) == "MThd"
+                    or (data:sub(1, 4) == "FORM" and data:find("XMID", 1, true))) then
+                    music.children[#music.children + 1] = {id = "music_" .. slot,
+                        name = range[3] .. " bank " .. (slot - range[1] + 1), type = "midi"}
+                end
+            end
+        end
+        if #music.children > 0 then resources[#resources + 1] = music end
+    end
     return resources
 end
 
@@ -1195,12 +1337,49 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id)
+    local game = is_simon2(game_path) and 2 or 1
+    local icon = resource_id:match("^icon_(%d+)$")
+    if icon then
+        local data, count = icon_data(game_path, game)
+        local index = tonumber(icon)
+        if not data or index >= count then return nil end
+        local w = game == 1 and 24 or 20
+        local stride = game == 1 and 2 or 4
+        local p = index * stride + 1
+        local off = u8(data, p) + u8(data, p + 1) * 256
+        if off >= #data then return nil end
+        local px = decode_icon(data, off, w, w / 2, 224)
+        if game == 2 then
+            off = u8(data, p + 2) + u8(data, p + 3) * 256
+            if off >= #data then return nil end
+            px = decode_icon(data, off, w, w / 2, 208, px)
+        end
+        local handle = image_create_indexed(w, w, px, global_palette(game_path, game) or {}, 0)
+        if handle then return {type = "image", image = handle, description = "Inventory icon " .. index} end
+        return nil
+    end
+    if resource_id:match("^sfx") or resource_id:match("^speech_") then
+        local clip = audio_catalog(game_path, game).clips[resource_id]
+        if not clip then return nil end
+        local f = file_open(clip.path)
+        if not f then return nil end
+        local data = file_read(f, clip.offset, clip.size); file_close(f)
+        local handle = data and sound_create_encoded(data)
+        if handle then return {type = "sound", sound = handle, description = resource_id .. " - " .. clip.size .. " encoded bytes"} end
+        return nil
+    end
+    local music_slot = resource_id:match("^music_(%d+)$")
+    if music_slot then
+        local info = gme_info(game_path)
+        local data = info.offsets and read_slot_file(info.path, info.offsets, info.nslots, tonumber(music_slot))
+        local handle = data and midi_create_auto(data)
+        if handle then return {type = "midi", midi = handle, description = "Simon music bank (XMIDI: first sequence preview; GMF: DOS tempo)"} end
+        return nil
+    end
     local kind, zone_s, idx_s = resource_id:match("^(%a+)_(%d+)_(%d+)$")
     if not kind then return nil end
     local zone = tonumber(zone_s)
     local idx  = tonumber(idx_s)
-    local game = is_simon2(game_path) and 2 or 1
-
     local ctx = load_zone(game_path, zone, game)
     if not ctx then return nil end
 
@@ -1212,7 +1391,7 @@ function engine.load_resource(game_path, resource_id)
         end
         if not im then return nil end
         local ops   = run_vga_script(ctx.f1, im.scriptOffs, game)
-        local pal   = build_palette(ctx.f1, ops)
+        local pal   = build_palette(ctx.f1, ops, ctx.global_pal)
         local canvas = composite(ctx, ops, SCREEN_W, SCREEN_H)
         local handle = image_create_indexed(SCREEN_W, SCREEN_H, canvas, pal)
         if not handle then return nil end
@@ -1228,22 +1407,10 @@ function engine.load_resource(game_path, resource_id)
     if kind == "img" then
         local e = find_raw(ctx, idx)
         if not e then return nil end
-        -- The vgaFile2 index space is shared by every script in the zone, so
-        -- walk them all in table order: the first draw of this image decides
-        -- its palette bank, and they all contribute palette blocks.
-        local ops, bank = {}, 0
-        for _, im in ipairs(ctx.images) do
-            local script = run_vga_script(ctx.f1, im.scriptOffs, game)
-            for _, o in ipairs(script) do
-                ops[#ops + 1] = o
-                if bank == 0 and o.op == "draw" and o.image == e.index then
-                    bank = o.bank
-                end
-            end
-        end
-        local pal = build_palette(ctx.f1, ops)
+        local bank = ctx.image_banks[e.index] or 0
+        local pal = build_palette(ctx.f1, ctx.pal_ops, ctx.global_pal)
         local px = decode_image(ctx.f2, e, bank * 16)
-        local handle = image_create_indexed(e.width, e.height, px, pal)
+        local handle = image_create_indexed(e.width, e.height, px, pal, e.is_background and -1 or bank * 16)
         if not handle then return nil end
         return {
             type = "image", image = handle,
@@ -1259,27 +1426,38 @@ function engine.load_resource(game_path, resource_id)
             if e.index == idx then an = e; break end
         end
         if not an then return nil end
-        local ops = run_anim_script(ctx.f1, an.scriptOffs, game)
+        local ops = ctx.anim_ops[an.index] or run_anim_script(ctx.f1, an.scriptOffs, game)
 
         -- Palette: the room background's script is what the game would have
         -- loaded before running this animation, so prefer it, and fall back
         -- to the animation's own setPalette calls.
-        local pal = build_palette(ctx.f1, ctx.pal_ops)
-        if not ctx.pal_ops then pal = build_palette(ctx.f1, ops) end
+        local palette_ops = {}
+        for _, o in ipairs(ctx.pal_ops or {}) do palette_ops[#palette_ops + 1] = o end
+        local pal = build_palette(ctx.f1, palette_ops, ctx.global_pal)
 
         -- Frames are the ordered vc24_setSpriteXY / vc10_draw image indices.
         -- Keep repeats: a frame that alternates between two images is a real
         -- part of the animation, and a ping-pong sequence is common.
-        local frames, frame_delays, bank = {}, {}, 0
+        local frames, frame_delays, bank = {}, {}, ctx.banks[an.id] or 0
         for _, o in ipairs(ops) do
-            if o.op == "start" and bank == 0 then
-                bank = o.bank
+            if o.op == "pal" then
+                palette_ops[#palette_ops + 1] = o
+                pal = build_palette(ctx.f1, palette_ops, ctx.global_pal)
             elseif o.op == "sprite" and o.image and o.image ~= 0 then
                 if o.bank then bank = o.bank end
                 local e = find_raw(ctx, o.image)
                 if e then
                     local px = decode_image(ctx.f2, e, bank * 16)
-                    local hh = image_create_indexed(e.width, e.height, px, pal)
+                    if (o.flags or 0) % 2 == 1 then
+                        for y = 0, e.height - 1 do
+                            for x = 0, math.floor(e.width / 2) - 1 do
+                                local a, b = y * e.width + x + 1, (y + 1) * e.width - x
+                                px[a], px[b] = px[b], px[a]
+                            end
+                        end
+                    end
+                    local transparent = not e.is_background and math.floor((o.flags or 0) / 2) % 2 == 0
+                    local hh = image_create_indexed(e.width, e.height, px, pal, transparent and bank * 16 or -1)
                     if hh then frames[#frames + 1] = hh; frame_delays[#frame_delays + 1] = o.delay end
                 end
             end
@@ -1324,6 +1502,10 @@ engine._debug = {
     img_table = parse_img_table,
     anim_ops  = run_anim_script,
     vclen     = VC_LEN,
+    decode_image = decode_image,
+    room_ops = run_vga_script,
+    palette = build_palette,
+    decode_icon = decode_icon,
 }
 
 return engine

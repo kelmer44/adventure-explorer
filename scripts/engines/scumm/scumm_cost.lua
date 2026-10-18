@@ -277,7 +277,7 @@ local FORMAT_COLORS = { [0x58] = 16, [0x59] = 32, [0x60] = 16, [0x61] = 32 }
 
 function Classic.parse(block, version)
     -- offsets below are 0-based positions inside the block, like ScummVM's pointers
-    local base = (version >= 6) and 8 or 2
+    local base = (version == 3) and -2 or ((version >= 6) and 8 or 2)
     local function B(off) return block:byte(off + 1) or 0 end
     local function W(off) return u16le(block, off + 1) end
 
@@ -288,12 +288,20 @@ function Classic.parse(block, version)
 
     local self = setmetatable({}, Classic)
     self.kind = "cost"
+    self.version = version
     self.block, self.base, self.B, self.W = block, base, B, W
     self.num_anim = num_anim
     self.ncolors = ncolors
     self.pal = {}
-    for i = 0, ncolors - 1 do self.pal[i] = B(base + 8 + i) end
-    local ptr = base + 8 + ncolors
+    if version == 3 then
+        for i = 0, 15 do self.pal[i] = i end
+        self.pal[B(base + 8)] = 0
+        self.base = 0 -- old-bundle offsets are relative to the size word
+    else
+        for i = 0, ncolors - 1 do self.pal[i] = B(base + 8 + i) end
+    end
+    local ptr = base + 8 + ((version == 3) and 1 or ncolors)
+    base = self.base
     self.anim_cmds = base + W(ptr)
     self.frame_offsets = ptr + 2
     self.data_offsets = ptr + 34
@@ -342,7 +350,13 @@ function Classic:parse_anim(anim)
     local guard = 0
     repeat
         if band(mask, 0x8000) ~= 0 then
-            local j = W(r); r = r + 2
+            local j
+            if self.version == 3 then
+                j = B(r); r = r + 1
+                if j == 0xFF then j = 0xFFFF end
+            else
+                j = W(r); r = r + 2
+            end
             if j ~= 0xFFFF then
                 local extra = B(r); r = r + 1
                 local cmd = B(self.anim_cmds + j)
@@ -724,9 +738,10 @@ end
 
 -- ── Public API ──────────────────────────────────────────────────────────────
 
---- Parse a costume block. `version` is the SCUMM major version (5..8).
+--- Parse a costume block. `version` is the SCUMM major version (3, 5..8).
 function C.parse(block, version)
     if not block or #block < 16 then return nil end
+    if version == 3 then return Classic.parse(block, version) end
     local tag = block:sub(1, 4)
     if tag == "AKOS" then return Akos.parse(block) end
     if tag == "COST" then return Classic.parse(block, version) end

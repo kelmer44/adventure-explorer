@@ -210,7 +210,22 @@ local function is_v2_lfl(game_path)
     if not (file_exists(game_path .. "/01.LFL") or file_exists(game_path .. "/01.lfl")) then
         return false
     end
-    return true
+    local f = file_open(game_path .. "/00.LFL")
+    if not f then return false end
+    local header = file_read(f, 0, file_size(f))
+    file_close(f)
+    if not header or #header < 4 then return false end
+    header = xor_decrypt(header, 0xFF)
+    if u16le(header, 1) ~= 0x0100 then return false end
+    -- Enhanced V2 and old-bundle V3 share the magic, but V2 stores one
+    -- byte per global object, V3 four. Validate all four directories.
+    local p = 5 + u16le(header, 3)
+    for _ = 1, 4 do
+        local n = header:byte(p)
+        if not n or n == 255 or p + n * 3 > #header then return false end
+        p = p + 1 + n * 3
+    end
+    return p == #header + 1
 end
 
 -- Enumerate all room LFL files (01.LFL through NN.LFL)
