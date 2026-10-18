@@ -19,6 +19,53 @@ import javax.sound.sampled.AudioSystem
 class ResourceExporterTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun `same folder exports backgrounds across rooms without overwriting duplicate names`() = runBlocking {
+        val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)
+        File(temporary.root, "Background.png").writeText("existing")
+        val tree = listOf(ResourceNode("rooms", "Rooms", "category", listOf(
+            ResourceNode("room1", "Room 1", "category", listOf(
+                ResourceNode("bg1", "Background", "image"),
+                ResourceNode("script", "Script", "text")
+            )),
+            ResourceNode("room2", "Room 2", "category", listOf(
+                ResourceNode("bg2", "background", "image")
+            )),
+            ResourceNode("empty", "Empty", "category")
+        )))
+        val loaded = mutableListOf<String>()
+        val result = ResourceExporter({ node ->
+            loaded += node.id
+            ResourceData("image", image, null)
+        }).export(ResourceCategories.filter(tree, ExportCategory.BACKGROUNDS), temporary.root, ExportLayout.SAME_FOLDER)
+        assertEquals(2, result.exported)
+        assertTrue(result.failures.isEmpty())
+        assertEquals(listOf("bg1", "bg2"), loaded)
+        assertEquals(setOf("Background.png", "Background (2).png", "background (3).png"), temporary.root.list()!!.toSet())
+        assertEquals("existing", File(temporary.root, "Background.png").readText())
+        assertEquals(2, ImageIO.read(File(temporary.root, "Background (2).png")).width)
+        assertEquals(2, ImageIO.read(File(temporary.root, "background (3).png")).width)
+    }
+
+    @Test fun `same folder skips empty categories and keeps animation frames grouped and failure paths intact`() = runBlocking {
+        val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)
+        val tree = listOf(ResourceNode("rooms", "Rooms", "category", listOf(
+            ResourceNode("empty", "Empty", "category"),
+            ResourceNode("animation", "Walk", "animation"),
+            ResourceNode("bad", "Broken", "image")
+        )))
+        val result = ResourceExporter({ node ->
+            if (node.id == "bad") null
+            else ResourceData("animation", image, null, frames = listOf(image, image), frameDelayMs = 75)
+        }).export(tree, temporary.root, ExportLayout.SAME_FOLDER)
+        assertEquals(1, result.exported)
+        assertEquals(1, result.failures.size)
+        assertEquals(setOf("Walk", "export-errors.txt"), temporary.root.list()!!.toSet())
+        assertTrue(File(temporary.root, "Walk/frame_0000.png").isFile)
+        assertTrue(File(temporary.root, "Walk/frame_0001.png").isFile)
+        assertTrue(File(temporary.root, "Walk/animation.txt").readText().contains("75 ms"))
+        assertTrue(result.errorLog!!.readText().contains("/Rooms/Broken [bad]"))
+    }
+
     @Test fun `model category exports rendered PNG instead of metadata`() = runBlocking {
         val node=ResourceNode("mesh","mesh","model")
         val model=ModelData(listOf(ModelVertex(-1.0,0.0,-1.0),ModelVertex(1.0,0.0,-1.0),ModelVertex(0.0,0.0,1.0)),

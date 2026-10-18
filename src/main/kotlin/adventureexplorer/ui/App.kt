@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.sp
 import adventureexplorer.app.AppState
 import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.ExportCategory
+import adventureexplorer.model.ExportLayout
 import adventureexplorer.model.ResourceCategories
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,12 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.util.prefs.Preferences
 import javax.swing.JFileChooser
+import javax.swing.JPanel
+import javax.swing.JLabel
+import javax.swing.JRadioButton
+import javax.swing.ButtonGroup
+import javax.swing.BoxLayout
+import javax.swing.BorderFactory
 import javax.swing.SwingUtilities
 
 // Dark color scheme
@@ -314,16 +321,31 @@ private suspend fun showExportAllDialog(appState: AppState, folder: ResourceNode
             }
             chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
             chooser.isAcceptAllFileFilterUsed = false
+            val treeLayout = JRadioButton("Resource tree path", true)
+            val sameFolder = JRadioButton("Same folder")
+            ButtonGroup().apply {
+                add(treeLayout)
+                add(sameFolder)
+            }
+            chooser.accessory = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                border = BorderFactory.createEmptyBorder(8, 12, 8, 8)
+                add(JLabel("Export folder layout"))
+                add(treeLayout)
+                add(sameFolder)
+                add(JLabel("Animations keep their own frame folders."))
+            }
             if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION)
-                chooser.selectedFile.absolutePath
+                chooser.selectedFile.absolutePath to
+                    if (sameFolder.isSelected) ExportLayout.SAME_FOLDER else ExportLayout.RESOURCE_TREE
             else null
         }
     } ?: return
     withContext(Dispatchers.Main) {
         when {
-            folder != null -> appState.exportFolder(chosen, folder)
-            category != null -> appState.exportCategory(chosen, category)
-            else -> appState.exportAll(chosen)
+            folder != null -> appState.exportFolder(chosen.first, folder, chosen.second)
+            category != null -> appState.exportCategory(chosen.first, category, chosen.second)
+            else -> appState.exportAll(chosen.first, chosen.second)
         }
     }
 }

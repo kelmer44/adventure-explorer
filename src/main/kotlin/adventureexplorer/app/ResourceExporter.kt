@@ -2,6 +2,7 @@ package adventureexplorer.app
 
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
+import adventureexplorer.model.ExportLayout
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
@@ -12,7 +13,7 @@ import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 
-/** Writes decoded resources one at a time, retaining the resource tree's hierarchy. */
+/** Writes decoded resources one at a time using the selected folder layout. */
 class ResourceExporter(
     private val load: (ResourceNode) -> ResourceData?,
     private val release: () -> Unit = {}
@@ -23,6 +24,7 @@ class ResourceExporter(
     suspend fun export(
         nodes: List<ResourceNode>,
         directory: File,
+        layout: ExportLayout = ExportLayout.RESOURCE_TREE,
         onProgress: suspend (Int, Int, ResourceNode) -> Unit = { _, _, _ -> }
     ): Result {
         require(directory.isDirectory || directory.mkdirs()) { "Cannot create ${directory.path}" }
@@ -36,6 +38,10 @@ class ResourceExporter(
             currentCoroutineContext().ensureActive()
             val label = "$treePath/${node.name}"
             if (node.isCategory) {
+                if (layout == ExportLayout.SAME_FOLDER) {
+                    node.children.forEach { walk(it, parent, label) }
+                    return
+                }
                 val folder = availableFile(parent, safeName(node.name))
                 // Creating the category here also preserves empty categories.
                 check(folder.mkdir()) { "Cannot create ${folder.path}" }
