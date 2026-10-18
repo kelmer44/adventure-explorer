@@ -87,7 +87,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
 
 > \* **Another World** opens the original DOS `MEMLIST.BIN` + `BANK01`...`BANK0D`
-> folder directly (tested with `~/Desktop/ags/AW`). It exposes all 12 planar
+> folder directly. It exposes all 12 planar
 > bitmaps, 5,042 script-referenced polygon artwork previews across nine parts,
 > 576 VGA/EGA palettes, and 97 nonempty signed PCM samples (313 pitch previews).
 > All 146 resource records have decompressed metadata/hex views; the nine
@@ -124,7 +124,7 @@ remains limited to backgrounds.
 > music. Audio entries with identical offsets appear once. Animation previews
 > explore static script branches and use a common frame delay; runtime variables,
 > actor placement, and every scene-dependent palette variant are not simulated.
-> XMIDI banks preview their first sequence. Verified with the local DOS data;
+> XMIDI banks preview their first sequence. Verified with DOS data;
 > Amiga/Atari/PC-98 graphics and Ogg/FLAC audio are not supported by this decoder.
 
 > Future Wars / Operation Stealth expose ANI/ANM frames and SET bitmaps; Cruise
@@ -137,11 +137,11 @@ remains limited to backgrounds.
 > flat vector shapes, shown front-on with zoom, wireframe, palette selection and PNG
 > export; authored colours, concave boundaries and drawing order are preserved.
 > Script-driven palette changes and animation timing are not replayed. Validated
-> locally with 1,989 Future Wars and 2,345 Cruise bitmap frames, plus every Cruise
+> with 1,989 Future Wars and 2,345 Cruise bitmap frames, plus every Cruise
 > polygon pose; Operation Stealth formats have synthetic tests.
 
 > \* Fable opens the original PC CD folder directly, detected by `DECORS.DAT`
-> containing `101DECOR.RAW` and `101DECOR.PAL`. The supplied edition exposes
+> containing `101DECOR.RAW` and `101DECOR.PAL`. The tested edition exposes
 > 83 room backgrounds, six title/installer screens, 11,474 sprite frames in
 > 473 banks, 85 palettes, 561 text resources and 2,932 audio clips (including
 > 2,739 speech WAVs and 191 bundled PCM sounds). English, French, German,
@@ -157,7 +157,7 @@ remains limited to backgrounds.
 > IMX movies have metadata/hex previews only. Movie playback is unavailable.
 > Validate with `lua scripts/tests/fable.lua /path/to/FABLE all`.
 
-> \* Jack Orlando opens the supplied original Spanish PC CD folder containing
+> \* Jack Orlando opens the tested original Spanish PC CD folder containing
 > `DATA.PAK`, `MENU.PAK`, `JACK95.EXE` and `ACTION` directly. No installation or
 > extraction is needed; nested installer archives and loose `MOVIES` resources
 > are included. BM backgrounds and numbered sprite files use RGB565; packed
@@ -169,15 +169,15 @@ remains limited to backgrounds.
 > Game scripts, scene composition, sprite placement and movie playback are not
 > reconstructed. Director's Cut PHK/PH2 archives and other editions are unverified.
 > All 22,418 images, 62 animation previews, 822 sound clips, two palettes and
-> 9,150 text/metadata entries in the supplied copy passed decoder checks.
+> 9,150 text/metadata entries in the tested copy passed decoder checks.
 > Validate with `lua scripts/tests/orlando.lua`, or append the game folder and
 > `all` to decode every resource (`catalog` lists counts only).
 
 > \* Bud Tucker opens the DOS game folder containing `CTABLE01.ENC` (or
 > `CTABLE01.C`), `BUD_1.PCX` and `PANEL1.PCX`, with `SPRITES`, `FX`, `MUSIC`,
-> `SPEECH`, `AUDIO` and `GRAPHICS` alongside them. The supplied Spanish copy is
-> at `~/Desktop/TUCKER`. PCX images retain their embedded palettes; walk masks
-> use grayscale. SPR frames use a matching room palette where available, with
+> `SPEECH`, `AUDIO` and `GRAPHICS` alongside them. PCX images retain their
+> embedded palettes; walk masks use grayscale. SPR frames use a matching room
+> palette where available, with
 > manual palette selection and grayscale fallback. Inventory icons are cropped
 > from `PANOBJS` sheets. Animation previews preserve stored frame origins and
 > split long banks into batches of at most 60 frames / four million pixels,
@@ -221,7 +221,7 @@ remains limited to backgrounds.
 > 4,834 sprite frames, 231 animations, 177 palettes, 100 text tables, 2,940
 > speech/effect clips, 80 music tracks and 592 data resources.
 
-> \* The City of Lost Children opens the supplied PC `CITY` folder directly,
+> \* The City of Lost Children opens the tested PC `CITY` folder directly,
 > containing `DATAS/CITE1.DAT`, `DATAS/CITEG.DAT`, `LANGS`, `GLOBS` and `MOVS`.
 > No installation or extraction is required. Opening `DATAS` alone also works,
 > with archive resources only. The verified copy exposes 80 pictures, four font
@@ -242,7 +242,7 @@ remains limited to backgrounds.
 > containing `DATA000.LAB` (or another `DATA00x.LAB`), or either CD root containing
 > `GRIMDATA`. No installation is required. To browse all four years together, copy
 > the LAB files from both discs into one folder, including `GRIM.TAB` for dialogue.
-> Each disc can also be browsed independently. The supplied discs expose 5,191
+> Each disc can also be browsed independently. The tested discs expose 5,191
 > stored bitmap/depth/texture images and 125 CMP palettes in total. BM codecs 0
 > and 3 are decoded as RGB565; ZBM depth images are shown in grayscale. Every
 > stored image state is a separate resource, preserving its own dimensions.
@@ -257,7 +257,7 @@ remains limited to backgrounds.
 > Validate with `lua scripts/tests/grim.lua`, or append a game folder and an optional
 > resource type (`image`, `sound`, `text`, `palette`) to scan real game data.
 
-> \* Una Aventura de Cine supports the supplied Spanish 2003 CD edition
+> \* Una Aventura de Cine supports the tested Spanish 2003 CD edition
 > (Alcachofa V3.0). Open the installed folder containing `Fondos`, `Animaciones`,
 > `Mascaras`, `Sonidos` and `Textos`. The verified copy contains 123 background
 > banks, 433 animation/sprite banks (three empty placeholders), 425 mask/overlay
@@ -292,9 +292,9 @@ remains limited to backgrounds.
 > `lua scripts/tests/alcachofa.lua /path/to/output catalog` (all bank structures),
 > `audio` (all sound clips), or `visual` (first frame of every AN0 bank).
 
-> \* Amazon: Guardians of Eden opens the supplied `AMAZON` directory, detected
+> \* Amazon: Guardians of Eden opens the tested `AMAZON` directory, detected
 > by `AMAZON.EXE`, `S00.AP` and `C00.AP`. AP archives and DBE compression are read
-> directly. The supplied Spanish floppy release exposes 41 tiled backgrounds,
+> directly. The tested Spanish floppy release exposes 41 tiled backgrounds,
 > 40 full-screen pictures, 122 sprite banks, 11 loose images, 104 video sequences,
 > 151 STEVE sound clips and 64 MIDI tracks. Wide backgrounds retain their full
 > dimensions, including the 2560-pixel panorama. Image palettes are embedded;
@@ -305,10 +305,10 @@ remains limited to backgrounds.
 > Previews are batched to at most 100 frames / eight million pixels. Scripted
 > animation timing, scene compositing, MIDI driver patches and script execution
 > are not interpreted; remaining data has hex/ASCII previews. Tested with the
-> supplied floppy data; CD speech and alternate release layouts are unverified.
+> Spanish floppy data; CD speech and alternate release layouts are unverified.
 
 > \* 3 Skulls of the Toltecs opens `3SKULLS`, a language `.PDI` directory,
-> or an installed directory containing `WESTERN`. The supplied Spanish CD has
+> or an installed directory containing `WESTERN`. The tested Spanish CD has
 > 56 backgrounds, 533 sprite banks (16-color, 256-color and shadow masks),
 > 92 interface images, 11 animation banks, 90 palette fragments, 3,868 unsigned
 > 22,050 Hz PCM speech/effect clips and 18 XMIDI/MIDI music resources.
@@ -322,7 +322,7 @@ remains limited to backgrounds.
 > interpreted. Resource names are numeric archive indices.
 
 > \* El Sulfato Atomico opens the unpacked `SULFATO` directory (detected by
-> `SULFATO.EXE`, `1.ALG` and `1.ALD`). The supplied Spanish release contains
+> `SULFATO.EXE`, `1.ALG` and `1.ALD`). The tested Spanish release contains
 > 111 NMP/PCX ALG images plus one SVS save thumbnail, their embedded palettes,
 > 53 FLC animation banks in VHS files, 735 PCM WAV clips, and 43 text/data files.
 > Wide pictures retain their full dimensions. Large animation banks are split
@@ -336,7 +336,7 @@ remains limited to backgrounds.
 > Pokus Pink), with matching companion BRO archives in the game root or `INSTALL`.
 > Open `PINKPANTHER/Peligrosa` or `PINKPANTHER/Abracadabra`. Resources are grouped
 > by archive page: indexed CEL stills and animations, PCM WAV/VOX audio and
-> Windows-1252 text. The supplied Spanish copies expose 14,820 resources in
+> Windows-1252 text. The tested Spanish copies expose 14,820 resources in
 > Passport to Peril and 11,146 in Hokus Pokus Pink. Original-media CEL size and
 > VOX padding quirks are handled. Large animations are split into batches of at most 200 frames
 > and eight million pixels; all frames remain accessible. Previews use the last
@@ -344,7 +344,7 @@ remains limited to backgrounds.
 > scene compositing, scripted playback, and SONGS.SON/ALLSONGS.PTP are not decoded.
 
 > \* Les Manley 2 reads the resource directory from `EXE.EXE` alongside
-> `DATA*.DAT` and `OOPS.OOP`. The supplied Spanish release exposes 267 still
+> `DATA*.DAT` and `OOPS.OOP`. The tested Spanish release exposes 267 still
 > pictures, 231 animation banks and 83 palettes. Scene palettes are selected by
 > filename hash where available; unassigned resources permit manual palette
 > selection. One picture (`DATAF.DAT` offset 502964) has an undecodable LZW
@@ -358,7 +358,7 @@ remains limited to backgrounds.
 > timing, movement and scene compositing are not interpreted.
 
 > \* Runaway reads loose files from the game root or its `RESOURCE` directory.
-> The supplied media folder exposes 70 backgrounds, 33,407 scene sprite frames,
+> The tested media folder exposes 70 backgrounds, 33,407 scene sprite frames,
 > overlays/masks and 16 kHz PCM music, speech and effects. Animation previews use
 > batches of up to 32 stored frames at 100 ms; scripted timing/compositing, Bink
 > cutscenes and the shared `RESOURCE.000`-`.004` formats are not interpreted.
@@ -387,7 +387,7 @@ no preparation. Cabinet resources are extracted, while loose files are linked:
 **keep the original media folder in place** so those links continue to work.
 Bink cutscenes are not previewed.
 
-> \* Capstone / Manley support covers the supplied AMTAIL, BHB and LALAW releases.
+> \* Capstone / Manley support covers the tested AMTAIL, BHB and LALAW releases.
 > Fievel actor previews play stored frames in order at 100 ms; choose a scene palette
 > for the intended colours. Scene/animation bytecode and BHB sound effects are decoded
 > data previews; LA Law ABT speech is metadata only. Driver-encoded audio playback and
@@ -414,7 +414,7 @@ Bink cutscenes are not previewed.
 > not decoded yet.
 
 > \* Dark Seed 2 exposes 83 room backgrounds, 3,660 sprite/UI images grouped by
-> archive, 83 room thumbnails and 84 palettes in the supplied release. Cropped
+> archive, 83 room thumbnails and 84 palettes in the tested release. Cropped
 > scanline sprites use their room background's palette; shared walking/action
 > sprites use `FIX.PAL`. Images with embedded palettes retain them, including
 > the 4-bit inventory icon. Palettes can also be selected manually. Frames are
@@ -778,7 +778,7 @@ under **3D Models**. Character bones are assembled in the body's stored pose.
 Polygon colors use Alone 1's game palette or the first camera palette with reserved
 colors for Alone 2/3. Lines are preserved; spheres and point primitives use mesh
 approximations. Animation playback and original game material effects are not
-simulated. All 1,861 supplied body entries were checked, including three empty
+simulated. All 1,861 tested body entries were checked, including three empty
 helper objects in Alone 3. Jack and TimeGate model data remain unverified.
 For optional real-data tests set `AITD1_MODEL_TEST_PATH`, `AITD2_MODEL_TEST_PATH`
 and/or `AITD3_MODEL_TEST_PATH` before running `./gradlew test`.
