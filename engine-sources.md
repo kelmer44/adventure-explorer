@@ -61,6 +61,30 @@ play.cpp (FILM reels, animation bytecode, multipart origins and 24 Hz timing).
 Tinsel exposes animated reels as playable Animation entries within each Sprites
 file group; individual images remain available.
 
+### DISCWORLD NOIR (Tinsel 3)
+
+Engine: `scripts/engines/noir/engine.lua`; native bounded codecs:
+`src/main/kotlin/adventureexplorer/graphics/NoirCodec.kt`.
+
+Local reference: `/Users/gabriel/Desktop/source/scummvm-fork/engines/tinsel/`:
+- `handle.cpp`: 24-byte index records, full 32-bit size, flags2 compression bit,
+  IMAGE records ending in isRLE/colorFlags rather than a palette handle.
+- `noir/lzss.cpp`: MSB-first LZSS, zero dictionary, cursor 1, offset-zero terminator.
+- `graphics.cpp`: t3WrtNonZero/t3WrtAll, RGB565 word RLE and magenta transparency.
+- `sound.cpp`: IDX/SMP offset records with length-prefixed MPEG subsamples.
+- `music.cpp`: MusicSegmentNoir (length/offset into MUS, MPEG Layer II on discs).
+- `strres.cpp` / `strres.h`: linked TXT chunks, 64 IDs/chunk, extended lengths.
+
+Original English CDs mounted at `/Volumes/DWN_ENG_1/cd1`,
+`/Volumes/DWN_ENG_2/cd2`, `/Volumes/DWN_ENG_3/cd3`. The browser discovers the
+other mounted discs when any of these roots/data folders is opened. CD 3
+contains shared `english.idx` and `english.smp`; CDs 1/2 contain scene files.
+Copied flat installations and cd1/cd2/cd3 folder layouts also work.
+
+All 12,041 images in this disc set decode through LuaJ. Music, speech/subsamples,
+TXT pages and chunk/file metadata are exposed. BMV movies and actor model files
+have metadata/hex only; animation scripts and blend effects are not replayed.
+
 ### TRICK OR TREAT
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 
@@ -1061,3 +1085,31 @@ shape bank and 3 music modules. The tree has 5,042 polygon previews, 12 bitmaps,
 `scripts/tests/anotherworld.lua`; `AnotherWorldIntegrationTest.kt` exercises
 real LuaJ decoding and image output when ANOTHER_WORLD_TEST_PATH is set.
 Only the supplied DOS release was verified; no alternate-edition claims.
+
+
+## Star Trek: 25th Anniversary / Judgment Rites (`startrek`)
+
+Reference: local ScummVM `engines/startrek/{resource,lzss,bitmap,actors,graphics,sound}.cpp`.
+The new Lua decoder independently implements the directory/run format, LZSS,
+indexed images, palette scaling, masks and resolvable animation previews.
+`resource.cpp` establishes LE24 direct offsets and indirect RUN strides;
+`lzss.cpp` establishes the zeroed 4096-byte history and distance/length tokens.
+`bitmap.cpp` establishes origins/dimensions; `actors.cpp` identifies 22-byte
+ANM records and virtual/XOR actor frames; `graphics.cpp` establishes VGA scaling
+and PRI nibble order. Real-data inspection establishes Rites BGD embedded palettes,
+all nine archive triplets, Latin-1 Spanish text and UNCOMP VOC resources.
+Music MT/GM files contain multiple nested XMIDI EVNT chunks; each gets a separate
+resource to avoid dropping all but the first tune. No changes to host APIs.
+
+Verified editions: `~/Desktop/ags/TREK/{STARTREK,RITES}` (Spanish DOS).
+Unsupported formats retain metadata/hex. STARS.SHP is a table; S5ROOM3.BMP in
+this 25th Anniversary copy points into incompatible data and fails decompression.
+
+Validation: native Lua loaded all 44,631 catalog leaves (14,784 Anniversary;
+29,847 Rites). Anniversary exposes 5,826 image/mask views, 1,269 animation
+previews, 91 music sequences and three palettes. Rites exposes 11,029 image/mask
+views, 2,739 animation previews, 1,134 music sequences, 123 palettes and 197 VOCs.
+One Anniversary source entry is damaged (its image and metadata return a clear
+diagnostic); no Rites decode failures. Five LuaJ tests pass, including 1,758
+real previews, every music/palette/audio leaf, MIDI parsing, and manual palette
+overrides. Both bridge PNG exports were visually inspected.

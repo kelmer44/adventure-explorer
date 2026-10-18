@@ -260,6 +260,28 @@ class LuaEngine {
             }
         }
 
+        globals["noir_unpack"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, size: LuaValue): LuaValue {
+                val ls = data.checkstring()
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                return try { LuaString.valueOf(adventureexplorer.graphics.NoirCodec.unpack(bytes, size.checkint())) }
+                catch (e: IllegalArgumentException) { NIL }
+            }
+        }
+        globals["noir_image"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val ls = args.checkstring(1)
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                val image = try {
+                    adventureexplorer.graphics.NoirCodec.image(bytes, args.checkint(2), args.checkint(3),
+                        args.checkint(4), args.checkboolean(5))
+                } catch (e: IllegalArgumentException) { return NIL }
+                val handle = nextImageHandle++
+                images[handle] = image
+                return valueOf(handle)
+            }
+        }
+
         // image_create_rgb(width, height, rgb_table) -> handle
         // rgb_table: 1-indexed, w*h*3 entries (R,G,B values 0-255)
         globals["image_create_rgb"] = object : VarArgFunction() {

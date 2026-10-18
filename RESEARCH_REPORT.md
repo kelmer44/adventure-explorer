@@ -3755,3 +3755,106 @@ and `ANOTHER_WORLD_TEST_PATH=... ./gradlew --offline test --tests
 malformed compression, directory bounds, palette/bitplane interpretation,
 polygon recursion and truncated instructions. The latter checks the actual
 LuaJ host and representative exports, including all twelve bitmap resources.
+
+
+# Discworld Noir / Tinsel 3 (English Windows 3CD)
+
+Verified against the mounted original English discs on 2026-10-18 and local
+ScummVM `engines/tinsel/{handle,graphics,sound,music,strres}.cpp`, `scn.h`, and
+`noir/lzss.cpp`. Implemented separately in `scripts/engines/noir/engine.lua`
+with bounded native LZSS/RGB565 decoding in `NoirCodec.kt`.
+
+The 1,968-byte index has 82 records of 24 bytes: a 12-byte filename, full u32
+unpacked size, unused u32, flags2 u32. Unlike DW1/2, size is not masked to 24
+bits; the largest scene (`unseobse.scn`) is 24,927,309 bytes unpacked.
+Compression bit 28 lives in flags2. The compressed scene stream has no size
+header; it is MSB-first LZSS. A 1 bit introduces an 8-bit literal. A 0 bit
+introduces a 12-bit dictionary offset followed by a 4-bit length minus two.
+Offset zero terminates; no length is required after that sentinel. Dictionary
+size is 4096, initialized to zero, write cursor 1; overlap is allowed. Decode
+must stop at the sentinel and match the index size exactly.
+
+Unpacked SCN files use the same absolute linked chunk headers as DW1/2.
+IMAGE chunk 0x33340006 still contains 16-byte records, but the trailing fields
+are i16 isRLE and i16 colorFlags, not hImgPal. Handles retain 25-bit offsets
+and 7-bit index slots. RGB565 is little endian and 0xF81F is transparent.
+Raw images store width*height words. RLE rows contain u16 codes: high bit means
+repeat the following color word, otherwise copy literal words; low 15 bits
+are the run length. Runs must fill each row exactly. colorFlags describe
+scene blending and are reported without applying background-dependent effects.
+Large images include full-screen overlays as well as base backgrounds.
+
+Music chunk 0x3334001E holds u32 length/offset pairs into matching MUS files.
+The original English tracks are MPEG Layer II (e.g. header FF FD), supported
+by the existing JLayer path despite its MP3-oriented API names. Do not decode
+concatenated scene music as a single track: preserve stored segment boundaries.
+CD 3 has the shared English speech index/archive. IDX is a u32 offset table,
+first word zero on this release. Nonzero entries point into SMP at a u32
+length, or a high-bit-set subsample count followed by length/data pairs.
+These payloads are also MPEG audio. Parse only the small headers when building
+the catalog, and read an individual payload on playback.
+
+Language TXT files use linked CHUNK_STRING/CHUNK_MBSTRING pages (64 IDs/page).
+A normal byte is length; 0x80 introduces an 8-bit length, 0x90 introduces an
+8-bit length plus 256. Other high-bit prefixes introduce multiple substrings.
+SCN chunks tagged CHUNK_STRING can contain binary pixels, so only TXT files
+are parsed as dialogue text.
+
+The browser accepts flat installed data, copied cd1/cd2/cd3 folder layouts,
+and any mounted DWN_ENG_n root or data folder. For the mounted English set it
+also discovers the other two volumes. Missing scene files are reported in
+catalog information; one decompressed scene is cached to limit memory.
+BMV movies, GBL/RBH/H/PAL/VMC actor data, and runtime FILM/pcode animation and
+scene composition are not decoded; chunk/file metadata and hex are available.
+
+Catalog: 1,345 backgrounds/screens, 10,696 sprites/overlays, 76 music segments,
+15,019 speech/sound subsamples, 1,092 text pages, and 1,569 data entries. The
+original discs omit the index-referenced `extra.scn`; this is reported as
+unavailable and does not prevent opening other resources.
+
+Validation includes all 12,041 catalogued images through LuaJ, exact RGB565
+and alpha fixtures, overlapping/zero dictionary references, malformed streams
+and rows, original MPEG music/speech samples, language text, and portable
+case-insensitive folder/missing-file fixtures.
+
+
+## Star Trek DOS archives (25th Anniversary and Judgment Rites)
+
+Both supplied Spanish editions use 14-byte DIR records and companion RUN/001
+files. Names are 8+3 bytes; NUL terminates the basename even if trailing bytes
+contain junk. The LE24 offset has a run flag at bit 23, seven-bit count, and
+16-bit RUN offset. RUN contains an absolute LE24 position followed by LE16
+strides between packed records. Each record starts with unpacked/packed LE16
+lengths. LZSS uses LSB flags, one literal, zero match; match distance is the
+upper 12 bits and length is low nibble plus three, with zero-filled 4 KiB history.
+
+Rites has DATA plus FED, LIGHT, MADNESS, METH, NOMAN, SCOTTY, SENTNL and VOIDS
+triplets. Bitmap run members must retain archive-qualified IDs: many mission
+packs reuse resource names. BGD files are 64,776 bytes: 768 palette bytes,
+an eight-byte bitmap header and 64,000 indexed pixels. BMP and ordinary SHP
+use the same header without the palette. Origins are signed. STARS.SHP is an
+816-byte starfield table, not a 3×3 image despite its initial header-like bytes.
+PRI files store 64,000 four-bit priorities, high nibble first. PAL is 768 six-bit
+VGA components. Database/dialogue text in these copies uses Latin-1 accents.
+
+ANM uses 22-byte records with frame name, signed placement offsets, priority,
+duration and four candidate next indices. Stored-order previews resolve bitmap
+aliases through RUN entries and align frame origins. They deliberately do not
+simulate branches, runtime timing, virtual crew recoloring/XOR overlays or BAN
+background deltas. RAW audio has no confirmed sample rate. External UNCOMP VOCs
+have self-described audio headers. MT/GM archives contain several XMIDI EVNT
+sequences, all exposed individually with original instrument mapping.
+
+The supplied STARTREK directory's S5ROOM3.BMP offset (4,653,198) points into
+incompatible content (FORM bytes follow), and cannot expand to its declared
+size. It remains browsable as a diagnostic. Rites SENTNL IFOOD.BMP is an empty
+placeholder. Neither finding prevents other archive members from loading.
+
+The exhaustive native Lua sweep validated 44,631 catalog leaves, including all
+image/mask and animation previews. Only the known Anniversary S5ROOM3 source
+entry produced a damage diagnostic; Rites had no failures. Five passing LuaJ
+tests cover malformed LZSS, overlap/zero history, signed origins, VGA scaling,
+Spanish text and 1,758 real previews across both games. All 1,225 music
+sequences were also parsed as standard MIDI by the JVM; 197 external VOCs and
+126 palettes were loaded through the host APIs. Bridge exports were visually
+checked for both games.

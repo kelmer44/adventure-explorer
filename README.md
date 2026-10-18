@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-57 game engines are currently supported via Lua scripts — no recompilation needed.
+60 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -40,6 +40,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Dark Seed | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Dark Seed 2 | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
 | Discworld 1 & 2 | 1995/96 | `tinsel` | Backgrounds, Sprites, Animations | ✅ Working |
+| Discworld Noir | 1999 | `noir` | RGB565 Backgrounds/Screens, Sprites/Overlays, Music, Speech/Sound, Text, Scene Data | ✅ Working* |
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
@@ -73,6 +74,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
 | Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | Simon the Sorcerer 1 & 2 | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
+| Star Trek: 25th Anniversary / Judgment Rites (DOS) | 1992/93 | `startrek` | Backgrounds, Sprites, Animation Previews, Priority Masks, Palettes, Text, VOC Sound, XMIDI Music, Data | ✅ Working* |
 | The Beverly Hillbillies | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
 | The Last Express | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | The Legend of Kyrandia | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
@@ -85,6 +87,21 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> **Discworld Noir:** open a mounted `DWN_ENG_1`, `DWN_ENG_2`, or `DWN_ENG_3`
+> CD root or its `cd1`/`cd2`/`cd3` folder. The browser finds the other mounted
+> English CDs automatically. A copied installation with `index` and `dw3.scn`
+> also works, as does a folder containing `cd1`, `cd2`, and `cd3` subfolders.
+> CD 1 or 2 is needed for detection; CD 3 supplies `english.idx`/`english.smp`
+> for shared speech and sound. Missing scene files are listed under
+> **Scene and File Data → Disc set and format information**.
+> The original English 3CD set exposes 12,041 raw/word-RLE RGB565 images, with
+> magenta transparency, 76 music segments, 15,019 speech/sound subsamples,
+> 1,092 language string pages, and scene chunk metadata/hex. Large images include
+> background layers and overlays, rather than fully composed game scenes.
+> Color effects are previewed unblended. BMV movies, 3D actor models, and
+> scripted animation playback are not decoded; those files have metadata/hex
+> entries. No disc copying or installation step is required.
 
 > **Discworld 1 & 2:** open **Sprites → file name → Animation** to play or
 > step through a stored animation reel. Sequences follow the game's frame order,
@@ -559,6 +576,35 @@ Run synthetic regressions with `./gradlew test --tests '*ToonstruckDecoderTest'`
 Set `TOONSTRUCK_TEST_PATH` to a game folder to also check every installed background,
 mask, palette, dialogue table, and CAF animation, plus samples from each audio pack.
 
+## Star Trek: 25th Anniversary / Judgment Rites
+
+Open `STARTREK` or `RITES` inside `~/Desktop/ags/TREK`. Detection requires
+`DATA.DIR`, `DATA.RUN`, `DATA.001` and `STARTREK.EXE` or `RITES.EXE`.
+The `startrek` engine reads all matching archive triplets, including Judgment
+Rites' eight mission packs, plus external files in `UNCOMP`.
+
+Previews cover indexed BMP/SHP sprites, 320×200 screens, Judgment Rites BGD
+backgrounds with embedded palettes, priority masks, VGA palette swatches,
+Latin-1 database/dialogue text, external VOC effects and speech, and individual
+MT-32/General MIDI XMIDI sequences. Stored bitmap runs and fully resolved ANM
+records have animation previews with aligned origins and transparent pixels.
+Animations play in stored record order at a fixed 100 ms cadence; game timing,
+random branches, virtual crew recoloring/XOR frames, BAN deltas, 3D scenes and
+script execution are not replayed. Unresolved animation records and other
+formats retain decompressed metadata/hex views. RAW audio stays in the data
+view because its playback rate has not been established.
+
+Backgrounds retain embedded colors. Sprites use a matching palette/background,
+a mission palette, or a labeled shared preview palette; use the palette selector
+for another scene. Music retains original instrument mappings. The supplied
+25th Anniversary archive has an invalid `S5ROOM3.BMP` entry, shown as a diagnostic;
+Judgment Rites' empty `IFOOD.BMP` placeholder remains in the data view.
+Only the supplied Spanish DOS editions have been verified.
+
+Run `./gradlew test --tests '*StarTrekDecoderTest'` for synthetic regressions.
+Set `STAR_TREK_TEST_PATH` to the `TREK` parent folder for both-game LuaJ tests.
+`lua scripts/tests/startrek.lua ~/Desktop/ags/TREK` validates every catalog leaf.
+
 ## Writing Engine Scripts
 
 Engine scripts live in `scripts/engines/<engine_id>/engine.lua`. Each script returns a table with:
@@ -692,7 +738,7 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 57 engine scripts (Lua)
+│   └── engines/                  # 60 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── anotherworld/engine.lua # Another World (original DOS)
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
@@ -732,9 +778,11 @@ adventure-explorer/
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)
 │       ├── sky/engine.lua        # Beneath a Steel Sky
+│       ├── startrek/engine.lua    # 25th Anniversary / Judgment Rites (DOS)
 │       ├── sword1/engine.lua     # Broken Sword 1
 │       ├── sword2/engine.lua     # Broken Sword 2
 │       ├── tucker/engine.lua     # Bud Tucker in Double Trouble
+│       ├── noir/engine.lua       # Discworld Noir (Tinsel 3)
 │       ├── tinsel/engine.lua     # Discworld 1 & 2
 │       ├── toltecs/engine.lua     # 3 Skulls of the Toltecs
 │       ├── tot/engine.lua        # Trick or Treat
