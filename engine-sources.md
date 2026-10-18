@@ -56,7 +56,10 @@ games are located in ags/TINSEL (DISCWLD for Discworld 1, DW2 for Discworld 2)
 
 key reference files: engines/tinsel/handle.cpp (SCNHANDLE + chunk list),
 object.cpp (DMA flags / decoder selection), graphics.cpp (all four decoders),
-palette.cpp (DAC palette index shift)
+palette.cpp (DAC palette index shift), film.h / anim.cpp / multiobj.cpp /
+play.cpp (FILM reels, animation bytecode, multipart origins and 24 Hz timing).
+Tinsel exposes animated reels as playable Animation entries within each Sprites
+file group; individual images remain available.
 
 ### TRICK OR TREAT
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -730,6 +733,12 @@ every animation through its last declared frame.
 - `video.cpp` (`VideoPlayer_v1`): dimensions/flags, u16 packet lengths,
   skip/literal deltas and optional initial raw background.
 - `sound.cpp`: STEVE signed PCM rates and MIDI loading; `screen.cpp`: palette expansion.
+- Palette links follow conversation calls in the decoded room scripts and
+  `CharEntry` cells/videos: character numbers differ from room numbers (C00 uses
+  S05, C05 uses S19, etc.). `loadBackground` transitions select distinct palettes
+  for C03, S14, S28 and S64 videos. Chapter heading frames use screen 16; chapter
+  illustrations use screen 15. Death, credits, inventory and shared player sheets
+  use their drawing scene's palette; manual palette overrides remain available.
 - Implementation: `scripts/engines/amazon/engine.lua`; regression/full-data scan:
   `lua scripts/tests/amazon.lua ~/Desktop/ags/AMAZON`.
 

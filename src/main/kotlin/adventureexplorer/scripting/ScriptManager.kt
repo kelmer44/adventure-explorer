@@ -112,7 +112,7 @@ class ScriptManager {
             val type = table.get("type").optjstring("unknown")
             val description = table.get("description").optjstring(null)
 
-            return when (type) {
+            val resource = when (type) {
                 "model" -> ResourceData(type, null, description,
                     modelData = lua.getModel(table.get("model").checkint())?.copy(
                         textureOptions = table.get("texture_options").takeIf { it.istable() }?.let { parseLuaResourceTable(it.checktable()) } ?: emptyList(),
@@ -150,6 +150,11 @@ class ScriptManager {
                 }
                 else -> ResourceData(type, null, description)
             }
+            val paletteHandle = table.get("palette_image")
+            return resource.copy(
+                paletteImage = if (paletteHandle.isnil()) null else lua.getImage(paletteHandle.checkint()),
+                paletteColors = table.get("palette_colors").optint(256).coerceIn(1, 256)
+            )
         } catch (e: Exception) {
             println("Error loading resource '$resourceId': ${e.message}")
             e.printStackTrace()

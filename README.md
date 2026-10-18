@@ -79,7 +79,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | The Legend of Kyrandia: Hand of Fate | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
 | The Lost Files of Sherlock Holmes | 1992/96 | `sherlock` | Backgrounds, Palettes, Object Sprites, Animations, Sound Effects, Speech | ✅ Working |
 | The Neverhood | 1996 | `neverhood` | Bitmaps, Animations, Palettes, Sounds, Music, Text, Data, Videos | ✅ Working |
-| Toonstruck | 1996 | `toonstruck` | Images | ✅ Working |
+| Toonstruck | 1996 | `toonstruck` | Backgrounds, Masks, Sprites & Animations, Palettes, Dialogue, Speech, Sound, Music, Data | ✅ Working* |
 | Touché: Adventures of the Fifth Musketeer | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
 | Trick or Treat | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
@@ -541,6 +541,23 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 6. Click **Export PNG** in the image preview to save the current image, or use the animation export buttons to save individual frames or the full sequence
 7. Open the toolbar's **Export** menu and choose **Export all**, **Export selected folder**, or a category with its resource count. In the output folder dialog, choose **Resource tree path** to preserve the hierarchy or **Same folder** to place resources together (for example, all backgrounds in one folder). Choose **1× (original size)**, **2×**, or **3×** for PNG images and animation frames; scaling uses nearest-neighbor pixels and preserves transparency. Animations keep their own frame folders in either layout. Category exports omit unrelated branches. Background and sprite roles are inferred from engine folder labels and resource names/IDs; animations, images, sounds, MIDI, palettes, text, and data use explicit resource types. Categories can overlap: a sprite animation appears under both Sprites and Animations; Images (all) includes backgrounds and sprite stills.
 8. Choose an output folder. Images use PNG, animations get numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`. Click **Stop export** to stop after the current decode or file write; files already exported are kept.
+
+### Toonstruck
+
+Open the game folder or its `MISC` folder. PAK archives expose normal and scrolling
+CPS backgrounds (including separate normal/close-up views and their palettes),
+RNC/SPCN room masks, CAF sprites and animations, VGA palette swatches, TRE dialogue, and raw data previews. Standalone CAF files are included; empty placeholders show metadata.
+Animations preserve frame offsets and transparent pixels; sprites without embedded
+colors use their room palette when available. Use the palette selector for other
+scene colors. **Automatic (stored colors)** preserves the decoded image. Combined
+normal/close-up previews use two palettes; select either separate view to inspect
+its swatch. Other palette choices are manual overrides. Speech is indexed by SVI/SVL pairs, sound effects by SEI/SEL pairs,
+and standalone MUS music plays as 22100 Hz mono IMA ADPCM. Smacker movies, EMC
+script execution, and game scene composition are not implemented.
+
+Run synthetic regressions with `./gradlew test --tests '*ToonstruckDecoderTest'`.
+Set `TOONSTRUCK_TEST_PATH` to a game folder to also check every installed background,
+mask, palette, dialogue table, and CAF animation, plus samples from each audio pack.
 
 ## Writing Engine Scripts
 

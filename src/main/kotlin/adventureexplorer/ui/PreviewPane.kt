@@ -246,10 +246,9 @@ private fun PalettePane(
         if (paletteOptions.isNotEmpty()) {
             var expanded by remember { mutableStateOf(false) }
             val count = paletteOptions.size
-            val current = selectedPaletteIndex.coerceIn(0, count - 1)
+            val current = selectedPaletteIndex
             val currentName = paletteOptions.getOrNull(selectedPaletteIndex)?.name
-                ?: paletteOptions.firstOrNull()?.name
-                ?: "Default"
+                ?: "Automatic (stored colors)"
 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -257,7 +256,7 @@ private fun PalettePane(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
-                    onClick = { onPaletteSelected((current - 1 + count) % count) },
+                    onClick = { onPaletteSelected(if (current <= 0) count - 1 else current - 1) },
                     modifier = Modifier.width(34.dp),
                     contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -282,6 +281,10 @@ private fun PalettePane(
                         expanded = expanded,
                         onDismissRequest = { expanded = false }
                     ) {
+                        DropdownMenuItem(onClick = {
+                            expanded = false
+                            onPaletteSelected(-1)
+                        }) { Text("Automatic (stored colors)", fontSize = 12.sp) }
                         paletteOptions.forEachIndexed { idx, palNode ->
                             DropdownMenuItem(onClick = {
                                 expanded = false
@@ -312,7 +315,7 @@ private fun PalettePane(
             }
 
             Text(
-                "${current + 1} / $count",
+                if (current < 0) "Automatic · $count available" else "${current + 1} / $count",
                 fontSize = 10.sp,
                 color = Color(0xFF888888),
                 modifier = Modifier.padding(bottom = 4.dp)

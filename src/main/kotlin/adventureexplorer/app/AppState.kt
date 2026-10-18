@@ -166,14 +166,14 @@ class AppState {
                     ?: derivePaletteId(node.id)
                 val defaultIdx = if (companionId != null)
                     allPalsCopy.indexOfFirst { it.id == companionId } else -1
-                val useIdx = if (defaultIdx >= 0) defaultIdx else if (allPalsCopy.isNotEmpty()) 0 else -1
+                val useIdx = defaultIdx
 
                 // Optionally load palette and re-render BG on IO thread
                 val palData: ResourceData? = if (useIdx >= 0)
                     runCatching { scriptManager.loadResource(path, allPalsCopy[useIdx].id) }.getOrNull()
                 else null
 
-                val bgWithPal: ResourceData? = if (useIdx >= 0 && data?.image != null) {
+                val bgWithPal: ResourceData? = if (useIdx >= 0 && data?.image != null && data.paletteImage == null) {
                     val palNode = allPalsCopy[useIdx]
                     runCatching { scriptManager.loadResource(path, node.id, palNode.id) }.getOrNull()
                         ?.takeIf { it.image != null }
@@ -192,8 +192,8 @@ class AppState {
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
-                            previewPaletteImage = palData?.image
-                            previewPaletteColors = palData?.paletteColors ?: 256
+                            previewPaletteImage = bgWithPal?.paletteImage ?: data.paletteImage ?: palData?.image
+                            previewPaletteColors = (bgWithPal ?: data).takeIf { it.paletteImage != null }?.paletteColors ?: palData?.paletteColors ?: 256
                         } else {
                             previewPaletteImage = data.paletteImage
                             previewPaletteColors = data.paletteColors
@@ -233,6 +233,10 @@ class AppState {
      * Re-renders the background image with the new palette when the Lua script supports it.
      */
     fun applyPalette(index: Int) {
+        if (index == -1) {
+            previewNode?.let { loadPreview(it, previewModelData?.selectedTextureId) }
+            return
+        }
         if (index < 0 || index >= previewPaletteOptions.size) return
         if (previewModelData != null) {
             previewNode?.let { loadPreview(it, previewModelData?.selectedTextureId, previewPaletteOptions[index].id) }
@@ -251,8 +255,8 @@ class AppState {
                 val bgData  = runCatching { scriptManager.loadResource(path, bgId, palNode.id) }.getOrNull()
                 withContext(Dispatchers.Main) {
                     selectedPaletteIndex = index
-                    previewPaletteImage = palData?.image
-                    previewPaletteColors = palData?.paletteColors ?: 256
+                    previewPaletteImage = bgData?.paletteImage ?: palData?.image
+                    previewPaletteColors = bgData?.takeIf { it.paletteImage != null }?.paletteColors ?: palData?.paletteColors ?: 256
                     if (bgData?.image != null) {
                         previewImage = bgData.image
                         previewDesc = bgData.description ?: previewDesc
@@ -338,7 +342,7 @@ class AppState {
                     val paletteId = if (node.type == "image" || node.type == "animation") {
                         val companion = companions[node.id] ?: manager.defaultPaletteFor(path, node.id)
                             ?: derivePaletteId(node.id)
-                        palettes.firstOrNull { it.id == companion }?.id ?: palettes.firstOrNull()?.id
+                        palettes.firstOrNull { it.id == companion }?.id
                     } else null
                     manager.loadResource(path, node.id, paletteId)
                 }, release = manager::releaseDecodedResources)
