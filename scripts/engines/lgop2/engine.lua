@@ -69,8 +69,7 @@ local TAG_FREE = 0x46524545
 local TAG_OMNI = 0x4F4D4E49
 
 -- Module-level palette cache (persists across load_resource calls)
-local _resource_types = nil    -- set by get_resources()
-local _game_palette   = nil    -- first palette found in any FLEX resource
+local _palette_path, _game_palette, _game_palette_id, _game_palette_count
 
 local TAG_NAMES = {
     [TAG_FLEX] = "Pictures",
@@ -91,67 +90,6 @@ local TAG_ICONS = {
     [TAG_XMID] = "midi",
     [TAG_MIDI] = "midi",
 }
-
--- ── Palette cache helpers ───────────────────────────────────────
-
--- Lazily scan FLEX resources until we find one with an embedded palette.
--- Stores result in _game_palette for reuse by all subsequent loads.
-local function ensure_game_palette(game_path)
-    if _game_palette then return end
-    if not _resource_types then return end
-
-    local flex_slots = nil
-    for _, rt in ipairs(_resource_types) do
-        if rt.tag == TAG_FLEX then
-            flex_slots = rt.slots
-            break
-        end
-    end
-    if not flex_slots or #flex_slots == 0 then return end
-
-    local prj_path = game_path .. "/LGOP2.PRJ"
-    if not file_exists(prj_path) then
-        prj_path = game_path .. "/lgop2.prj"
-    end
-    if not file_exists(prj_path) then return end
-
-    local f = file_open(prj_path)
-    if not f then return end
-
-    local limit = math.min(#flex_slots, 300)
-    for i = 1, limit do
-        local slot = flex_slots[i]
-        -- Read 6 bytes: hasPalette(1) cmdFlags(1) pixelFlags(1) maskFlags(1) cmdOffsLo(1) cmdOffsHi(1)
-        local hdr = file_read(f, slot.offset, 6)
-        if hdr and #hdr >= 6 and hdr:byte(1) ~= 0 then
-            local cmd_offs = hdr:byte(5) + hdr:byte(6) * 256
-            if cmd_offs > 18 then
-                local pal_count = math.floor((cmd_offs - 18) / 3)
-                if pal_count >= 1 and pal_count <= 256 then
-                    local pal_data = file_read(f, slot.offset + 18, pal_count * 3)
-                    if pal_data and #pal_data >= pal_count * 3 then
-                        _game_palette = {}
-                        for j = 0, pal_count - 1 do
-                            local p = j * 3 + 1
-                            _game_palette[j * 3 + 1] = pal_data:byte(p)
-                            _game_palette[j * 3 + 2] = pal_data:byte(p + 1)
-                            _game_palette[j * 3 + 3] = pal_data:byte(p + 2)
-                        end
-                        for j = pal_count, 255 do
-                            _game_palette[j * 3 + 1] = 0
-                            _game_palette[j * 3 + 2] = 0
-                            _game_palette[j * 3 + 3] = 0
-                        end
-                        log_info(string.format("[lgop2] Cached game palette from FLEX slot %d (%d colors)", i, pal_count))
-                        break
-                    end
-                end
-            end
-        end
-    end
-
-    file_close(f)
-end
 
 -- ── File helpers ─────────────────────────────────────────────────
 
@@ -440,11 +378,12 @@ local function extract_flex_palette(game_path, off, sz)
     if not f then return nil end
     local raw = file_read(f, off, math.min(sz, 18 + 256 * 3 + 4))
     file_close(f)
-    if not raw or #raw < 7 then return nil end
+    if not raw or #raw < 18 then return nil end
     if raw:byte(1) == 0 then return nil end  -- no palette flag
     local cmd_offs = raw:byte(5) + raw:byte(6) * 256
-    if cmd_offs <= 18 then return nil end
-    local pal_count = math.min(math.floor((cmd_offs - 18) / 3), 256)
+    if cmd_offs <= 18 or cmd_offs > sz or cmd_offs > #raw then return nil end
+    local pal_count = math.floor((cmd_offs - 18) / 3)
+    if pal_count > 256 then return nil end
     if pal_count < 1 then return nil end
     local palette = {}
     for i = 0, pal_count - 1 do
@@ -463,9 +402,37 @@ local function extract_flex_palette(game_path, off, sz)
     return palette, pal_count
 end
 
+-- LGOP2 uses one shared palette, stored well beyond the first 300 FLEX slots
+-- (picture 547 in the DOS release). Cache by folder, never by preview order.
+local function ensure_game_palette(game_path)
+    if _palette_path == game_path then return end
+    _palette_path = game_path
+    _game_palette, _game_palette_id, _game_palette_count = nil, nil, nil
+    for _, rt in ipairs(parse_prj(game_path) or {}) do
+        if rt.tag == TAG_FLEX then
+            for _, slot in ipairs(rt.slots) do
+                local palette, count = extract_flex_palette(game_path, slot.offset, slot.size)
+                if palette then
+                    _game_palette, _game_palette_count = palette, count
+                    _game_palette_id = string.format("palflex_%d_%d", slot.offset, slot.size)
+                    return
+                end
+            end
+        end
+    end
+end
+
+local function palette_swatch(palette)
+    local pixels = {}
+    for y = 0, 15 do
+        for x = 0, 255 do pixels[#pixels + 1] = x end
+    end
+    return image_create_indexed(256, 16, pixels, palette)
+end
+
 -- ── Load a FLEX picture resource ─────────────────────────────────
 
-local function load_picture(game_path, res_offset, res_size, override_palette)
+local function load_picture(game_path, res_offset, res_size, override_palette, override_count)
     local prj_path = find_file(game_path, "LGOP2.PRJ")
     if not prj_path then return nil end
 
@@ -483,8 +450,6 @@ local function load_picture(game_path, res_offset, res_size, override_palette)
     end
 
     -- Parse 18-byte header
-    local has_palette  = u8(raw, 1)
-    local cmd_flags    = u8(raw, 2)
     local pixel_flags  = u8(raw, 3)
     local mask_flags   = u8(raw, 4)
     local cmd_offs     = u16le(raw, 5)
@@ -499,44 +464,21 @@ local function load_picture(game_path, res_offset, res_size, override_palette)
         return { type = "text", text = string.format("Invalid picture dimensions: %dx%d", width, height) }
     end
 
-    -- Extract palette
-    local palette = {}
-    local pal_source
-    if override_palette then
-        palette = override_palette
-        pal_source = "override"
-    elseif has_palette ~= 0 and cmd_offs > 18 then
-        local pal_count = math.floor((cmd_offs - 18) / 3)
-        if pal_count > 256 then pal_count = 256 end
-        for i = 0, pal_count - 1 do
-            local pos = 19 + i * 3
-            if pos + 2 <= #raw then
-                palette[i * 3 + 1] = u8(raw, pos)
-                palette[i * 3 + 2] = u8(raw, pos + 1)
-                palette[i * 3 + 3] = u8(raw, pos + 2)
-            end
-        end
-        -- Fill remaining with black
-        for i = pal_count, 255 do
-            palette[i * 3 + 1] = 0
-            palette[i * 3 + 2] = 0
-            palette[i * 3 + 3] = 0
-        end
+    local palette, pal_count = override_palette, override_count
+    local pal_source = "override"
+    if not palette then
+        palette, pal_count = extract_flex_palette(game_path, res_offset, res_size)
         pal_source = "embedded"
-    else
-        -- No embedded palette: use the game's shared palette if we have it,
-        -- otherwise fall back to grayscale so at least pixel structure is visible.
+    end
+    if not palette then
         ensure_game_palette(game_path)
-        if _game_palette then
-            palette = _game_palette
-            pal_source = "game"
-        else
-            for i = 0, 255 do
-                palette[i * 3 + 1] = i
-                palette[i * 3 + 2] = i
-                palette[i * 3 + 3] = i
-            end
-            pal_source = "grayscale"
+        palette, pal_count = _game_palette, _game_palette_count
+        pal_source = "shared game"
+    end
+    if not palette then
+        palette, pal_count, pal_source = {}, 256, "grayscale (no game palette found)"
+        for i = 0, 255 do
+            palette[i * 3 + 1], palette[i * 3 + 2], palette[i * 3 + 3] = i, i, i
         end
     end
 
@@ -552,6 +494,8 @@ local function load_picture(game_path, res_offset, res_size, override_palette)
     return {
         type = "image",
         image = img,
+        palette_image = palette_swatch(palette),
+        palette_colors = pal_count,
         description = string.format("Picture %dx%d, %s palette (%d bytes)",
             width, height, pal_source, res_size)
     }
@@ -825,12 +769,50 @@ end
 
 -- ── Resource tree ────────────────────────────────────────────────
 
+-- Visually identified interface assets in the DOS FLEX index. The archive has
+-- no semantic names: other full-width views are backdrops, remaining cutouts
+-- are sprites (including separate animation poses and scene props).
+local UI_PICTURES = {}
+for _, index in ipairs({
+    29,32,37,79,80,84,104,126,142,144,170,175,176,177,204,
+    316,317,318,319,325,335,349,350,390,391,392,393,394,395,
+    431,432,461,464,470,472,501,505,506,536,539,545,546,565,
+    698,699,700,717,720,721,724,725,748,752,754,766,768,769,773,
+    798,843,844,944,955,958,965,1144,1145,1222,1223,1224,1225,
+    1230,1233,1234,1235,1236,1238
+}) do UI_PICTURES[index] = true end
+for i = 20, 25 do UI_PICTURES[i] = true end
+for _, i in ipairs({286,287,326}) do UI_PICTURES[i] = true end
+for i = 870, 878 do UI_PICTURES[i] = true end
+for i = 984, 993 do UI_PICTURES[i] = true end
+UI_PICTURES[995] = true
+
+local function picture_role(game_path, slot)
+    if UI_PICTURES[slot.index] then return "ui" end
+    local f = file_open(find_file(game_path, "LGOP2.PRJ"))
+    if not f then return "sprites" end
+    local hdr = file_read(f, slot.offset, 18)
+    file_close(f)
+    if hdr and #hdr == 18 and u16le(hdr, 15) == 320 then return "backgrounds" end
+    return "sprites"
+end
+
+function engine.default_palette(game_path, resource_id)
+    if not resource_id:match("^res_464C4558_") then return nil end
+    local off, size = resource_id:match("^res_%x+_%d+_(%d+)_(%d+)$")
+    if off and extract_flex_palette(game_path, tonumber(off), tonumber(size)) then
+        return string.format("palflex_%s_%s", off, size)
+    end
+    ensure_game_palette(game_path)
+    return _game_palette_id
+end
+
 function engine.get_resources(game_path)
     local types = parse_prj(game_path)
     if not types then return {} end
 
-    _resource_types = types   -- cache for lazy palette scan
-    _game_palette   = nil     -- reset on new game folder load
+    _palette_path = nil
+    ensure_game_palette(game_path)
 
     local resources = {}
 
@@ -845,9 +827,25 @@ function engine.get_resources(game_path)
             }
         end
 
+        if rt.tag == TAG_FLEX then
+            local groups = {backgrounds = {}, sprites = {}, ui = {}}
+            for i, slot in ipairs(rt.slots) do
+                local role = picture_role(game_path, slot)
+                groups[role][#groups[role] + 1] = children[i]
+            end
+            children = {}
+            for _, role in ipairs({"backgrounds", "sprites", "ui"}) do
+                local label = ({backgrounds = "Backgrounds", sprites = "Sprites", ui = "UI"})[role]
+                if #groups[role] > 0 then
+                    children[#children + 1] = {id = "lgop2_" .. role,
+                        name = string.format("%s (%d)", label, #groups[role]),
+                        type = "category", children = groups[role]}
+                end
+            end
+        end
         resources[#resources + 1] = {
             id       = string.format("type_%08X", rt.tag),
-            name     = string.format("%s (%d)", rt.name, #children),
+            name     = string.format("%s (%d)", rt.name, #rt.slots),
             type     = "category",
             children = children,
         }
@@ -920,18 +918,18 @@ function engine.load_resource(game_path, resource_id, palette_id)
                 end
             end
             local img = image_create_indexed(sw, sh, pixels, palette)
-            return { type = "image", image = img,
+            return { type = "image", image = img, palette_colors = pal_count,
                      description = string.format("Palette (%d colors)", pal_count) }
         end
         return { type = "text", text = "Palette not found: " .. resource_id }
     end
 
     -- Resolve palette override when palette_id is supplied
-    local override_palette = nil
+    local override_palette, override_count
     if palette_id and palette_id ~= "" then
         local poff_s, psz_s = palette_id:match("^palflex_(%d+)_(%d+)$")
         if poff_s then
-            override_palette = extract_flex_palette(game_path, tonumber(poff_s), tonumber(psz_s))
+            override_palette, override_count = extract_flex_palette(game_path, tonumber(poff_s), tonumber(psz_s))
         end
     end
 
@@ -945,7 +943,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local res_size = tonumber(sz_s)
 
     if tag == TAG_FLEX then
-        return load_picture(game_path, res_offset, res_size, override_palette)
+        return load_picture(game_path, res_offset, res_size, override_palette, override_count)
     elseif tag == TAG_SNDS then
         return load_sound(game_path, res_offset, res_size)
     elseif tag == TAG_MENU then

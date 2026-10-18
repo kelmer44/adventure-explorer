@@ -350,6 +350,17 @@ Key files: resource.cpp, graphics.cpp, sound.cpp, made.cpp
 
 game in ags/LGOP2
 
+The DOS PRJ contains 1,141 FLEX pictures and a single 256-color palette in
+picture 547. Paletteless pictures inherit that shared RGB palette; scan the
+entire FLEX index, including when loading a resource without enumerating first.
+The preview exposes the shared palette through `default_palette` and returns its
+swatch alongside each image. Image roles are inferred: full-width (320-pixel)
+views are backgrounds, visually identified controls/cursors/menu/title graphics
+are UI, and the remaining cutouts/poses/props are sprites. For this release the
+split is 176 backgrounds, 859 sprites and 106 UI images; cropped scene fragments
+may need further refinement. Regression: `lua scripts/tests/lgop2.lua` (optionally
+pass the installed game folder to decode every picture).
+
 
 ### Prisoner of Ice (ICE)
 No public source. All four containers use the same `Burp` directory layout

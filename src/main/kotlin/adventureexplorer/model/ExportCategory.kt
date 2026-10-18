@@ -4,6 +4,7 @@ package adventureexplorer.model
 enum class ExportCategory(val label: String) {
     BACKGROUNDS("Backgrounds"),
     SPRITES("Sprites"),
+    UI("UI"),
     ANIMATIONS("Animations"),
     IMAGES("Images (all)"),
     MODELS("3D Models"),
@@ -18,11 +19,14 @@ object ResourceCategories {
     private val backgroundWords = Regex("\\b(?:backgrounds?|backdrops?|bg)\\b")
     private val spriteWords = Regex("\\b(?:sprites?|costumes?|actors?|spr|ss)\\b")
 
+    private val uiWords = Regex("\\b(?:ui|user interface)\\b")
+
     private fun roles(node: ResourceNode): Set<ExportCategory> {
         val label = "${node.id} ${node.name}".lowercase().replace('_', ' ')
         return buildSet {
             if (backgroundWords.containsMatchIn(label)) add(ExportCategory.BACKGROUNDS)
             if (spriteWords.containsMatchIn(label)) add(ExportCategory.SPRITES)
+            if (uiWords.containsMatchIn(label)) add(ExportCategory.UI)
         }
     }
 

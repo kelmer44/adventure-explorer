@@ -69,4 +69,14 @@ class ResourceCategoriesTest {
         assertTrue(ResourceCategories.filter(nodes, ExportCategory.SOUNDS).isEmpty())
         assertTrue(ResourceCategories.counts(emptyList()).isEmpty())
     }
+    @Test fun `UI folders support image counts and export filtering`() {
+        val icon = ResourceNode("button", "Button", "image")
+        val nodes = listOf(ResourceNode("lgop2_ui", "UI (1)", "category", listOf(icon)))
+        val counts = ResourceCategories.counts(nodes)
+        assertEquals(1, counts[ExportCategory.UI])
+        assertEquals(1, counts[ExportCategory.IMAGES])
+        assertEquals(listOf(icon), ResourceCategories.filter(nodes, ExportCategory.UI).single().children)
+        assertTrue(ResourceCategories.filter(nodes, ExportCategory.SPRITES).isEmpty())
+    }
+
 }
