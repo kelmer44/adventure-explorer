@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-60 game engines are currently supported via Lua scripts — no recompilation needed.
+61 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -33,6 +33,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Broken Sword: Shadow of the Templars | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Broken Sword II: The Smoking Mirror | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
 | Bud Tucker in Double Trouble | 1996 | `tucker` | Background Tiles, Sprite Sheets/Frames, Animation Previews, Inventory Sprites, Masks, Palettes, Speech, Sound, Music, Text, Data | ✅ Working* |
+| Bureau 13 / Hell: A Cyberpunk Thriller | 1995/94 | `take2` | Backgrounds, Sprites, Palettes, FLC Previews (Hell), Dialogue (Bureau 13), WAV/VOC Speech and Sound, MIDI (Bureau 13), Data | ✅ Working* |
 | The City of Lost Children | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
 | Cobra Mission | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
 | Cruise for a Corpse | 1991 | `cruise` | Backgrounds, Sprite Frames, Polygon Actors, Palettes | ✅ Working |
@@ -87,6 +88,24 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> **Bureau 13 / Hell: A Cyberpunk Thriller:** open the original DOS game
+> folder directly (`TAKE2/B13` or `TAKE2/HELL`). Bureau 13 is detected by
+> `DATA.GL`, `TEXT.GL` and `B13.DAT`/`B13.COM`; Hell by `BACKGRND.PL`,
+> `ARTWORK.PL` and `SOUND.SL`. Nested GL/PL/SL libraries are read in place.
+> Bureau 13 exposes 3,871 images, 301 palettes, 3,875 dialogue/text records
+> (Spanish in the tested copy), 63 WAV effects and ten MIDI tracks.
+> Hell exposes 740 still images, 417 palettes, 447 FLI/FLC previews and
+> 3,054 WAV/VOC speech/effect clips, plus binary metadata. Animation previews
+> show at most 60 frames and eight million pixels per clip. Embedded palettes and preceding palette
+> entries within each library supply image defaults; Bureau 13 also has a
+> common palette. Unassigned Hell sprites use grayscale; select a scene palette
+> to inspect them in context. Palette overrides work for still images.
+> Scripts, fonts, translation tables and other unrecognized data retain
+> metadata/hex previews. Runtime scene composition, scripted sprite sequences
+> and installation archives (`DISK1.HEL`) are not decoded. Open the supplied
+> Hell media folder without installation; resources absent from that copy
+> cannot be listed.
 
 > **Discworld Noir:** open a mounted `DWN_ENG_1`, `DWN_ENG_2`, or `DWN_ENG_3`
 > CD root or its `cd1`/`cd2`/`cd3` folder. The browser finds the other mounted

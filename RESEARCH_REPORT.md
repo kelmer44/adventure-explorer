@@ -3858,3 +3858,90 @@ Spanish text and 1,758 real previews across both games. All 1,225 music
 sequences were also parsed as standard MIDI by the JVM; 197 external VOCs and
 126 palettes were loaded through the host APIs. Bridge exports were visually
 checked for both games.
+
+
+## Take-Two DOS: Bureau 13 and Hell: A Cyberpunk Thriller
+
+The supplied folders `~/Desktop/ags/TAKE2/B13` and `HELL` share the same
+six-byte library header and trailing directory. Header fields are u16 count
+and u32 directory offset. Each 12-byte record contains u32 payload offset
+and an eight-byte NUL-padded name. Payload lengths come from the next record,
+or the directory offset. Every offset is relative to its containing library;
+Bureau's DATA.GL contains several levels of nested actor/image banks. Hell
+also nests libraries (notably BACKGRND.PL/rtp). No extraction is needed.
+
+### Packed image codec
+
+Reverse engineering B13.DAT at file offsets 0x25200 (decompressor) and
+0x252D2 (loader) established the 28-byte image header:
+
+| Offset | Field |
+| --- | --- |
+| 0 | u8 flags: bit 0 palette, bit 1 index-remapping table |
+| 1 | u8 maximum encoded color index (modulus = value + 1) |
+| 2 | u8 final palette color index |
+| 3 | u8 color key index, before remapping |
+| 4 | u8 codec: 1 delta, 2 delta with repeat escape |
+| 5 | fifteen delta bytes |
+| 20 | u16 raw suffix pixel count |
+| 22 | u16 height |
+| 24 | u16 width |
+| 26 | u16 compressed byte count |
+
+The first compressed byte is an absolute encoded index. Remaining nibbles
+are read low half first. Opcodes 0..D add the header's delta byte modulo the
+color count; E also adds a delta for codec 1. F reads an absolute index from
+the next two nibbles. Codec-2 E repeats the previous pixel `nextByte+2` times.
+If that byte is FF, read two more bytes in high/low order for a 16-bit count,
+then add two. The final rawTail pixels are uncompressed encoded indices at
+the end of the packed buffer. Apply optional remapping to every output index.
+After packed bytes comes (paletteLast+1)*3 VGA RGB bytes when flag 1 is set,
+then maxIndex+1 mapping bytes when flag 2 is set. Validate the exact member
+size and reject stream truncation, invalid indices, and output overruns.
+
+All 3,871 Bureau images decoded, including 300 embedded palettes. The common
+B13RTP resource contributes one additional palette (its first 768 bytes are
+VGA RGB; its remaining translation data is not interpreted). Title and scene
+exports were inspected visually. Preceding embedded palettes in each bank
+supply defaults for later frames; the Bureau common palette handles remaining
+unassigned images. These defaults do not reconstruct runtime scene scripts.
+
+### Dialogue and media
+
+Bureau TEXT.GL has twenty indexed text tables. Each starts with u16
+nameWidthMinusOne and u16 count, followed by name[width+1], u32 offset,
+u16 byte length records; offsets are relative to the table. All 3,875
+strings fit their table bounds. The supplied edition is Spanish CP850;
+NUL/tilde separators are displayed as line breaks. DATA.GL also has 63
+PCM WAVE effects and ten standard MIDI files (Sound Blaster and Roland sets).
+Other scripts/font/scene data retain metadata and bounded hex previews.
+
+Hell PCX resources have one 8-bit plane and a trailing 256-color RGB palette.
+Custom packed sprites use the same codec as Bureau. RTP palette resources
+are nested in BACKGRND.PL. Many Hell resources are Autodesk FLC with palette,
+BRUN, COPY, BLACK, SS2 word delta and LC byte delta chunks. Some FLC headers
+have stale depth fields; all decoded frames remain bounded by dimensions and
+chunk sizes. Some final COPY chunks declare two bytes fewer than the actual
+pixel payload; accept the correction only when dimensions and the enclosing
+frame size agree exactly. Previews cap at sixty frames/eight million pixels,
+without reconstructing game scripts or scene composition. Unassigned sprite
+palettes fall back to grayscale and can be overridden in the explorer.
+Hell audio includes Creative VOC and PCM WAVE, decoded through existing host
+APIs. DISK1.HEL is installation data, not a GL/PL/SL library; absent installed
+resources are not fabricated or silently taken from another directory.
+
+Regression coverage is in `scripts/tests/take2.lua` and `Take2DecoderTest.kt`,
+including delta wraparound, repeat escapes, raw tails, remapping, VGA scaling,
+CP850, malformed streams and optional real-folder integration.
+
+
+Validation of the supplied data found 8,139 Bureau catalog leaves and 4,667
+Hell leaves. Hell contributes 740 still images, 417 palettes, 3,054 sound
+clips, 447 animation previews and nine metadata entries. An exhaustive native
+Lua sweep initially found six short-COPY diagnostics; all six clips plus the
+stale-depth MANSION clip passed after the bounded correction. The remaining
+native previews passed. Real LuaJ integration verified 241 Bureau resources
+and 860 Hell resources, including every MIDI track parsed by Java's MIDI
+reader. Full-size ABYSS PCX and Bureau TITLE exports were visually inspected.
+Palette state is reset at nested-library boundaries to avoid assigning an
+unrelated parent/sibling scene palette to unassigned thumbnail banks.

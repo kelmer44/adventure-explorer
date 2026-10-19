@@ -1124,3 +1124,25 @@ One Anniversary source entry is damaged (its image and metadata return a clear
 diagnostic); no Rites decode failures. Five LuaJ tests pass, including 1,758
 real previews, every music/palette/audio leaf, MIDI parsing, and manual palette
 overrides. Both bridge PNG exports were visually inspected.
+
+
+### TAKE-TWO DOS (Bureau 13 / Hell: A Cyberpunk Thriller)
+
+Implemented in `scripts/engines/take2/engine.lua`. Primary references are the
+local original DOS resources in `~/Desktop/ags/TAKE2/B13` and `HELL`, plus
+Bureau 13 `B13.DAT` x86 image loader/decompressor (file offsets 0x25200 and
+0x252D2). No ScummVM engine implements these games.
+
+The decompressor confirms low-first delta nibbles, repeat/absolute escapes,
+optional VGA palettes, post-palette index remapping and raw suffix pixels.
+GL/PL/SL nested directory records and Bureau indexed CP850 dialogue were
+validated directly against all member boundaries. Hell uses standard PCX and
+Autodesk FLC; the existing sulfato decoder provided the starting point, with
+LC support and validated recovery of short COPY chunk lengths. Some Hell FLC
+headers have stale depth values. Read only indexed library members; do not
+interpret DISK1.HEL installation data as a resource library. Scene scripts and
+unrecognized binary assets remain metadata/hex entries.
+
+Tests: `scripts/tests/take2.lua`, `Take2DecoderTest.kt`. Local fixtures verify
+all still images and text boundaries; LuaJ integration exercises images,
+custom palettes, animations, audio and MIDI through the real host APIs.
