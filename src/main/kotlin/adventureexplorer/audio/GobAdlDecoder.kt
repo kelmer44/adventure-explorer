@@ -56,7 +56,70 @@ object GobAdlDecoder {
         }
         val parsed = parseEvents(data, songOffset) ?: return null
         val events = parsed.first
-        val durationMs = parsed.second.coerceIn(1, MAX_DURATION_MS)
+        return render(timbres, percussionMode, events, parsed.second)
+    }
+
+    /** AdLib Visual Composer MUS/SND, named MDY/TBR in Fascination. */
+    fun decodeMdy(data: ByteArray, instruments: ByteArray): SoundData? = runCatching {
+        require(data.size >= 71 && instruments.size >= 6)
+        require(u8(data, 0) == 1 && u8(instruments, 0) == 1)
+        val timbreCount = u16le(instruments, 2)
+        val timbreOffset = u16le(instruments, 4)
+        require(timbreCount in 1..256 && timbreOffset >= 6 + timbreCount * 9)
+        require(timbreOffset + timbreCount * TIMBRE_WORDS * 2 == instruments.size)
+        val timbres = Array(timbreCount) { i -> IntArray(TIMBRE_WORDS) { p -> u16le(instruments, timbreOffset + (i * TIMBRE_WORDS + p) * 2) } }
+        val ticksPerBeat = u8(data, 36)
+        val length = u16le(data, 42).toLong() or (u16le(data, 44).toLong() shl 16)
+        require(length in 1..(data.size - 70).toLong() && ticksPerBeat > 0)
+        val end = 70 + length.toInt()
+        val baseTempo = u16le(data, 60)
+        require(baseTempo > 0)
+        var tempo = baseTempo
+        var pos = 70
+        fun byte(): Int { require(pos < end); return u8(data, pos++) }
+        var time = 0.0
+        fun delay(n: Int) {
+            var ticks = n
+            if (ticks == 0xF8) { ticks = 240; if (pos < end && u8(data, pos) != 0xF8) ticks += byte() }
+            time += ticks * 60000.0 / (ticksPerBeat * tempo)
+            require(time <= MAX_DURATION_MS)
+        }
+        delay(byte())
+        val events = mutableListOf<Event>()
+        var last = 0
+        var ended = false
+        while (pos < end && events.size < 100000) {
+            var cmd = byte()
+            if (cmd == 0xFC) { ended = true; break }
+            if (cmd == 0xF8) { delay(cmd); continue }
+            if (cmd == 0xF0) {
+                val a = byte(); val b = byte()
+                if (a == 0x7F && b == 0) { tempo = baseTempo * byte() + ((baseTempo * byte()) shr 7); require(tempo > 0); require(byte() == 0xF7) }
+                else { while (byte() != 0xF7) { /* bounded by the song data */ } }
+                delay(byte()); continue
+            }
+            if (cmd >= 0x80) last = cmd else { pos--; cmd = last }
+            val voice = cmd and 15
+            require(voice < VOICE_COUNT && cmd >= 0x80)
+            val event = when (cmd and 0xF0) {
+                0x80 -> { byte(); byte(); Command.NoteOff(voice) }
+                0x90 -> { val note = byte(); val volume = byte(); if (volume == 0) Command.NoteOff(voice) else Command.NoteOn(voice, note, volume) }
+                0xA0 -> Command.Volume(voice, byte())
+                0xB0 -> { byte(); byte(); null }
+                0xC0 -> Command.Instrument(voice, byte())
+                0xD0 -> { byte(); null }
+                0xE0 -> { val value = byte() + (byte() shl 7); Command.Pitch(voice, 8192 + ((value - 8192) * u8(data, 59) / 2)) }
+                else -> error("Invalid MUS command")
+            }
+            if (event != null) events += Event(time.toInt(), event)
+            delay(byte())
+        }
+        require(ended && events.isNotEmpty())
+        render(timbres, u8(data, 58) != 0, events, time.toInt() + 250)
+    }.getOrNull()
+
+    private fun render(timbres: Array<IntArray>, percussionMode: Boolean, events: List<Event>, duration: Int): SoundData? {
+        val durationMs = duration.coerceIn(1, MAX_DURATION_MS)
         val totalSamples = ((durationMs.toLong() * SAMPLE_RATE) / 1000L).toInt()
         if (totalSamples <= 0) return null
 

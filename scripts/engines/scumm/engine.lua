@@ -1,5 +1,5 @@
 -- ============================================================================
--- Adventure Explorer - Engine Script: SCUMM V3 EGA / V5-V8
+-- Adventure Explorer - Engine Script: SCUMM V3/V4 EGA / V5-V8
 -- ============================================================================
 -- Reads SCUMM V5-V8 data files:
 --   .000 index + .001 data        (Monkey Island 2, Atlantis, Indy 4, The Dig)
@@ -26,11 +26,12 @@ local Cost  = require("scumm_cost")
 local Sound = require("scumm_snd")
 local Nut   = require("scumm_nut")
 local V3    = require("scumm_v3")
+local V4    = require("scumm_v4")
 
 engine.name        = "SCUMM"
 engine.id          = "scumm"
-engine.description = "SCUMM V3 EGA / V5-V8 (LucasArts, 1989-1997)"
-engine.version     = "3.1"
+engine.description = "SCUMM V3/V4 EGA / V5-V8 (LucasArts, 1989-1997)"
+engine.version     = "3.2"
 
 local band   = bit32.band
 local bor    = bit32.bor
@@ -1082,6 +1083,7 @@ end
 
 function engine.detect(game_path)
     if V3.detect(game_path) then return true end
+    if V4.detect(game_path) then return true end
     local games = find_scumm_games(game_path)
     return #games > 0
 end
@@ -1642,6 +1644,7 @@ end
 
 function engine.get_resources(game_path)
     if V3.detect(game_path) then return V3.get_resources(game_path) end
+    if V4.detect(game_path) then return V4.get_resources(game_path) end
     local resources = {}
     local games = find_scumm_games(game_path)
 
@@ -1895,6 +1898,7 @@ end
 -- stores them. The app asks for this when a node has no palette sibling.
 function engine.default_palette(game_path, resource_id)
     if resource_id:match("^v3:") then return "v3:pal" end
+    if resource_id:match("^v4:") then return "v4:pal" end
     local prefix, base, num = resource_id:match("^(%a+):([^:]+):(%d+)")
     if not base then return nil end
     local game = find_game(game_path, base)
@@ -1912,6 +1916,7 @@ end
 
 function engine.load_resource(game_path, resource_id, palette_id)
     if resource_id:match("^v3:") then return V3.load_resource(game_path, resource_id, palette_id) end
+    if resource_id:match("^v4:") then return V4.load_resource(game_path, resource_id, palette_id) end
     local prefix = resource_id:match("^(%a+):")
     if prefix == "cossheet" or prefix == "cosanim" then
         return load_costume_resource(game_path, resource_id, palette_id)

@@ -1863,7 +1863,7 @@ through a different input-buffering path: `SCENE01.LBM` (66,012 in, 66,012 out)
 and `UNIVERSE.EXE` itself (81,707 in, 94,392 out). Both are treated identically
 in a flat-memory port, since the bit reader only ever walks the buffer forward.
 
-# Part 8: SCUMM V3 EGA / V5-V8 Resource Layout
+# Part 8: SCUMM V3/V4 EGA / V5-V8 Resource Layout
 
 Source: ScummVM `engines/scumm/` — `resource.cpp`, `resource.h`, `object.h`,
 `object.cpp`, `gfx.h`, `gfx.cpp`, `detection_tables.h`.
@@ -2035,7 +2035,46 @@ previews and one palette, all loading successfully. Background and object
 scans also pass through the app's LuaJ developer CLI; exported background and
 costume artwork was inspected visually. V3 sound/music, fonts, VGA/small-header
 and other platform variants remain unsupported; this is not a claim of full
-V3 or V4 coverage.
+V3 coverage.
+
+## 8.7 V4 DOS EGA (Monkey Island)
+
+The supplied Monkey Island EGA uses plaintext `000.LFL` and XOR `0x69`
+`DISK01.LEC` through `DISK08.LEC`. It was not detected because the old-bundle
+V3 and IFF-style V5-V8 parsers do not cover V4's six-byte small headers:
+u32 little-endian total size followed by a two-byte tag. Index blocks are
+`RN` (room names, XOR `0xFF`), `0R`, `0S`, `0N`, `0C` and `0O`.
+Resource directories have a u16 count followed by interleaved u8 room/u32
+offset records, rather than V5's separate room and offset arrays. Room entries
+map to disk numbers; other resources reference room IDs.
+
+Each decrypted archive is a `LE` container. Its `FO` table has a byte count
+at offset 12 followed by room ID/u32 physical offset records. These offsets
+point to `LF` containers; room data begins eight bytes later. Indexed costume
+offsets are relative to the same room base and also skip that eight-byte LF
+wrapper. Sizes, offsets, tags and enclosing resource bounds are checked before
+reading. A validated EGA BM strip table is required for detection; filenames
+alone and VGA-style strip tables do not match.
+
+Room `RO` resources contain `HD` dimensions, `BM` EGA bitmap data and paired
+`OC`/`OI` object records. OC has the object ID at +6, width in strips at +11,
+height/direction at +17; OI's bitmap starts at +8. BM and OI use the same u16
+strip offsets and EGA run codec as V3. Costumes have a `CO` header, base zero,
+an explicit 16-colour palette and u16 limb-command offsets, in contrast to V3's
+single palette substitution and byte command offsets. Existing classic-costume
+cel sheets and animation previews are reused.
+
+References: ScummVM `resource_v4.cpp`, `resource.cpp` (`readRoomsOffsets`,
+`getEncByte`, `loadResource`), `object.cpp` (`resetRoomObject`, `getObjectImage`),
+`gfx.cpp` (`drawStripEGA`) and `costume.cpp` (`ClassicCostumeLoader`).
+
+Validation: `SCUMM_V4_TEST_PATH=/path/to/MONKEYEGA ./gradlew test --tests
+'*ScummV4DecoderTest'` passes four tests, including disk/room routing, LF
+offsets, truncated index/archive bounds, VGA rejection and V4 costume offsets.
+All 2,823 graphics leaves load through LuaJ: 81 backgrounds, 606 object sprites,
+115 costume sheets, 2,020 animation previews and one palette. Exported bar,
+beach and Guybrush costume-sheet previews were inspected visually. V4
+sound/music, fonts, VGA and non-DOS variants remain unsupported.
 
 # Part 9: Drascula — The Vampire Strikes Back
 

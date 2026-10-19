@@ -248,4 +248,7 @@ function V.load_resource(path, id, palette_id)
     return nil
 end
 
+-- V4 EGA uses the same strip codec and hardware palette.
+V.decode_ega = bitmap
+V.ega_palette = palette
 return V

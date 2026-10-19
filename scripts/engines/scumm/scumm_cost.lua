@@ -277,7 +277,7 @@ local FORMAT_COLORS = { [0x58] = 16, [0x59] = 32, [0x60] = 16, [0x61] = 32 }
 
 function Classic.parse(block, version)
     -- offsets below are 0-based positions inside the block, like ScummVM's pointers
-    local base = (version == 3) and -2 or ((version >= 6) and 8 or 2)
+    local base = (version == 3) and -2 or ((version == 4) and 0 or ((version >= 6) and 8 or 2))
     local function B(off) return block:byte(off + 1) or 0 end
     local function W(off) return u16le(block, off + 1) end
 
@@ -738,10 +738,11 @@ end
 
 -- ── Public API ──────────────────────────────────────────────────────────────
 
---- Parse a costume block. `version` is the SCUMM major version (3, 5..8).
+--- Parse a costume block. `version` is the SCUMM major version (3..8).
 function C.parse(block, version)
     if not block or #block < 16 then return nil end
     if version == 3 then return Classic.parse(block, version) end
+    if version == 4 and block:sub(5, 6) == "CO" then return Classic.parse(block, version) end
     local tag = block:sub(1, 4)
     if tag == "AKOS" then return Akos.parse(block) end
     if tag == "COST" then return Classic.parse(block, version) end

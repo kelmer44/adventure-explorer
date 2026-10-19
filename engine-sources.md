@@ -5,6 +5,8 @@ Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/
 games are located in ags/scumm folder
 Key references used:
 - `engines/scumm/resource_v3.cpp` - old-bundle V3 index magic `0x0100`, global object table and byte-counted room/costume/script/sound directories with u16 offsets. Implemented in `scumm_v3.lua`; tested with `ags/SCUMM/LOOM` (DOS EGA).
+- `engines/scumm/resource_v4.cpp` (`readResTypeList`, `readIndexFile`) - plaintext V4 `000.LFL`, LE sizes + two-byte tags, interleaved room/u32-offset directories. `resource.cpp` (`readRoomsOffsets`, `getEncByte`, `loadResource`) - XOR-0x69 `DISKnn.LEC`, offset-12 FO room table, eight-byte LF wrapper before indexed resources. Implemented in `scumm_v4.lua`; tested with `ags/scumm/MONKEYEGA` (81 backgrounds, 606 objects, 115 costume sheets, 2,020 animation previews).
+- `engines/scumm/object.cpp` (`ScummEngine_v4::resetRoomObject`, `getObjectImage`) - V4 OC dimensions and OI image payload at +8. `costume.cpp` (`ClassicCostumeLoader::loadCostume`) - V4 CO base at zero, explicit palette, u16 limb command offsets. V3/V4 share the EGA strip decoder and hardware palette. V4 VGA, audio/fonts and non-DOS variants remain unsupported.
 - `engines/scumm/room.cpp`, `object.cpp` (`resetRoomObjects`, `resetRoomObject`) - V3 room dimensions, image offsets and separate object image/code tables. Invisible interaction rectangles can share the next object's image pointer; validate both strip-table width and encoded height before listing sprites.
 - `engines/scumm/gfx.cpp` (`Gdi::drawStrip`, `drawStripEGA`) - u16 strip offsets, solid/alternating/previous-column EGA runs. `costume.cpp` (`ClassicCostumeLoader`) - V3 single-byte limb command offsets and old-bundle palette/offset adjustments.
 - `engines/scumm/object.h` - ImageHeader (old/v7/v8), CodeHeader, RoomHeader layouts
@@ -110,7 +112,22 @@ Tools in ags/TOOLS/ANB
 ### Gob engine
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 
-games in ags/GOB/
+games in ags/GOB/, ags/FASCI/ and ags/Woodruff/
+
+GOB references: `engines/gob/dataio.cpp`, `resources.cpp`, `video_v1.cpp`,
+`video_v2.cpp`, `inter_v1.cpp`, `inter_fascin.cpp`, `sound/musplayer.cpp`, and
+`video/coktel_decoder.cpp`. STK and ITK share the directory layout. Fascination
+stores most sprites/palettes in TOT, starts in DISK0.STK and uses MDY/TBR music.
+Woodruff uses palLoad subcommand 61, positioned background strips and indexed
+VMDs in WOODRUFF.ITK. Unused VMD part descriptors contain arbitrary size bytes;
+ignore them before reading or validating the size. Fascination's TIRA/TIRB use
+PreIMD (128x80 with the calling TOT's palette); TIRB's frame count is one larger
+than the number of physical records, so index the records before making clips.
+
+Validation (2026-10-19): 1,964/1,964 Fascination and 5,110/5,110 Woodruff
+resource leaves decode, including every video clip and nonempty VMD soundtrack.
+Gobliiins 1/2/3 regressions decode all 457/335/367 image and palette leaves.
+Full Gradle suite: 88 passed, 16 optional integration tests skipped, no failures.
 
 ### INDARK engine
 Free in the dark engine in https://github.com/yaz0r/FITD

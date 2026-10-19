@@ -237,6 +237,11 @@ class LuaEngine {
     // ── Image API ───────────────────────────────────────────────────
 
     private fun registerImageApi() {
+        // Engines that retain no Lua image handles can release earlier previews.
+        // ResourceData keeps its own references to images, animations and audio.
+        globals["resource_release_decoded"] = object : ZeroArgFunction() {
+            override fun call(): LuaValue { releaseDecodedResources(); return NIL }
+        }
         // image_create_indexed(width, height, pixel_table, palette_table) -> handle
         // pixel_table: 1-indexed, values 0-255 (color indices)
         // palette_table: 1-indexed, 768 entries (R,G,B triplets, values 0-255)
@@ -323,6 +328,26 @@ class LuaEngine {
             }
         }
 
+        // animation_create_coktel(data [, first_frame, frame_count]) -> animation_handle
+        globals["animation_create_coktel"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val ls = args.checkstring(1)
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                val first = args.optint(2, 0); val count = args.optint(3, 48)
+                val decoder = adventureexplorer.video.CoktelVideoDecoder
+                val clip = if (args.optint(4, 0) > 0) {
+                    val pal = args.checktable(6)
+                    val colors = IntArray(256) { i -> (pal.get(i * 3 + 1).toint() shl 16) or
+                        (pal.get(i * 3 + 2).toint() shl 8) or pal.get(i * 3 + 3).toint() }
+                    decoder.decodePreImd(bytes, args.checkint(4), args.checkint(5), colors, first, count)
+                } else decoder.decode(bytes, first, count)
+                if (clip == null) return NIL
+                val handle = nextAnimHandle++
+                animations[handle] = Pair(clip.frames, clip.delayMs)
+                return valueOf(handle)
+            }
+        }
+
         // animation_create(image_handles_table [, delay_ms]) -> animation_handle
         // image_handles_table: 1-indexed table of image handles (from image_create_*)
         // delay_ms: optional milliseconds per frame (default 100)
@@ -376,6 +401,31 @@ class LuaEngine {
                 if (samples.isEmpty()) return NIL
                 val handle = nextSoundHandle++
                 sounds[handle] = SoundData(samples, sampleRate, bitsPerSample, channels, signed)
+                return valueOf(handle)
+            }
+        }
+
+        globals["sound_create_coktel_video"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val ls = data.checkstring()
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                val sound = adventureexplorer.video.CoktelVideoDecoder.decodeSound(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
+
+        // sound_create_gob_mdy(song, timbres) -> sound_handle
+        globals["sound_create_gob_mdy"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, instruments: LuaValue): LuaValue {
+                fun bytes(value: LuaValue): ByteArray {
+                    val ls = value.checkstring()
+                    return ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                }
+                val sound = GobAdlDecoder.decodeMdy(bytes(data), bytes(instruments)) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
                 return valueOf(handle)
             }
         }

@@ -45,11 +45,12 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Drascula: The Vampire Strikes Back | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | El Sulfato Atomico | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | El Tesoro de la Isla Alcachofa | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
+| Fascination | 1991 | `gob` | Backgrounds, Sprites, Palettes, AdLib Music, IMD Animation Clips | ✅ Working* |
 | Fable | 1996 | `fable` | Backgrounds, Sprite Frames, Frame Bank Previews, Palettes, Dialogue, Speech, PCM Sound | ✅ Working* |
 | Fievel Goes West / An American Tail | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
 | Flight of the Amazon Queen | 1995 | `queen` | Backgrounds, Sprites & Actor Banks (animated), Palettes | ✅ Working |
 | Future Wars / Operation Stealth | 1989/90 | `cine` | Backgrounds, Sprite Frames, Palettes | ✅ Working |
-| Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sound, Music | ✅ Working |
+| Gobliiins / Gobliins 2 / Goblins Quest 3 | 1991-93 | `gob` | Backgrounds, Sprites, Palettes, Sound, Music | ✅ Working |
 | Grim Fandango | 1998 | `grim` | RGB565 Bitmaps, Depth Masks, Textures, Palettes, Speech, Sound, Music, Dialogue, Scene Data | ✅ Working* |
 | Harvester | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
 | Hollywood Monsters | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
@@ -71,6 +72,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Runaway: A Road Adventure | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
 | SCUMM V2 (Maniac Mansion, Zak McKracken) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
 | SCUMM V3 EGA (tested: Loom) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
+| SCUMM V4 EGA (tested: Monkey Island) | 1990 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | Shadow of the Comet | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | Sherlock Holmes: Consulting Detective | 1991-93 | `sherlock2` | Backgrounds, Animations | ✅ Working |
@@ -89,6 +91,20 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+| Woodruff and the Schnibble of Azimuth | 1994/95 | `gob` | Composed Backgrounds, Sprites, Palettes, Sound, Music, VMD Animation Clips and Soundtracks | ✅ Working* |
+
+> **GOB / Coktel Vision:** Fascination and Woodruff now expose TOT and EXT
+> sprites and selectable scene palettes. Fascination includes `DISK0.STK`,
+> MDY/TBR music (FM approximation), and the early TIRA/TIRB movie format.
+> Woodruff composes room strips at their script positions and reads animation,
+> speech and music members directly from `WOODRUFF.ITK`. Video soundtracks are
+> separate sound resources; long movies are split into consecutive clips to
+> bound preview memory. These are static asset previews; dynamic game scripts
+> are not executed. Other Coktel releases and external-codec VMDs are unverified.
+> Restart with `./gradlew run` to load the native video/audio decoder changes.
+> Validate with `FASCINATION_TEST_PATH=/path/to/FASCI
+> WOODRUFF_TEST_PATH=/path/to/Woodruff GOB_SERIES_TEST_ROOT=/path/to/GOB
+> GOB_SCAN_ALL=1 ./gradlew test --tests '*Gob*Test' --tests '*CoktelVideoDecoderTest'`.
 
 > **Little Big Adventure 1 & 2:** open the original `LBA1` or `LBA2`
 > game folder directly. The `twine` module reads HQR/VOX archives in place.
@@ -197,7 +213,17 @@ remains limited to backgrounds.
 > pointer are omitted from the sprite list. Object previews use a black backdrop
 > where the image copies pixels from the surrounding scene. V3 music/sound,
 > fonts, VGA/small-header releases and other platform variants are not decoded.
-> V4 is still unsupported.
+
+> \* SCUMM V4 EGA opens the original Monkey Island `000.LFL` + `DISK01.LEC`
+> through `DISK08.LEC` folder directly. Verified 81 backgrounds, 606 object
+> sprites, 115 costume sheets, 2,020 animation previews and the EGA palette.
+> Room names come from the index. Standalone object previews use black where
+> pixels copy the surrounding scene; costume previews use the existing uniform
+> timing and key-colour backdrop. V4 sound/music, fonts, VGA and other platform
+> variants are not decoded. Reopen the game folder to load the updated scripts;
+> no conversion is required. Run
+> `SCUMM_V4_TEST_PATH=/path/to/MONKEYEGA ./gradlew test --tests '*ScummV4DecoderTest'`
+> for archive/detection regressions and a complete LuaJ graphics scan.
 
 > Simon 1 & 2: fixed room composition, palette banks, sprite transparency and
 > Simon 2 scrolling backgrounds (full-width images are also available separately).
@@ -727,6 +753,7 @@ return engine
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `animation_create(image_handles, delay_ms)` | handle | Create animation from a table of image handles |
+| `animation_create_coktel(data, first_frame, count [, width, height, palette])` | handle | Decode an indexed VMD/IMD clip; dimensions/palette select early Fascination IMD |
 
 - `image_handles`: Lua table of image handles (from `image_create_*` calls)
 - `delay_ms`: Frame delay in milliseconds (default: 100)
@@ -737,6 +764,8 @@ return engine
 |----------|---------|-------------|
 | `sound_create_pcm(rate, bits, channels, signed, data)` | handle | Create playable raw PCM audio |
 | `sound_create_gob_adl(data)` | handle | Render Coktel Vision ADL/OPL music to PCM |
+| `sound_create_gob_mdy(song, timbres)` | handle | Render MDY/TBR AdLib music to PCM |
+| `sound_create_coktel_video(data)` | handle | Decode a Woodruff VMD soundtrack to PCM |
 
 #### MIDI
 
@@ -821,7 +850,7 @@ adventure-explorer/
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
 │       ├── saga/engine.lua       # I Have No Mouth, and I Must Scream
-│       ├── scumm/engine.lua      # SCUMM V3 EGA / V5-V8 (+ scumm_v3/cost/snd/nut/util.lua modules)
+│       ├── scumm/engine.lua      # SCUMM V3/V4 EGA / V5-V8 (+ scumm_v3/v4/cost/snd/nut/util.lua modules)
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sherlock2/engine.lua  # Sherlock Holmes (Consulting Detective)
