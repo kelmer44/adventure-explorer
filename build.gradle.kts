@@ -31,6 +31,16 @@ compose.desktop {
             packageName = "Adventure Explorer"
             packageVersion = "1.0.0"
 
+            macOS {
+                iconFile.set(project.file("src/main/resources/icons/fedora.icns"))
+            }
+            windows {
+                iconFile.set(project.file("src/main/resources/icons/fedora.ico"))
+            }
+            linux {
+                iconFile.set(project.file("src/main/resources/icons/fedora.png"))
+            }
+
             // Include scripts directory in distribution
             appResourcesRootDir.set(project.layout.projectDirectory.dir("scripts"))
         }
