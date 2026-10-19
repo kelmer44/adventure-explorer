@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-61 game engines are currently supported via Lua scripts — no recompilation needed.
+62 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -60,6 +60,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | L.A. Law: The Computer Game | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
 | Leather Goddesses of Phobos 2 | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | Les Manley 2: Lost in L.A. | 1991 | `les2` | Scenes, Sprites, Animation Previews, Palettes, Text and Data | ✅ Working* |
+| Little Big Adventure 1 / Twinsen's Odyssey | 1994/97 | `twine` | Isometric Scenery, Screens, Sprites, Bricks, LBA2 3D Models, Palettes, Dialogue, Speech, Effects, Music, Data | ✅ Working* |
 | Lure of the Temptress | 1992 | `lure` | Screens, Palettes | ✅ Working* |
 | MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
 | Noctropolis | 1994 | `noctropolis` | Backgrounds, Screens, Sprites | ✅ Working* |
@@ -88,6 +89,33 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | Universe | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
 | Visionaire Engine (Daedalic games) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | Wayne's World / The Dark Half (Capstone, Genus GXL) | 1993 | `gxl` | Images | ✅ Working |
+
+> **Little Big Adventure 1 & 2:** open the original `LBA1` or `LBA2`
+> game folder directly. The `twine` module reads HQR/VOX archives in place.
+> **Isometric Scenery** reconstructs 134 LBA1 grids and 148 LBA2 interior grids
+> at full size using their block libraries and original bricks. These are static
+> scenery previews; actors, scripted changes and ceiling overlays are not composed.
+> Screens, sprites (including LBA1's second shadow image), 26,618 individual
+> scenery bricks, RGB palettes, and CP850 dialogue/interface text are also available.
+> **3D Models** exposes 1,445 LBA2 bodies, fixed objects and island `.OBL` objects.
+> The viewer assembles bone-local vertices in the rest pose and preserves polygon
+> faces, colors, lines and UVs. Bodies use `RESS.HQR`'s texture atlas; outdoor
+> objects use entry 2 of the matching `.ILE`. Rotate, zoom, inspect wireframes,
+> change the palette, or export PNGs. Sphere primitives use mesh approximations.
+> Two empty `ILOTCX.OBL` helpers remain in Resource Data. LBA1 body previews,
+> skeletal animation, original shading/translucency effects and assembled LBA2
+> outdoor island terrain are not implemented.
+> VOC/WAV speech and effects play directly, including hidden speech segments;
+> LBA2 IMA ADPCM speech/music is decoded to PCM. LBA1's two MIDI banks retain
+> their original instrument mappings. Available clips depend on installed media.
+> Models, animation records, scenes/scripts, island terrain records and other
+> unrecognized entries retain decompressed metadata/hex views. FLA/Smacker
+> cinematics are not decoded. No installation or conversion step is required.
+> Rebuild and restart the app (`./gradlew run`) for the new model/audio decoders.
+> Run `LBA_TEST_PATH=/path/to/LBA ./gradlew test --tests '*TwineDecoderTest'
+> --tests '*Lba2ModelDecoderTest' --tests '*ImaWaveDecoderTest'` for LuaJ,
+> model and audio checks; `lua scripts/tests/twine.lua /path/to/LBA` scans
+> archive payloads with native Lua.
 
 > **Bureau 13 / Hell: A Cyberpunk Thriller:** open the original DOS game
 > folder directly (`TAKE2/B13` or `TAKE2/HELL`). Bureau 13 is detected by
@@ -782,6 +810,7 @@ adventure-explorer/
 │       ├── kyra1/engine.lua      # The Legend of Kyrandia
 │       ├── kyra2/engine.lua      # Hand of Fate
 │       ├── lastexpress/          # The Last Express
+│       ├── twine/engine.lua      # Little Big Adventure 1 & 2
 │       ├── lure/engine.lua       # Lure of the Temptress
 │       ├── mads/engine.lua       # MicroProse MADS (Rex Nebular, Dragonsphere, Return of the Phantom)
 │       ├── les2/engine.lua       # Les Manley 2: Lost in L.A.

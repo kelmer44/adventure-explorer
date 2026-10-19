@@ -1146,3 +1146,28 @@ unrecognized binary assets remain metadata/hex entries.
 Tests: `scripts/tests/take2.lua`, `Take2DecoderTest.kt`. Local fixtures verify
 all still images and text boundaries; LuaJ integration exercises images,
 custom palettes, animations, audio and MIDI through the real host APIs.
+
+
+## Little Big Adventure 1 & 2 (`twine`)
+
+Local format reference: ScummVM `engines/twine/resources/{hqr,resources}.cpp`,
+`parser/{sprite,blocklibrary,text}.cpp`, `scene/grid.cpp`, and `audio/sound.cpp`.
+HQR compression, palette assignments, brick/sprite RLE, LBA1 grids and speech
+header repair were checked against those sources. LBA2's grouped polygon records
+and bone indices differ from the local ScummVM body parser's assumptions.
+
+Primary implementation references for LBA2 models, textures and grids:
+- [LBA Lab remake body2 parser](https://github.com/LBALab/lba2remake/blob/master/src/resources/parsers/body2.ts)
+- [Skeleton hierarchy](https://github.com/LBALab/lba2remake/blob/master/src/model/anim/Skeleton.ts)
+- [Model geometry and UV groups](https://github.com/LBALab/lba2remake/blob/master/src/model/geometries.ts)
+- [Outdoor object faces](https://github.com/LBALab/lba2remake/blob/master/src/game/scenery/island/objects.ts)
+- [Island atlas](https://github.com/LBALab/lba2remake/blob/master/src/game/scenery/island/TextureAtlas.ts)
+- [Resource mappings](https://github.com/LBALab/lba2remake/blob/master/www/resources/lba2.json)
+- [LBA file-format community: LBA2 grid](https://lbafileinfo.kaziq.net/index.php/LBA2:Grid)
+- [LBA2 background archive layout](https://lbafileinfo.kaziq.net/index.php/LBA2:LBA_bkg.hqr)
+
+Implementation: `scripts/engines/twine/engine.lua`, `Lba2ModelDecoder.kt`,
+`ImaWaveDecoder.kt`. These are independent parsers using the documented layouts.
+Test data: supplied `~/Desktop/ags/LBA/LBA1` and `LBA2`. No proprietary data is
+included. Animation playback, FLA/SMK video, LBA1 model previews and assembly of
+outdoor island terrain remain outside the implemented previews.

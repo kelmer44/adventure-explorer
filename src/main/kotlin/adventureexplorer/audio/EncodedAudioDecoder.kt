@@ -16,7 +16,7 @@ object EncodedAudioDecoder {
         when {
             data.size < 4 -> null
             data.startsWith("Creative Voice File") -> voc(data)
-            data.startsWith("RIFF") -> wave(data)
+            data.startsWith("RIFF") -> ImaWaveDecoder.decode(data) ?: wave(data)
             else -> mp3(data)
         }
     }.getOrNull()

@@ -3945,3 +3945,58 @@ and 860 Hell resources, including every MIDI track parsed by Java's MIDI
 reader. Full-size ABYSS PCX and Bureau TITLE exports were visually inspected.
 Palette state is reset at nested-library boundaries to avoid assigning an
 unrelated parent/sibling scene palette to unassigned thumbnail banks.
+
+
+## Little Big Adventure / TwinE resource findings (2026-10-19)
+
+The supplied original PC editions are supported by `twine`. HQR is a sparse u32
+absolute-offset directory with ten-byte entry headers and LZSS modes 0/1/2.
+Some directories end in EOF offsets, others do not; infer slots from first offset
+rather than universally subtracting one. Speech VOX files contain additional
+unindexed records; enumerate them within each indexed entry's physical boundary.
+Their first byte can carry continuation flags, replacing the C of Creative VOC
+or R of RIFF. Restore it only when the rest of that signature is recognizable.
+
+Verified native Lua sweeps decoded every catalog entry in both folders: LBA1 has
+134 grids, 8,715 bricks, 120 sprite images, nine screens, 12 palettes, 70 text
+banks, 230 effects, 2,818 speech segments, 66 MIDI entries and 13,168 metadata
+entries. LBA2 has 148 grids, 17,903 bricks, 425 sprites, 39 screens, 42 palettes,
+84 text banks, 606 effects, 1,261 speech segments, 18 WAV tracks and 25,191 metadata
+entries. Native audio stubs verify signatures; actual decoding is checked in LuaJ.
+
+LBA1 scenery uses matching GRI/BLL archive indices and shared BRK images. LBA2
+BKG entry 0 specifies grid/fragment/library/brick ranges; grids add 34 bytes
+before the same 64x64 column table. Library index is header byte 0; u16 column
+offsets are relative to data after that header. Compositing brick RLE images in
+z/x/y order with (x-z)*24, (x+z)*12-y*15 reproduces the full static scenery.
+Actor composition, state changes, ceiling overlays and outdoor island terrain
+are separate systems and not rendered. Twinsen's house was visually verified.
+
+LBA2 BODY, OBJFIX and OBL models share a 96-byte v0x10 header, but do not use
+LBA1's variable polygon records or vertex offsets multiplied by six. Polygons
+are grouped by render type, with fixed record stride inferred per section.
+Type bit 15 selects quads; UV-bearing triangles/quads use 24/32-byte records.
+Bones translate vertices from local coordinates via parent anchor points; the
+fourth u16 of each vertex is its bone index, not padding. UV group rectangles
+crop the palette-indexed atlas; BODY/OBJFIX use RESS[6], OBL uses matching ILE[2].
+The 1,447 model entries include two empty helpers (`ILOTCX.OBL` 12 and 13), kept
+only as data. Preview surfaces retain polygon boundaries, palette colors, UVs,
+lines and approximate sphere meshes, assembled in their rest pose. Skeletal
+animation and game-specific transparency/shading are not simulated.
+
+Dialogue uses paired ID/offset banks and CP850 strings, with an extra leading
+byte in LBA2 strings. All palettes are byte RGB. LBA1 MIDI_MI and MIDI_SB keep
+original mappings. LBA2 WAV files include Microsoft IMA ADPCM (codec 17);
+`ImaWaveDecoder` implements predictor/index block headers, low-nibble-first
+samples, stereo channel groups and fact chunk trimming with allocation bounds.
+Regression tests cover malformed compression/RLE, skeleton cycles, direct polygon
+indices, texture crops, ADPCM samples and optional real-game LuaJ previews.
+
+
+Validation completed with the full Gradle test suite and nine targeted TwinE,
+LBA2 model and IMA tests. The optional real-game integration decoded all 1,445
+visible models through LuaJ plus representative resources from every archive
+and category in both games, including real ADPCM speech/music. All assertions
+passed. Twinsen, a fixed object, a Citadel outdoor tree and the first full scenery
+in each game were rendered for visual inspection under `build/twine-previews`.
+The model pass also checked palette overrides and missing-resource handling.

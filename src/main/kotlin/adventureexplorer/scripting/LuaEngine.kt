@@ -1,6 +1,7 @@
 package adventureexplorer.scripting
 
 import adventureexplorer.model.ModelData
+import adventureexplorer.models.Lba2ModelDecoder
 import adventureexplorer.models.AitdModelDecoder
 import adventureexplorer.models.CityModelPose
 import adventureexplorer.models.CityModelDecoder
@@ -87,6 +88,21 @@ class LuaEngine {
                     models[handle] = model
                     return valueOf(handle)
                 }
+            }
+        }
+        globals["model_decode_lba2"] = object : ThreeArgFunction() {
+            override fun call(data: LuaValue, palette: LuaValue, atlas: LuaValue): LuaValue {
+                fun bytes(v: LuaValue): ByteArray {
+                    val s=v.checkstring();return ByteArray(s.length()).also { s.copyInto(0,it,0,it.size) }
+                }
+                val colors=IntArray(256) { i ->
+                    (palette.get(i*3+1).checkint().coerceIn(0,255) shl 16) or
+                    (palette.get(i*3+2).checkint().coerceIn(0,255) shl 8) or
+                    palette.get(i*3+3).checkint().coerceIn(0,255)
+                }
+                val model=try { Lba2ModelDecoder.decode(bytes(data),colors,if(atlas.isnil()) null else bytes(atlas)) }
+                    catch(e: Exception) { throw LuaError(e.message ?: "Invalid LBA2 model") }
+                val handle=nextModelHandle++;models[handle]=model;return valueOf(handle)
             }
         }
         globals["model_decode_aitd"] = object : TwoArgFunction() {
