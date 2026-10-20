@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-62 game engines are currently supported via Lua scripts — no recompilation needed.
+63 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -37,7 +37,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [The City of Lost Children](engine-details.md#city) | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
 | [Cobra Mission](engine-details.md#cobramission) | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
 | [Cruise for a Corpse](engine-details.md#cruise) | 1991 | `cruise` | Backgrounds, Sprite Frames, Polygon Actors, Palettes | ✅ Working |
-| [Curse of Enchantia](engine-details.md#curseofenchantia) | 1992 | `curseofenchantia` | Backgrounds | ✅ Working |
+| [Curse of Enchantia](engine-details.md#curseofenchantia) | 1992 | `curseofenchantia` | Backgrounds, sprites/character frames, screen animations, PCM effects, palettes | ✅ Working |
 | [Dark Seed](engine-details.md#darkseed) | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
 | [Dark Seed 2](engine-details.md#darkseed2) | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
 | [Discworld 1 & 2](engine-details.md#tinsel) | 1995/96 | `tinsel` | Backgrounds, Sprites, Animations | ✅ Working |
@@ -70,7 +70,8 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Ringworld: Revenge of the Patriarch / Blue Force](engine-details.md#tsage) | 1992-94 | `tsage` | Backgrounds, Palettes, Sprites & Animations, Messages, Sound metadata | ✅ Working* |
 | [Ripley's Believe It or Not!: The Riddle of Master Lu](engine-details.md#riddle) | 1995 | `riddle` | Backgrounds, Palettes, Sprites & Animations, Sound/Speech, Music (HMP→MIDI), Attribute Codes, Fonts, Scene Definitions | ✅ Working |
 | [Runaway: A Road Adventure](engine-details.md#runaway) | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
-| [SCUMM V2 (Maniac Mansion, Zak McKracken)](engine-details.md#scummv2) | 1988-89 | `scummv2` | Backgrounds | ✅ Working |
+| [Sanitarium](engine-details.md#asylum) | 1998 | `asylum` | Backgrounds, Sprites/UI, Fonts, Aligned Animation Previews, Masks, Palettes, WAV Audio, Text, Data | ✅ Working* |
+| [SCUMM V2 (Maniac Mansion, Zak McKracken)](engine-details.md#scummv2) | 1988-89 | `scummv2` | Backgrounds, object sprites, occlusion masks, object data, EGA palette | ✅ Working |
 | [SCUMM V3 EGA (tested: Loom)](engine-details.md#scumm) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | [SCUMM V4 EGA (tested: Monkey Island)](engine-details.md#scumm) | 1990 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
@@ -309,9 +310,10 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 60 engine scripts (Lua)
+│   └── engines/                  # 63 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── anotherworld/engine.lua # Another World (original DOS)
+│       ├── asylum/engine.lua      # Sanitarium (Windows; demo verified)
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
@@ -393,7 +395,7 @@ adventure-explorer/
 - [x] Support for Capstone games (Genus GXL and Manley/Synergistic resource formats; driver audio remains metadata)
 - [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
-- [ ] Support for Sanitarium
+- [x] Support for Sanitarium (Windows resource formats; official demo verified)
 - [x] Support for Microprose adventures
 - [x] Support for Tsunami games
 - [x] Support for Noctropolis

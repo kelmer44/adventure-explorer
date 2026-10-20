@@ -1621,6 +1621,41 @@ both RNC methods under LuaJ 3.0.1, the same runtime the app uses:
 - 5,879,040 image bytes byte-identical to the reference
 - 57,600 palette bytes byte-identical to the reference
 
+## 6.6 Sprite, character, PCM and sequence expansion (2026-10-20)
+
+The 57 SPR banks already listed by the engine contain 2,058 images. All 29 BRD
+character banks use the same format and add 637 frames: the first u16 gives the
+header size in paragraphs, hence eight u16 paragraph offsets per paragraph.
+Zero entries are absent. SMALL.BRD contains a stray 0x3F00 word after its last
+valid offset, outside the file, so do not enumerate it. Headers are width,
+height, end-of-plane-2/1/0 (u16 each); planes start after the ten-byte header.
+Each row ends in zero; positive controls give literal counts, negative controls
+skip transparent bytes then give a literal count. Plane byte x maps to pixel
+4*x+plane. Bounds checks must cover each plane, each row and the output width.
+All 2,695 frames pass these checks. Palette index 0 exports as transparent.
+
+The previous SPRITES-only palette lost room-specific sprite colours. Same-stem
+SPR banks now take their room's 192 colours plus SPRITES.PAL's upper 64. This
+shared upper range also replaces the old grey-ramp guess for MAP backgrounds.
+Other banks default to SPRITES.PAL; all six standalone and 56 merged room palettes
+are exposed for manual selection. Palette swatches now use actual 16x16 colour
+cells and the host's `palette_image`/`palette_colors` result keys.
+
+Every SFX bank starts with u16 byte offsets; the first offset is also the table
+size. Each offset addresses a u16 sample length followed by unsigned 8-bit mono
+PCM, ending exactly at the next offset (or EOF). All 19 banks account for every
+byte and expose 109 samples. CURSE.EXE file offsets 0x8342/0x8347 send DSP command
+0x40 and time constant 0x83: 1,000,000/(256-131)=8000 Hz. This establishes the
+initial driver rate used for previews; sample banks have no per-clip rate field.
+
+BALCONY1-5, BASEBAL1-6 and CAULDRN1-4 now also expose animation previews while
+retaining individual screens. The 100 ms delay is a UI preview choice. BRD banks
+remain individual frames; gameplay sequencing and RS music remain undecoded.
+
+Validation: native Lua synthetic malformed-plane/offset/PCM regressions plus a
+complete sweep of 2,770 images, 109 sounds, 3 animations and 62 palettes. The
+optional CurseOfEnchantiaIntegrationTest exercises the real LuaJ host APIs.
+
 # Part 7: Universe EPFS Archive & Method-1 Compression
 
 ## 7.1 Archive Layout
@@ -1978,7 +2013,7 @@ total leaf resources: 823
   different game and contribute nothing to the 823 DOTT resources.
 - No other title changed: MONKEY2 1231, ATLANTIS 1499, Monkey 869, DIG 689
   leaf resources. `MANIAC` is still correctly *not* detected by the V5-V7 engine
-  while `scummv2` still detects it with 53 resources, so there is no
+  while `scummv2` at that stage detected it with 53 backgrounds, so there was no
   cross-detection between the two engines.
 
 ## 8.5 Actor Sprites and Music
@@ -1995,7 +2030,7 @@ total leaf resources: 823
 - Format references: ScummVM `costume.cpp`, `base-costume.cpp`, `akos.cpp`,
   `bomp.cpp`, `sound.cpp`, `imuse_digi/dimuse_bndmgr.cpp` and
   `imuse_digi/dimuse_codecs.cpp`. These additions apply to the `scumm` engine;
-  the separate `scummv2` engine still exposes backgrounds only.
+  the separate `scummv2` engine at that stage exposed backgrounds only (expanded below on 2026-10-20).
 
 ## 8.6 V3 Old-Bundle EGA (Loom)
 
@@ -4039,3 +4074,133 @@ and category in both games, including real ADPCM speech/music. All assertions
 passed. Twinsen, a fixed object, a Citadel outdoor tree and the first full scenery
 in each game were rendered for visual inspection under `build/twine-previews`.
 The model pass also checked palette overrides and missing-resource handling.
+
+
+# SCUMM enhanced V2 object and mask extraction (2026-10-20)
+
+Verified against the local ScummVM `resource_v2.cpp`, `object.cpp` and `gfx.cpp`
+and the Spanish enhanced DOS Maniac Mansion under `ags/SCUMM/MANIAC`.
+
+Only the first u16-length room block belongs to the room; scripts, costumes and
+sound can follow in the same LFL. The u8 at +20 counts objects. Parallel u16
+room-relative image/code-offset tables start at +28 and +28+2*objectCount.
+For each code record, +4 is the u16 global ID, +7/+8 the x/y bytes (x8; y&127 then x8),
++9 width (x8), +10 parent, +11/+12 walk-to coordinates (x8, y&31 then x8),
++13 height/direction (height&248; direction&7), and +14 the byte offset to a
+zero-terminated object name. DOS extended names convert from CP850 to UTF-8.
+
+Both room and object pictures use whole-image column-major RLE. A clear high
+bit gives high-nibble count/low-nibble colour; a set high bit copies the previous
+column's colour at the same y, using the low seven bits as count. Zero count
+reads an extended u8 count. Runs carry across columns, and the previous-column
+table initializes to black. Return the consumed byte position: mask RLE starts
+immediately there, not at an independent header offset.
+
+Mask RLE emits one byte per eight horizontal pixels, walking down each strip
+before the next strip. A set control high bit repeats the next byte; clear high
+bit copies literal bytes; low seven bits give the count. Expand each byte MSB
+first to a full-size black/white image. Reads stay inside the room/image section.
+
+Non-drawing hotspots can reuse arbitrary picture pointers or point directly at
+the code region. Listing them as bitmaps creates garbage and out-of-bounds reads.
+All 460 code records remain in text reports, but pictures are offered only when
+both bitmap and mask decode fully before the first object code record. Images
+can intentionally overlap in encoded data, so the next image pointer is not a
+reliable per-image bound.
+
+The tested copy yields 53 room pictures, 269 object pictures, 322 masks, 53 text
+reports and one EGA palette: 698 leaves. Native Lua and LuaJ scans pass; LuaJ
+also exports representative object/mask PNGs, text and the 48-byte RGB palette.
+Asset-free tests cover dither across columns, extended runs, mask bit order,
+truncation, zero runs and invalid room/object tables. Original room_N IDs are
+preserved. Actor costumes, scripts, music and other platforms remain outside this
+V2 expansion; Zak has no real-data verification in this change.
+
+
+# Sanitarium / Asylum resource extraction (2026-10-20)
+
+New engine: `scripts/engines/asylum/engine.lua`. Reference: local ScummVM Asylum
+`respack.cpp`, `system/graphics.cpp`, `system/screen.cpp`, `system/sound.cpp`,
+`system/text.cpp`, `views/scene.cpp`, and `resources/worldstats.cpp`.
+
+The official Windows demo was obtained from ScummVM's public demo download
+(https://www.scummvm.org/frs/demos/asylum/asylum-demo.zip) and extracted to the
+user-requested `/Users/gabriel/Desktop/ags/Sanitarium`. It contains RES.000/001/
+002/004/005, SCN.005, sntrm.dat, and four Vids/*.SMK cutscenes. The ZIP is retained
+under ignored build/sanitarium-research/. No installer or game executable is run.
+
+## Archive and graphics layout
+
+RES/MUS archives have u32 count then count u32 offsets; the last item extends to
+EOF. Directory bounds, nondecreasing offsets and all resource/frame reads are
+validated. The 27 combined-speech length repairs from ScummVM respack.cpp apply
+only to the exact 299872422-byte RES.104/204/304 file and matching disc/index.
+Synthetic tests verify the repair, filename/file-size scoping, and EOF rejection;
+this source-based retail exception is not a full retail-data verification.
+Zero offsets are absent entries, and zero-length entries are omitted
+from resource previews. Only one resource is read for audio/graphics, rather than
+loading entire potentially large speech archives. Directory/frame metadata caches
+are rebuilt when the game is opened.
+
+D3GR resource headers contain flags +4, content offset +8, palette pointer +12,
+u16 frame count +24, u16 maximum width +26 and a u32 frame-offset table +28.
+Frame offsets are relative to content offset. Each frame begins with two u32s
+(size/flag), i16 x/y, u16 height/width, then raw row-major CLUT8 pixels. Header
+sizes and output dimensions are checked before allocation. Empty frames remain in
+animations, while empty font glyphs are omitted from image leaves. Font banks
+must not be listed as ordinary animation sequences.
+
+Palettes are D3GR resources with flag 0x2000; follow the +12 pointer, read u16
+count/u8 first index/u8 unknown, then RGB triples in 0..63, scaled by four. The
+three demo palettes each cover 256 colours. Partial palettes are accepted with
+unassigned entries black, rather than inventing missing state.
+
+DFISCN scene files begin with six-byte magic before WorldStats. Background,
+fonts and current palette are at WS +0x24, +0x5C/+0x60/+0x64 and +0x68. Width/
+height and action/object counts are at +0x88/+0x8C and +0x98/+0x9C. Resource IDs
+encode 0x80000000+pack*65536+index. This binds the tower background and fonts to
+RES.005 entry 20. Other images use the preceding same-pack palette when available,
+with scene/archive fallback; such defaults do not claim to reproduce palette
+swaps performed by scripts. All palettes remain manually selectable.
+
+Sprites preserve index-0 alpha. Backgrounds stay opaque. Animation previews
+compose each raw frame at its signed origin into a common bounding rectangle,
+retaining blank frames. Delay is a fixed 100 ms UI choice; no gameplay scripts,
+palette cycling, fades, blending or scene-layer composition are replayed. Bounded
+animation canvases avoid excessive allocations; individual frames remain available.
+
+## Masks, text, audio and data
+
+Seven demo resources are masks: u32 height, u32 width, then width/8*height packed
+bytes and a four-byte trailer. Bits are row-major, LSB first; white bits block
+sprite drawing, confirmed against Screen::bltMasked. These export as full-size
+black/white PNGs. Three 65536-byte colour-translation tables remain hex metadata.
+
+RIFF/WAVE clips use the existing host decoder. All 171 demo clips are signed
+16-bit mono PCM at 11025 or 22050 Hz, including the RES.002 music track. The
+shared resource banks retain archive/index identity rather than inventing voice
+speaker names. MUS.xxx files use the same archive reader for retail music data.
+
+RES.000 contains 158 nonblank dialogue/text strings, 61 blank placeholders and
+two binary script/lookup entries. Preserve brace markup, omit trailing SOH/NUL,
+and convert Western Windows text from CP1252 to UTF-8. Binary data is not scanned
+for arbitrary printable fragments. Reports include archive directories, bounded
+hex for unclassified resources, scene-header fields and Smacker video metadata.
+Smacker movie playback/extraction is not implemented.
+
+## Verification and scope
+
+The official demo yields 2494 leaves: 2051 raw graphics frames (1 background,
+1615 sprite/UI frames, 435 glyphs), 7 masks, 89 animation previews, 171 WAV clips,
+3 palettes, 158 text strings and 15 data reports. Native Lua sweeps load all
+leaves. The background's 1095x897 RGB bytes match an independent Python/Pillow
+decode byte-for-byte. Synthetic regressions cover malformed/sparse directories,
+frame bounds, signed-origin alignment, partial palettes, mask bit order, text
+controls and scene headers; they also run in LuaJ. AsylumIntegrationTest checks
+all demo leaves and representative PNG/alpha, animation, WAV, text and palette
+export, and compares decoded PCM with the JVM's independent WAVE reader.
+
+Retail formats follow ScummVM's source layouts but have not been tested with
+retail CD/GOG/Steam assets. In particular, multi-disc/shared-audio archive quirks,
+localized encodings beyond Western CP1252, and script-driven visual state are not
+established by this demo sweep. Opening a folder does not claim game execution.

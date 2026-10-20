@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Game data sits in a flat DATA/ directory, one resource per file.
 --
--- Images are Rob Northen Compression (ProPack) streams. The 18-byte header is
+-- Backgrounds/screens are Rob Northen Compression (ProPack) streams. The 18-byte header is
 -- big-endian:
 --     0  'R' 'N' 'C' <method>
 --     4  u32 unpacked size
@@ -30,10 +30,9 @@
 -- BASEBALL.PAL, which is what ties the room files to the standalone screens.
 --
 -- The 56 rooms almost all paint with indices 0..191. A handful also touch
--- 192..255, which the file does not store; the game rewrites those entries at
--- runtime for effects such as water and fire.
+-- 192..255, which the file does not store; use the shared SPRITES.PAL range.
 --
--- .SPR  a room sprite bank, not compressed. It opens with a 16-bit paragraph
+-- .SPR/.BRD  room and character sprite banks, not compressed. It opens with a 16-bit paragraph
 --         count H, so it holds H*8 table entries; every entry is a paragraph
 --         (16-byte) offset of one sprite and a zero entry means "absent".
 --         A sprite is stored VGA-planar, exactly as the game blits it:
@@ -48,14 +47,14 @@
 --         reads a literal run (its count and bytes). The byte at plane p, row y
 --         and byte offset k is the colour of pixel (4*k + p, y), so the four
 --         planes interleave into one width-by-height image whose colours index
---         SPRITES.PAL.
+--         the matching room palette plus SPRITES.PAL shared colours.
 -- ============================================================================
 
 local engine = {}
 engine.name        = "Curse of Enchantia"
 engine.id          = "curseofenchantia"
 engine.description = "Curse of Enchantia (1992, Core Design)"
-engine.version     = "1.0"
+engine.version     = "1.1"
 
 local DATA = "/DATA/"
 
@@ -420,7 +419,7 @@ end
 -- Unpack the RNC block whose "RNC" magic starts at 1-based index `i`.
 -- Returns (pixels, pixel_count, next_index), or nil when the block is not valid.
 local function rnc_unpack(data, i)
-    if data:sub(i, i + 2) ~= "RNC" then return nil end
+    if i < 1 or i + 17 > #data or data:sub(i, i + 2) ~= "RNC" then return nil end
     local method = data:byte(i + 3) % 4
     if method ~= 1 and method ~= 2 then return nil end
 
@@ -492,33 +491,34 @@ local function load_palette(game_path, name)
 end
 
 local function palette_swatch(pal)
-    local rgb, n = {}, 0
-    for py = 0, 15 do
-        for px = 0, 15 do
-            local ci = py * 16 + px
-            n = n + 1
-            rgb[n] = pal[ci * 3 + 1] or 0
-            n = n + 1
-            rgb[n] = pal[ci * 3 + 2] or 0
-            n = n + 1
-            rgb[n] = pal[ci * 3 + 3] or 0
+    local pixels = {}
+    for y = 0, 255 do
+        for x = 0, 255 do
+            pixels[y * 256 + x + 1] = math.floor(y / 16) * 16 + math.floor(x / 16)
         end
     end
-    return image_create_rgb(256, 256, rgb)
+    return image_create_indexed(256, 256, pixels, pal)
 end
 
--- A .MAP palette covers indices 0..191 only. Some rooms also reference 192..255,
--- which the file never stores -- the game retargets those slots at runtime. Pad
--- them with a grey ramp so the affected pixels stay visible instead of going
--- black; they are rare enough (under 1% of most rooms) to leave as a guess.
-local function pad_palette(pal)
-    for i = MAP_PAL_COLORS, 255 do
-        local v = math.floor(255 * (i - MAP_PAL_COLORS) / (255 - MAP_PAL_COLORS))
-        pal[i * 3 + 1] = v
-        pal[i * 3 + 2] = v
-        pal[i * 3 + 3] = v
-    end
+-- Rooms own indices 0..191; SPRITES.PAL supplies the shared 192..255 range.
+local function room_palette(game_path, stem)
+    local f = file_open(game_path .. DATA .. stem .. ".MAP")
+    if not f then return nil end
+    local data = file_read(f, 0, MAP_PAL_BYTES)
+    file_close(f)
+    if not data or #data ~= MAP_PAL_BYTES then return nil end
+    local pal = load_palette(game_path, "SPRITES") or {}
+    for i = 1, MAP_PAL_BYTES do pal[i] = data:byte(i) * 4 end
+    for i = MAP_PAL_BYTES + 1, 768 do pal[i] = pal[i] or 0 end
     return pal
+end
+
+local function selected_palette(game_path, id)
+    if not id then return nil end
+    local room = id:match("^pal:room:([%w_]+)$")
+    if room then return room_palette(game_path, room) end
+    local name = id:match("^pal:([%w_]+)$")
+    if name then return load_palette(game_path, name) end
 end
 
 -- Which palette a given .DAT was drawn against, taken from the game's own
@@ -542,7 +542,7 @@ end
 
 -- .MAP: a chain of 32x200 strips, stored left to right
 -- ------------------------------------------------------------------------
-local function load_map(game_path, stem)
+local function load_map(game_path, stem, palette_id)
     local data = read_file(game_path .. DATA .. stem .. ".MAP")
     if not data then
         return { type = "text", text = "Missing " .. stem .. ".MAP" }
@@ -594,19 +594,16 @@ local function load_map(game_path, stem)
         return { type = "text", text = stem .. ".MAP: too small to hold a palette" }
     end
 
-    -- The room's own palette sits at the very front of the file.
-    local pal = {}
-    for i = 0, MAP_PAL_BYTES - 1 do
-        pal[i + 1] = data:byte(i + 1) * 4
-    end
-    pad_palette(pal)
+    local pal = palette_id and selected_palette(game_path, palette_id)
+        or room_palette(game_path, stem)
+    if not pal then return { type = "text", text = "Missing room palette: " .. stem } end
 
     local img = image_create_indexed(w, STRIP_H, pixels, pal)
     return {
         type = "image",
         image = img,
-        paletteImage = palette_swatch(pal),
-        paletteColors = MAP_PAL_COLORS,
+        palette_image = palette_swatch(pal),
+        palette_colors = 256,
         description = string.format(
             "%s - %dx%d room background, %d x %d strips, own %d-colour palette",
             stem, w, STRIP_H, nstrips, STRIP_W, MAP_PAL_COLORS),
@@ -615,7 +612,7 @@ end
 
 -- .DAT: a single full-screen image
 -- ------------------------------------------------------------------------
-local function load_dat(game_path, stem)
+local function load_dat(game_path, stem, palette_id)
     local data = read_file(game_path .. DATA .. stem .. ".DAT")
     if not data then
         return { type = "text", text = "Missing " .. stem .. ".DAT" }
@@ -636,7 +633,8 @@ local function load_dat(game_path, stem)
     end
 
     local palname = dat_palette(stem)
-    local pal = load_palette(game_path, palname)
+    local pal = palette_id and selected_palette(game_path, palette_id)
+        or load_palette(game_path, palname)
     if not pal then
         return { type = "text", text = "Missing " .. palname .. ".PAL" }
     end
@@ -645,8 +643,8 @@ local function load_dat(game_path, stem)
     return {
         type = "image",
         image = img,
-        paletteImage = palette_swatch(pal),
-        paletteColors = 192,
+        palette_image = palette_swatch(pal),
+        palette_colors = 256,
         description = string.format("%s - %dx%d full-screen image, %s palette",
             stem, w, h, palname),
     }
@@ -658,119 +656,124 @@ local SPR_PALETTE = "SPRITES"
 
 -- Read the paragraph offset table. entry[0] is the header size, so it also
 -- fixes the entry count at entry[0] * 8; each entry is a 16-byte paragraph.
+local function u16(data, pos)
+    if pos < 1 or pos + 1 > #data then return nil end
+    return data:byte(pos) + data:byte(pos + 1) * 256
+end
+
 local function spr_entries(data)
     if not data or #data < 2 then return nil end
-    local header = data:byte(1) + data:byte(2) * 256
-    if header < 1 then return nil end
-    local count = header * 8
-    if #data < count * 2 then return nil end
-    local ents = {}
+    local header = u16(data, 1)
+    if header < 1 or header * 16 > #data then return nil end
+    local count, ents = header * 8, {}
     for i = 0, count - 1 do
-        local o = i * 2
-        ents[i] = data:byte(o + 1) + data:byte(o + 2) * 256
+        local offset = u16(data, i * 2 + 1)
+        -- SMALL.BRD has one stray word after its last valid offset.
+        if offset >= header and offset * 16 + 10 <= #data then ents[i] = offset
+        else ents[i] = 0 end
     end
     return ents, count
 end
 
--- Decode one sprite whose header starts at 1-based byte `base` into a
--- width*height table of palette indices. `region_end` is the 1-based exclusive
--- end of the sprite (the next sprite's first byte). The four planes are read
--- one after another and interleaved by [pixel x = 4*byte + plane], unused
--- pixels staying transparent as 0.
 local function spr_decode(data, base, region_end)
-    local function u16(o) return data:byte(o) + data:byte(o + 1) * 256 end
-    local w, h = u16(base), u16(base + 2)
-    local end2, end1, end0 = u16(base + 4), u16(base + 6), u16(base + 8)
+    if base < 1 or region_end > #data + 1 or base + 10 > region_end then return nil end
+    local w, h = u16(data, base), u16(data, base + 2)
+    local end2, end1, end0 = u16(data, base + 4), u16(data, base + 6), u16(data, base + 8)
+    if w < 1 or h < 1 or w > 1024 or h > 512 or end0 > end1 or end1 > end2
+        or base + 10 + end2 > region_end then return nil end
     local d0 = base + 10
     local starts = { d0, d0 + end0, d0 + end1, d0 + end2 }
     local stops = { d0 + end0, d0 + end1, d0 + end2, region_end }
-
     local pixels = {}
     for i = 1, w * h do pixels[i] = 0 end
-
-    for p = 0, 3 do
-        local si, stop = starts[p + 1], stops[p + 1]
-        local function read()
-            local v = data:byte(si)
-            si = si + 1
-            return v or 0
-        end
+    for plane = 0, 3 do
+        local pos, stop = starts[plane + 1], stops[plane + 1]
         for y = 0, h - 1 do
-            if si >= stop then break end
-            local off = 0
-            local t = read()
-            if t ~= 0 then
-                local run
-                if t < 0x80 then
-                    run = t
-                else
-                    off = off + (256 - t)
-                    run = read()
+            local x = 0
+            while true do
+                if pos >= stop then return nil end
+                local run = data:byte(pos); pos = pos + 1
+                if run == 0 then break end
+                if run >= 128 then
+                    x = x + 256 - run
+                    if pos >= stop then return nil end
+                    run = data:byte(pos); pos = pos + 1
                 end
-                while true do
-                    for k = 1, run do
-                        local v = read()
-                        local x = 4 * (off + k - 1) + p
-                        if x < w then pixels[y * w + x + 1] = v end
-                    end
-                    off = off + run
-                    t = read()
-                    if t == 0 then break end
-                    off = off + (256 - t)
-                    run = read()
+                if x + run > math.ceil(w / 4) or pos + run > stop then return nil end
+                for k = 0, run - 1 do
+                    local px = (x + k) * 4 + plane
+                    if px < w then pixels[y * w + px + 1] = data:byte(pos + k) end
                 end
+                pos = pos + run; x = x + run
             end
         end
     end
     return w, h, pixels
 end
 
-local function load_spr(game_path, stem, index)
-    local data = read_file(game_path .. DATA .. stem .. ".SPR")
-    if not data then
-        return { type = "text", text = "Missing " .. stem .. ".SPR" }
-    end
+local function load_spr(game_path, stem, index, ext, palette_id)
+    local filename = stem .. "." .. ext
+    local data = read_file(game_path .. DATA .. filename)
     local ents, count = spr_entries(data)
-    if not ents then
-        return { type = "text", text = stem .. ".SPR: bad offset table" }
+    if not ents or not ents[index] or ents[index] == 0 then
+        return { type = "text", text = filename .. ": absent or invalid sprite " .. index }
     end
-    if not ents[index] or ents[index] == 0 then
-        return { type = "text",
-                 text = string.format("%s.SPR: sprite %d is absent", stem, index) }
+    local base, region_end = ents[index] * 16 + 1, #data + 1
+    for k = 0, count - 1 do
+        if ents[k] > ents[index] then region_end = math.min(region_end, ents[k] * 16 + 1) end
     end
-
-    local base = ents[index] * 16 + 1
-    local region_end = #data + 1
-    for k = index + 1, count - 1 do
-        if ents[k] and ents[k] > 0 then
-            region_end = ents[k] * 16 + 1
-            break
-        end
-    end
-
     local w, h, pixels = spr_decode(data, base, region_end)
-    if w <= 0 or h <= 0 then
-        return { type = "text",
-                 text = string.format("%s.SPR: sprite %d is empty", stem, index) }
-    end
+    if not w then return { type = "text", text = filename .. ": malformed sprite " .. index } end
+    local pal = palette_id and selected_palette(game_path, palette_id)
+        or (ext == "SPR" and room_palette(game_path, stem))
+        or load_palette(game_path, SPR_PALETTE)
+    if not pal then return { type = "text", text = "Missing sprite palette" } end
+    return { type = "image", image = image_create_indexed(w, h, pixels, pal, 0),
+        palette_image = palette_swatch(pal), palette_colors = 256,
+        description = string.format("%s sprite #%d - %dx%d, transparent index 0", filename, index, w, h) }
+end
 
-    local pal = load_palette(game_path, SPR_PALETTE)
-    if not pal then
-        pal = {}
-        for i = 0, 255 do
-            pal[i * 3 + 1], pal[i * 3 + 2], pal[i * 3 + 3] = i, i, i
-        end
+-- Byte offsets, including entry zero (the table size), followed by u16 lengths
+-- and unsigned 8-bit mono PCM. All 19 tested banks account for every byte.
+local function sfx_entries(data)
+    if not data or #data < 4 then return nil end
+    local header = u16(data, 1)
+    if header < 2 or header % 2 ~= 0 or header + 2 > #data then return nil end
+    local entries = {}
+    for i = 0, header / 2 - 1 do
+        local offset = u16(data, i * 2 + 1)
+        local size = u16(data, offset + 1)
+        local stop = i + 1 < header / 2 and u16(data, i * 2 + 3) or #data
+        if offset < header or not size or size == 0 or offset + 2 + size ~= stop then return nil end
+        entries[#entries + 1] = { offset = offset + 3, size = size }
     end
+    return entries
+end
 
-    local img = image_create_indexed(w, h, pixels, pal)
-    return {
-        type = "image",
-        image = img,
-        paletteImage = palette_swatch(pal),
-        paletteColors = 256,
-        description = string.format("%s.SPR sprite #%d - %dx%d, %s palette",
-            stem, index, w, h, SPR_PALETTE),
-    }
+local function load_sfx(game_path, stem, index)
+    local data = read_file(game_path .. DATA .. stem .. ".SFX")
+    local entries = sfx_entries(data)
+    local e = entries and entries[index + 1]
+    if not e then return { type = "text", text = stem .. ".SFX: invalid sample " .. index } end
+    -- DSP initialization at CURSE.EXE file offset 0x8342 sends 0x40, 0x83:
+    -- 1,000,000 / (256 - 131) = 8000 Hz. The banks have no rate field.
+    return { type = "sound", sound = sound_create_pcm(8000, 8, 1, false,
+        data:sub(e.offset, e.offset + e.size - 1)),
+        description = string.format("%s.SFX #%d - %d samples, unsigned 8-bit mono, 8000 Hz preview", stem, index, e.size) }
+end
+
+local SCREEN_SEQUENCES = { BALCONY = 5, BASEBAL = 6, CAULDRN = 4 }
+local function load_sequence(game_path, stem, palette_id)
+    local count = SCREEN_SEQUENCES[stem]
+    if not count then return nil end
+    local frames = {}
+    for i = 1, count do
+        local result = load_dat(game_path, stem .. i, palette_id)
+        if result.type ~= "image" then return result end
+        frames[#frames + 1] = result.image
+    end
+    return { type = "animation", animation = animation_create(frames, 100), delay_ms = 100,
+        description = string.format("%s - %d full-screen frames, 100 ms preview timing", stem, count) }
 end
 
 -- engine interface
@@ -785,7 +788,7 @@ end
 -- BOXDET.DAT is a plain offset table rather than an image, so it is skipped.
 function engine.get_resources(game_path)
     local resources = {}
-    local maps, dats, sprs = {}, {}, {}
+    local maps, dats, sprs, brds, sounds, palettes = {}, {}, {}, {}, {}, {}
     local files = list_files(game_path .. DATA) or {}
 
     for _, fn in ipairs(files) do
@@ -800,12 +803,21 @@ function engine.get_resources(game_path)
                 dats[#dats + 1] = stem
             elseif ext == "SPR" then
                 sprs[#sprs + 1] = stem
+            elseif ext == "BRD" then
+                brds[#brds + 1] = stem
+            elseif ext == "SFX" then
+                sounds[#sounds + 1] = stem
+            elseif ext == "PAL" then
+                palettes[#palettes + 1] = stem
             end
         end
     end
     table.sort(maps)
     table.sort(dats)
     table.sort(sprs)
+    table.sort(brds)
+    table.sort(sounds)
+    table.sort(palettes)
 
     if #maps > 0 then
         local cat = {
@@ -831,45 +843,93 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = cat
     end
 
-    if #sprs > 0 then
-        local cat = {
-            id = "sprites", name = string.format("Sprite Banks (%d)", #sprs),
-            type = "category", children = {},
-        }
-        for _, stem in ipairs(sprs) do
-            local data = read_file(game_path .. DATA .. stem .. ".SPR")
+    for _, group in ipairs({ {sprs, "SPR", "sprites", "Sprite Banks"},
+                              {brds, "BRD", "characters", "Character Sprites"} }) do
+        local cat = { id = group[3], name = group[4], type = "category", children = {} }
+        local prefix = group[2] == "SPR" and "spr_" or "brd_"
+        for _, stem in ipairs(group[1]) do
+            local data = read_file(game_path .. DATA .. stem .. "." .. group[2])
             local ents, count = spr_entries(data)
-            local bank = { id = "spr_" .. stem, name = stem, type = "category",
-                           children = {} }
+            local bank = { id = prefix .. stem, name = stem, type = "category", children = {} }
             if ents then
                 for idx = 0, count - 1 do
                     if ents[idx] > 0 then
                         bank.children[#bank.children + 1] = {
-                            id = string.format("spr_%s_%d", stem, idx),
-                            name = string.format("#%d", idx),
-                            type = "image",
-                        }
+                            id = string.format("%s%s_%d", prefix, stem, idx),
+                            name = string.format("#%d", idx), type = "image" }
                     end
                 end
             end
             bank.name = string.format("%s (%d)", stem, #bank.children)
-            cat.children[#cat.children + 1] = bank
+            if #bank.children > 0 then cat.children[#cat.children + 1] = bank end
         end
-        resources[#resources + 1] = cat
+        if #cat.children > 0 then resources[#resources + 1] = cat end
     end
+    local audio = { id = "sounds", name = "Sound Effects", type = "category", children = {} }
+    for _, stem in ipairs(sounds) do
+        local entries = sfx_entries(read_file(game_path .. DATA .. stem .. ".SFX"))
+        if entries then
+            local bank = { id = "sfx:" .. stem, name = stem, type = "category", children = {} }
+            for i, e in ipairs(entries) do
+                bank.children[#bank.children + 1] = { id = "sfx:" .. stem .. ":" .. (i - 1),
+                    name = string.format("#%d (%d samples)", i - 1, e.size), type = "sound" }
+            end
+            audio.children[#audio.children + 1] = bank
+        end
+    end
+    if #audio.children > 0 then resources[#resources + 1] = audio end
+    local animations = { id = "animations", name = "Screen Animations", type = "category", children = {} }
+    for _, stem in ipairs({ "BALCONY", "BASEBAL", "CAULDRN" }) do
+        local complete = true
+        for i = 1, SCREEN_SEQUENCES[stem] do
+            if not starts_with_rnc(game_path, stem .. i) then complete = false end
+        end
+        if complete then animations.children[#animations.children + 1] = {
+            id = "anim:" .. stem, name = stem, type = "animation" } end
+    end
+    if #animations.children > 0 then resources[#resources + 1] = animations end
+    local pals = { id = "palettes", name = "Palettes", type = "category", children = {} }
+    for _, stem in ipairs(palettes) do
+        pals.children[#pals.children + 1] = { id = "pal:" .. stem, name = stem .. ".PAL", type = "palette" }
+    end
+    for _, stem in ipairs(maps) do
+        pals.children[#pals.children + 1] = { id = "pal:room:" .. stem, name = stem .. " room", type = "palette" }
+    end
+    if #pals.children > 0 then resources[#resources + 1] = pals end
 
     return resources
 end
 
--- The palette travels inside the image, so palette_id is accepted but unused:
--- each Curse screen was drawn against one fixed palette.
+function engine.default_palette(game_path, resource_id)
+    local room = resource_id:match("^bg_(.+)$") or resource_id:match("^spr_(.+)_%d+$")
+    if room and room_palette(game_path, room) then return "pal:room:" .. room end
+    if resource_id:match("^spr_") or resource_id:match("^brd_") then return "pal:SPRITES" end
+    local screen = resource_id:match("^bg:dat:(.+)$") or resource_id:match("^anim:(.+)$")
+    if screen then return "pal:" .. dat_palette(screen) end
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^pal:") then
+        local pal = selected_palette(game_path, resource_id)
+        if not pal then return { type = "text", text = "Missing palette: " .. resource_id } end
+        return { type = "image", image = palette_swatch(pal), palette_colors = 256,
+            description = resource_id .. " - 256 colours" }
+    end
+    if palette_id and not selected_palette(game_path, palette_id) then
+        return { type = "text", text = "Invalid palette: " .. palette_id }
+    end
     local stem = resource_id:match("^bg_(.+)$")
-    if stem then return load_map(game_path, stem:upper()) end
+    if stem then return load_map(game_path, stem:upper(), palette_id) end
     stem = resource_id:match("^bg:dat:(.+)$")
-    if stem then return load_dat(game_path, stem:upper()) end
+    if stem then return load_dat(game_path, stem:upper(), palette_id) end
     local bank, index = resource_id:match("^spr_(.+)_(%d+)$")
-    if bank then return load_spr(game_path, bank:upper(), tonumber(index)) end
+    if bank then return load_spr(game_path, bank:upper(), tonumber(index), "SPR", palette_id) end
+    bank, index = resource_id:match("^brd_(.+)_(%d+)$")
+    if bank then return load_spr(game_path, bank:upper(), tonumber(index), "BRD", palette_id) end
+    bank, index = resource_id:match("^sfx:([%w_]+):(%d+)$")
+    if bank then return load_sfx(game_path, bank:upper(), tonumber(index)) end
+    stem = resource_id:match("^anim:([%w_]+)$")
+    if stem then return load_sequence(game_path, stem:upper(), palette_id) end
     return nil
 end
 

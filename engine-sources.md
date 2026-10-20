@@ -4,6 +4,16 @@
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/scumm folder
 Key references used:
+- `engines/scumm/resource_v2.cpp` (`readEnhancedIndexFile`), `object.cpp`
+  (`ScummEngine_v3old::resetRoomObjects`, `ScummEngine_v4::resetRoomObject`,
+  `getObjOrActorName`) and `gfx.cpp` (`GdiV2::prepareDrawBitmap`) - enhanced DOS V2
+  index, room-relative image/code tables, names and geometry, whole-bitmap column
+  RLE/dither and following mask-byte RLE. The Spanish `ags/SCUMM/MANIAC` copy
+  validates 53 backgrounds, 269 object sprites, 322 masks, 53 reports containing
+  460 object records, and one EGA palette (PNG plus 48-byte RGB export). Decode
+  within the declared room block and validate bitmap plus mask before offering
+  object pictures; non-drawing hotspots can share image pointers. Tests:
+  `scripts/tests/scumm_v2.lua`, `LegacyEngineDecoderTest`, `ScummV2IntegrationTest`.
 - `engines/scumm/resource_v3.cpp` - old-bundle V3 index magic `0x0100`, global object table and byte-counted room/costume/script/sound directories with u16 offsets. Implemented in `scumm_v3.lua`; tested with `ags/SCUMM/LOOM` (DOS EGA).
 - `engines/scumm/resource_v4.cpp` (`readResTypeList`, `readIndexFile`) - plaintext V4 `000.LFL`, LE sizes + two-byte tags, interleaved room/u32-offset directories. `resource.cpp` (`readRoomsOffsets`, `getEncByte`, `loadResource`) - XOR-0x69 `DISKnn.LEC`, offset-12 FO room table, eight-byte LF wrapper before indexed resources. Implemented in `scumm_v4.lua`; tested with `ags/scumm/MONKEYEGA` (81 backgrounds, 606 objects, 115 costume sheets, 2,020 animation previews).
 - `engines/scumm/object.cpp` (`ScummEngine_v4::resetRoomObject`, `getObjectImage`) - V4 OC dimensions and OI image payload at +8. `costume.cpp` (`ClassicCostumeLoader::loadCostume`) - V4 CO base at zero, explicit palette, u16 limb command offsets. V3/V4 share the EGA strip decoder and hardware palette. V4 VGA, audio/fonts and non-DOS variants remain unsupported.
@@ -22,6 +32,41 @@ Key references used:
 - `engines/scumm/imuse_digi/dimuse_bndmgr.cpp`, `dimuse_codecs.cpp` - `.BUN` bundles (LB83/LB23 directory, COMP block table, codecs 0-13/15), ported to `ImuseBundleCodecs.kt`
 - `engines/scumm/nut_renderer.cpp` - `.NUT` bitmap fonts (codecs 1/21/44)
 - MI3 (`COMI.LA0/1/2`) game located in ags/SCUMM/Monkey3 (music/speech in `RESOURCE/*.BUN`)
+
+### SANITARIUM / ASYLUM
+
+Engine: `scripts/engines/asylum/engine.lua`.
+Local reference: `scummvm-fork/engines/asylum/`:
+- `respack.cpp` (`ResourcePack::init/get`): u32 entry count and u32 resource offsets
+  in RES/MUS archives, with the final entry ending at EOF. Includes the 27 known
+  combined-speech length corrections, scoped to the exact 299872422-byte pack
+  and RES.104/204/304 disc filename. Synthetic tests exercise correction scoping
+  and retain EOF bounds checks.
+- `system/graphics.cpp` (`GraphicResource::init`): D3GR header, content-relative
+  frame-offset table, signed x/y origins, height/width and raw CLUT8 pixels.
+- `system/screen.cpp` (`getPaletteData/setupPalette`): palette flag 0x2000, header
+  offset +12, count/start header and six-bit RGB channels scaled by four.
+  `blitMasked/bltMasked`: u32 height/width then row-major LSB-first packed bits;
+  index 0 is the sprite colour key. Preserve frame offsets in animation canvases.
+- `views/scene.cpp` (`Scene::load`) and `resources/worldstats.cpp`: DFISCN magic,
+  background/font/current-palette bindings and scene header fields.
+- `system/sound.cpp` and `system/text.cpp`: RIFF/WAVE audio and NUL-terminated text;
+  retain dialogue control markup and convert Western Windows text from CP1252.
+
+Verified data: official Windows demo, downloaded from
+https://www.scummvm.org/frs/demos/asylum/asylum-demo.zip and installed at
+`/Users/gabriel/Desktop/ags/Sanitarium`. The 5 RES packs contain 2,051 nonempty
+frames, 89 non-font animation banks, 7 masks, 3 palettes, 171 WAV clips, 158 text
+strings, and 5 unknown lookup/script resources exposed as bounded hex reports.
+There are also 5 archive directories, 1 scene-header report and 4 video reports.
+
+`lua scripts/tests/asylum.lua [game directory]` covers synthetic malformed data
+and an optional full sweep. `AsylumDecoderTest` repeats synthetic cases in LuaJ;
+`SANITARIUM_TEST_PATH=... ./gradlew --offline test --tests '*AsylumIntegrationTest'`
+checks every demo leaf and PNG/WAV/animation/text/palette export. Background RGB
+was also byte-identical to an independent Python/Pillow decode.
+Retail, script-driven palette changes/composition, and Smacker decoding are not
+verified by this demo; do not infer complete retail compatibility from these counts.
 
 ### SCI
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -194,6 +239,16 @@ Two containers sit on top of that:
 Standalone `.PAL` files are 768 bytes, 256 RGB triples, six bits per channel, so
 every component scales by 4. CORE.PAL is the exception: only its first 16
 entries carry colour, and CORE.DAT is the one .DAT that stays inside that range.
+
+Additional local data/executable verification (2026-10-20): SPR and BRD share
+paragraph-offset / four-plane RLE, yielding 2,058 and 637 valid frames. SMALL.BRD
+has one out-of-file padding word, skipped. Room sprites combine their matching
+MAP's first 192 colours and SPRITES.PAL's upper 64; index 0 is transparent.
+The 19 SFX banks contain 109 u16-length-prefixed unsigned 8-bit mono PCM samples
+behind u16 byte-offset tables. CURSE.EXE file offsets 0x8342-0x8349 initialize
+Sound Blaster DSP with 0x40/0x83 (8000 Hz); previews use that initial rate.
+Three named DAT sequences expose 5/6/4 full-screen frames at fixed preview timing.
+See scripts/tests/curseofenchantia.lua and CurseOfEnchantiaIntegrationTest.
 
 games in ags/CURSE
 

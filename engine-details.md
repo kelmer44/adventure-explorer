@@ -56,6 +56,7 @@ coverage and known limitations are described where available. See also
 | [Prisoner of Ice](#ice) | `ice` |
 | [Ripley's Believe It or Not!: The Riddle of Master Lu](#riddle) | `riddle` |
 | [Runaway: A Road Adventure](#runaway) | `runaway` |
+| [Sanitarium](#asylum) | `asylum` |
 | [SCUMM V2](#scummv2) | `scummv2` |
 | [SCUMM V3–V8](#scumm) | `scumm` |
 | [Shadow of the Comet](#comet) | `comet` |
@@ -317,6 +318,19 @@ palette and Cruise polygon-preview details.
 Open the parent game folder containing `CURSE.EXE` and the `DATA` subfolder. Releases
 without that executable need `CURSE.CFG` and `DATA/CORE.PAL`. Select the parent folder
 so the engine can find the files under `DATA`.
+
+The tested DOS release exposes 56 room backgrounds, 19 standalone screens,
+2,058 sprite/UI/font frames in 57 `.SPR` banks, and 637 character frames in 29
+`.BRD` banks. Sprites export with index 0 transparent. Room sprites use their
+matching room palette with the shared upper 64 colours from `SPRITES.PAL`;
+unmatched sprite and character banks use `SPRITES.PAL`. Select any of the six
+standalone or 56 room palettes manually when a bank needs another context.
+
+Also available: 109 PCM effects from 19 `.SFX` banks, and three full-screen
+animation previews (BALCONY, BASEBAL and CAULDRN). Effects preview/export as
+unsigned 8-bit mono at the driver's initial 8,000 Hz rate; banks contain no rate
+field. Screen sequences use a fixed 100 ms preview delay. Character banks expose
+individual frames; gameplay animation scripts and `.RS1`-`.RS5` music are not decoded.
 
 <a id="darkseed"></a>
 
@@ -864,6 +878,39 @@ click **Open Folder** and select `runaway-data`. Subsequent opens need no prepar
 Cabinet resources are extracted, while loose files are linked: **keep the original media
 folder in place** so those links continue to work. Bink cutscenes are not previewed.
 
+<a id="asylum"></a>
+
+## Sanitarium
+
+**Engine ID:** `asylum`
+
+Open the Windows game data folder containing `SNTRM.DAT` (or `ASYLUM.DAT`) and
+`RES.000`, with the remaining `RES.xxx`, `SCN.xxx` and `MUS.xxx` files alongside
+them. Keep `Vids/` for cutscene metadata. No installation executable is needed.
+The official Windows demo is verified; retail CD/GOG/Steam resource layouts and
+ScummVM's known combined-speech size corrections are implemented from the reference
+code but have not had a full-game data sweep.
+
+The tested demo exposes 2,051 graphics frames (one background, 1,615 sprite/UI
+frames, and 435 font glyphs), seven full-size black/white masks, 89 animation
+previews, three palettes, and 171 WAV audio clips including music. There are also
+158 dialogue/text entries and 15 archive, scene, lookup-table and cutscene reports.
+Frames export as PNGs, audio as WAVs, text as UTF-8, and palettes as PNG/RGB tables.
+
+Scene backgrounds and fonts use the palette referenced by their scene. Other
+frames default to the preceding palette in their archive, or an available scene/
+archive palette when none precedes them. These defaults are inferred for assets
+whose palette changes through gameplay scripts; select another palette manually
+when needed. Backgrounds are opaque; other frames preserve index-0 transparency.
+Empty glyphs are omitted, while empty animation frames retain their timing.
+
+Animation previews align each frame using its signed origin on a stable canvas.
+The fixed 100 ms preview delay does not replay gameplay timing, scripts, palette
+cycling, blending or scene composition. Excessively large animation canvases are
+omitted while their individual frames remain available. Smacker cutscenes expose
+metadata only. Partial palettes leave unspecified entries black. Scene reports
+cover the scene header; actor/object/script logic is not decoded.
+
 <a id="scummv2"></a>
 
 ## SCUMM V2
@@ -873,6 +920,19 @@ folder in place** so those links continue to work. Bink cutscenes are not previe
 For enhanced V2 Maniac Mansion or Zak McKracken, open the game data folder containing
 `00.LFL` and `01.LFL`, with the remaining numbered `.LFL` room files. The detector
 validates the V2 index layout.
+
+The tested Spanish enhanced DOS Maniac Mansion exposes 53 room backgrounds,
+269 object sprites, 53 room masks, 269 object masks, 53 room/object text reports
+and the EGA palette. Object images are named from the game data and grouped by
+room. Masks export as black/white PNGs at full image dimensions, with white
+marking set occlusion bits. Text reports include all 460 object records, including
+hotspots without a decodable picture, with names, positions, walk-to coordinates,
+parent indices and image offsets. Palette export includes a 48-byte RGB table.
+
+Reopen the game folder to refresh the resource tree, then use Export for PNGs,
+text and palette data. Actor costumes/animations, scripts and sound/music remain
+unsupported in this V2 engine. Coverage is verified for enhanced DOS Maniac Mansion;
+Zak uses the same layout but has not had a real-data sweep in this change.
 
 <a id="scumm"></a>
 
@@ -916,8 +976,7 @@ SCUMM V5-V8 supports per-room object sprites and actor costumes (`COST` for V5/V
 
 Music includes MIDI tracks from sound resources and digital iMUSE audio, including
 `.BUN` music bundles for The Dig and The Curse of Monkey Island. Sound effects and
-speech are also available when present in the game data. SCUMM V2 support remains
-limited to backgrounds.
+speech are also available when present in the game data. See [SCUMM V2](#scummv2) for its separate background, object, mask and data coverage.
 
 <a id="comet"></a>
 
