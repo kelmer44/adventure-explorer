@@ -19,7 +19,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 
 ## Supported Engines
 
-63 game engines are currently supported via Lua scripts — no recompilation needed.
+64 game engines are currently supported via Lua scripts — no recompilation needed.
 
 | Engine | Year | ID | Resources | Status |
 |--------|------|----|-----------|--------|
@@ -43,6 +43,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Discworld 1 & 2](engine-details.md#tinsel) | 1995/96 | `tinsel` | Backgrounds, Sprites, Animations | ✅ Working |
 | [Discworld Noir](engine-details.md#noir) | 1999 | `noir` | RGB565 Backgrounds/Screens, Sprites/Overlays, Music, Speech/Sound, Text, Scene Data | ✅ Working* |
 | [Drascula: The Vampire Strikes Back](engine-details.md#drascula) | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
+| [DreamWeb](engine-details.md#dreamweb) | 1994 | `dreamweb` | Tiled Backgrounds, Sprites/UI, Fonts, Object Animations, PCX Titles, Palettes, PCM Sound/Music, CD Speech, Text, Data | ✅ Working* |
 | [El Sulfato Atomico](engine-details.md#sulfato) | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
 | [El Tesoro de la Isla Alcachofa](engine-details.md#tesoro) | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
 | [Fascination](engine-details.md#gob) | 1991 | `gob` | Backgrounds, Sprites, Palettes, AdLib Music, IMD Animation Clips | ✅ Working* |
@@ -310,9 +311,10 @@ adventure-explorer/
 ├── build.gradle.kts              # Compose Desktop build
 ├── settings.gradle.kts           # Gradle settings
 ├── scripts/
-│   └── engines/                  # 63 engine scripts (Lua)
+│   └── engines/                  # 64 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── anotherworld/engine.lua # Another World (original DOS)
+│       ├── dreamweb/engine.lua    # DreamWeb (installed DOS floppy/CD data)
 │       ├── asylum/engine.lua      # Sanitarium (Windows demo and retail CD 1)
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
@@ -395,6 +397,7 @@ adventure-explorer/
 - [x] Support for Capstone games (Genus GXL and Manley/Synergistic resource formats; driver audio remains metadata)
 - [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
+- [x] Support for DreamWeb (full English UK CD resources)
 - [x] Support for Sanitarium (Windows demo and retail CD 1 resources)
 - [x] Support for Microprose adventures
 - [x] Support for Tsunami games

@@ -4243,3 +4243,87 @@ text and mask exports. The asset-free Lua/LuaJ tests also cover disc-root discov
 nested-music duplicate precedence and demo-versus-retail title-header offsets.
 CD 2/3 and digital releases still require their own data validation; CD 1 coverage
 must not be described as validation of the complete three-disc game.
+
+
+# DreamWeb extraction (2026-10-20)
+
+Implemented `dreamweb` using installed DOS data and the local ScummVM engine.
+The official freeware English UK CD ZIP matches published SHA-256
+`4a6f13911ce67d62c526e41048ec067b279f1b378c9210f39e0ce8d3f2b80142`.
+Its 588 files / 271152260 bytes are installed and hash-verified under
+`/Users/gabriel/Desktop/ags/Dreamweb`.
+
+## Resource structure
+
+`DREAMWEB.*`, Spanish `DREAMWSP.*` and French `DREAMWFR.*` have the same resource
+families. Most begin with a 96-byte header: 50-byte description, twenty u16le
+lengths and six padding bytes. Room files use the first fifteen lengths as
+consecutive sections; graphics and standalone text use only length zero, because
+other header length slots can contain stale room-editor data. Header description
+begins `DREAMWEB DATA`. All ranges are bounded against the actual file size.
+
+Room sections: 0 backdrop flags (192 bytes) then 16x16 raw tiles; 1 map; 2 set
+frames; 3 64-byte SetObject records; 4/5/6 reel graphics; 7 paths/reel commands;
+8 24-byte person-frame header followed by person text; 9 set-object text;
+10 block text; 11 room text; 12 free-object frames; 13 16-byte free-object records;
+14 free-object text. Several backdrop sections have 64 unused trailing bytes:
+only complete 256-byte tiles are used, without rejecting their background maps.
+
+Graphics banks have a fixed 2080-byte frame directory. Each six-byte record is
+u8 width, u8 height, u16le pixel offset relative to the end of that directory,
+u8 x, u8 y. Pixels are raw row-major palette indices; zero is transparent for
+sprites. Enumerate 346 whole directory records for standalone/set banks, 240
+for 80 free objects times three frames, and 160 per reel bank (`findSource`
+selects bank 1 below160, bank2 below320, bank3 thereafter). Reject nonempty
+frames extending beyond their section; unused directory slots may contain junk.
+
+The map has 132-byte source rows, of which the first 66 bytes are tile indices;
+`sortOutMap` retains 66x60. It contains a 6x6 grid of 11x10 tile viewports. Export
+nonempty valid viewports as 176x160 backgrounds, and the tiles as a 16-column
+atlas. Tile zero denotes blank map space. Runtime shadows, static objects and
+actors are not composited into these tile-only backgrounds.
+
+The `PAL` file is an IFF ILBM; parse its CMAP chunk (256 RGB triples). Runtime
+quantizes each component to six bits then shifts left two: floor(value/4)*4.
+PCX `I00..I06` are 640x480 one-bit/four-plane title screens with a 16-color
+header palette. The decoder handles per-scanline RLE, MSB-first planes, padding,
+and also the eight-bit/single-plane PCX variant with trailing palette. Extraction preserves
+original PCX dimensions and palette values; gameplay fades additionally quantize
+these colors through the VGA DAC.
+
+Text sections begin with u16le offsets relative to the text body, after their
+fixed offset table. Standalone text has 66 slots; people1026, set130, block98,
+room38 and free82. Preserve slot IDs, skip empty/out-of-bounds strings, decode
+DOS850 as used by ScummVM for Western languages, and display control bytes as
+hex escapes. Russian DOS866 and Czech Windows1250 remain unsupported.
+
+V sound banks use length zero as their six-byte sample table size. Entry is
+u8 page, u16le within-page offset, u16le length in 2048-byte blocks and one unused
+byte. PCM starts after the header/table, at page*16384+offset. Both bank samples
+and individual CD `RxxCxxxx.RAW` / `TxxTxxxx.RAW` speech are unsigned 8-bit mono
+22050 Hz PCM. No WAV header is present in these clips. `P01/P02/WAV` legacy
+aggregate files are not treated as headerless sound clips.
+
+SetObject type1 is a verified constant sequence: its forty frame indices begin
+at record+18 and terminate at255; repeat indices preserve holds. Use frame
+origins on a shared transparent canvas. The delay is (object.delay+1) normal
+sprite updates, each four 70 Hz retraces, rounded to integer milliseconds.
+Only these twelve constant objects become animation previews. Door/lift/random
+behavior, actor locomotion and scripted reel control flow are not guessed.
+
+## Verification
+
+Full UK CD catalog: 11,777 leaves = 140 backgrounds +34 tile atlases +6484
+sprite/UI/font/reel frames +7 PCX screens +12 animations +8 palettes +120 bank
+samples +469 speech clips +4469 text entries +34 structure reports. Every leaf
+loaded successfully through LuaJ with handles released after each resource.
+An independent JVM reconstruction checked all 28,160 pixels of a room screen;
+bank sample and speech bytes match their original files. Pillow independently
+matches all seven PCX title images. Representative PNG/alpha, WAV, animation,
+DOS850 text and RGB palette exports were also read back and verified.
+
+Synthetic regressions run under native Lua and LuaJ, including truncated or
+out-of-range frame/PCX/palette/text/sound records. Commands:
+`lua scripts/tests/dreamweb.lua` and `DREAMWEB_TEST_PATH=... ./gradlew --offline
+test --tests '*Dreamweb*'`. Installed floppy/CD alternate releases remain
+unverified, and packed RNCA installer volumes are not supported.

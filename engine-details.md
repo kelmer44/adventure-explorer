@@ -33,6 +33,7 @@ coverage and known limitations are described where available. See also
 | [Discworld 1 & 2](#tinsel) | `tinsel` |
 | [Discworld Noir](#noir) | `noir` |
 | [Drascula: The Vampire Strikes Back](#drascula) | `drascula` |
+| [DreamWeb](#dreamweb) | `dreamweb` |
 | [El Sulfato Atomico](#sulfato) | `sulfato` |
 | [El Tesoro de la Isla Alcachofa](#tesoro) | `tesoro` |
 | [Fable](#fable) | `fable` |
@@ -406,6 +407,37 @@ copying or installation step is required.
 Open the unpacked game data folder containing numbered `.ALD` room descriptions and
 `.ALG` pictures, including `14.ALD`. The detector checks several room files and a valid
 picture; packed distribution archives must be unpacked first.
+
+<a id="dreamweb"></a>
+
+## DreamWeb
+
+**Engine ID:** `dreamweb`
+
+Open the installed game directory containing `DREAMWEB.R00` and `DREAMWEB.PAL`,
+with the other `DREAMWEB.*` files alongside them. Spanish `DREAMWSP.*` and French
+`DREAMWFR.*` names are recognized too. Keep CD speech in `SPEECH/`, `SPANISH/` or
+`FRENCH/`. The verified full English UK freeware CD is installed at
+`/Users/gabriel/Desktop/ags/Dreamweb`.
+
+The full UK CD exposes **11,777 resources**: 140 tiled background screens, 34 tile
+atlases, 6,484 sprite/UI/font/reel frames, seven original 640x480 PCX title screens,
+12 constant-object animation previews, eight palettes, 120 sound/music samples,
+469 speech clips, 4,469 text entries and 34 room-structure reports. Every resource
+was decoded through the app's LuaJ host; representative PNG, WAV, animation, text
+and palette exports were verified. Text uses DOS850. Sprites retain transparent
+index zero; animations retain frame offsets, repeated frames and nominal game timing.
+
+Backgrounds reconstruct the 11x10 tile viewport at 176x160. Objects, actors and
+runtime shadows remain separate. Frames from all three reel banks are available,
+but scripted cutscenes, doors, lifts, random-object behavior and actor walking are
+not played as animations. The game VGA palette is used for graphics; PCX screens
+use their own palettes, and manual palette selection is supported.
+
+The full UK CD is verified. Other installed floppy/CD languages use the same
+parsers but have not been validated; Russian/Czech text encodings are not handled.
+Packed multi-disk `DREAMW_*.RNC` installers, original DOS executable playback,
+legacy `P01/P02/WAV` aggregate data and PDF manuals are not extracted.
 
 <a id="sulfato"></a>
 

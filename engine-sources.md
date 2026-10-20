@@ -1,5 +1,32 @@
 ## Sources for engines
 
+### DreamWeb
+
+Implemented in `scripts/engines/dreamweb/engine.lua`. Local ScummVM references:
+`engines/dreamweb/structs.h` (96-byte header, Frame/SetObject/TextFile layouts),
+`stubs.cpp` (`loadRoomData`, `sortOutMap`, `loadGraphicsFile`, `loadTextFile`,
+`screenUpdate`), `sprite.cpp` (`findSource`, `constant`, `backObject`),
+`vgagrafx.cpp` (`loadPalFromIFF`, `showPCX`, `showFrame`), `backdrop.cpp`
+(`doBlocks`) and `sound.cpp` (`loadSounds`, `loadSpeech`, `playSound`).
+
+Full English UK CD freeware downloaded from ScummVM's official games page:
+https://downloads.scummvm.org/frs/extras/Dreamweb/dreamweb-cd-uk-1.1.zip
+SHA-256: `4a6f13911ce67d62c526e41048ec067b279f1b378c9210f39e0ce8d3f2b80142`.
+Installed at `/Users/gabriel/Desktop/ags/Dreamweb`: 588 files / 271152260 bytes;
+every installed file hash was compared with its ZIP member. No DOS executable ran.
+
+Coverage: 11,777 catalog leaves (6,665 images, 12 animations, 8 palettes, 589
+sounds and 4,503 text/report entries). Independent JVM map reconstruction agrees
+pixel-for-pixel; sound-bank and speech PCM agree byte-for-byte. All leaves load
+in LuaJ, with actual PNG/alpha, WAV, animation, DOS850 text and palette exports.
+Seven title PCXs additionally match Pillow's independent decoding.
+
+`lua scripts/tests/dreamweb.lua` exercises bounds, frame origin alignment, planar
+PCX/RLE, VGA palette quantization, tiled maps, DOS850 strings and paged sound
+offsets. `DREAMWEB_TEST_PATH=... ./gradlew --offline test --tests '*Dreamweb*'`
+validates the full UK CD and exports. Packed RNCA installers, alternative language
+releases and legacy aggregate speech files remain outside verified coverage.
+
 ### SCUMM
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/scumm folder
