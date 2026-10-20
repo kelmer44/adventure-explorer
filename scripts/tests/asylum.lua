@@ -86,6 +86,27 @@ archive = dw(count) .. table.concat(offsets)
 
 claimed_size = claimed_size - 1; assert(not directory('RES.104'))
 claimed_size = nil
+-- Disc roots and nested music are accepted; installed root tracks take precedence.
+local roots = up(index, 'data_root')
+local indexed_files = up(index, 'index_files')
+function file_exists(path) return path=='disc/Data/RES.000' or path=='disc/Data/SNTRM.DAT' end
+function list_files(path)
+    if path=='disc' then return {'SETUP.EXE','Data'} end
+    if path=='installed' then return {'RES.000','MUS.005','Music'} end
+    if path=='installed/Music' then return {'MUS.005','MUS.006','ignored.txt'} end
+    return {}
+end
+assert(roots('disc')=='disc/Data')
+assert(not roots('unrelated'))
+local discovered = indexed_files('installed')
+assert(#discovered==4 and table.concat(discovered,','):find('Music/MUS.006',1,true))
+assert(not table.concat(discovered,','):find('Music/MUS.005',1,true))
+local function at(s,offset,value) return s:sub(1,offset)..dw(value)..s:sub(offset+5) end
+local extended = scn .. string.rep('\0',722-#scn)
+extended=at(at(extended,6+0x2C0,0x800500CC),6+0x2C4,0x800500CD)
+assert(scene(extended,false).title==0x800500CC and scene(extended,false).title_palette==0x800500CD)
+extended=at(at(extended,6+0x2C4,0x800500C4),6+0x2C8,0x800500C5)
+assert(scene(extended,true).title==0x800500C4 and scene(extended,true).title_palette==0x800500C5)
 print('Sanitarium archive, palette, frame, animation alignment, mask, scene and text regressions passed')
 if not arg or not arg[1] then return end
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end

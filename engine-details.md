@@ -885,11 +885,18 @@ folder in place** so those links continue to work. Bink cutscenes are not previe
 **Engine ID:** `asylum`
 
 Open the Windows game data folder containing `SNTRM.DAT` (or `ASYLUM.DAT`) and
-`RES.000`, with the remaining `RES.xxx`, `SCN.xxx` and `MUS.xxx` files alongside
-them. Keep `Vids/` for cutscene metadata. No installation executable is needed.
-The official Windows demo is verified; retail CD/GOG/Steam resource layouts and
-ScummVM's known combined-speech size corrections are implemented from the reference
-code but have not had a full-game data sweep.
+`RES.000`, or select the CD root containing its `Data/` folder. Keep the remaining
+`RES.xxx` and `SCN.xxx` files alongside them. Music archives may be in the root
+or `Music/`; keep `Vids/` for cutscene metadata. No installer is needed.
+
+The official Windows demo and the mounted English retail CD 1 are verified.
+CD 1's 31 data files were copied and SHA-256 checked into
+`~/Desktop/ags/Sanitarium`; the demo is preserved in `~/Desktop/ags/Sanitarium-demo`.
+CD 1 exposes 14,320 graphics frames, 29 masks, 666 animation previews, 27 palettes,
+1,723 audio clips (including 11 music tracks and 972 shared speech clips), 3,911
+text strings and 130 data reports. This covers three scene backgrounds and their
+chapter-title screens. CD 2/3 assets and GOG/Steam installations remain unverified;
+known combined-speech size repairs are included from ScummVM's reference code.
 
 The tested demo exposes 2,051 graphics frames (one background, 1,615 sprite/UI
 frames, and 435 font glyphs), seven full-size black/white masks, 89 animation
@@ -897,11 +904,12 @@ previews, three palettes, and 171 WAV audio clips including music. There are als
 158 dialogue/text entries and 15 archive, scene, lookup-table and cutscene reports.
 Frames export as PNGs, audio as WAVs, text as UTF-8, and palettes as PNG/RGB tables.
 
-Scene backgrounds and fonts use the palette referenced by their scene. Other
-frames default to the preceding palette in their archive, or an available scene/
-archive palette when none precedes them. These defaults are inferred for assets
-whose palette changes through gameplay scripts; select another palette manually
-when needed. Backgrounds are opaque; other frames preserve index-0 transparency.
+Scene sprites, backgrounds and fonts keep their scene palette even when alternate
+palettes appear before them in the archive. Chapter-title screens use their own
+scene title palette; retail menu/credits fonts use their explicit palette bindings.
+Other resources infer an archive palette when no binding exists. Select another
+palette for assets whose colours change through scripts. Background/title/known
+menu screens are opaque; other frames preserve index-0 transparency.
 Empty glyphs are omitted, while empty animation frames retain their timing.
 
 Animation previews align each frame using its signed origin on a stable canvas.

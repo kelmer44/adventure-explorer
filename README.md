@@ -313,7 +313,7 @@ adventure-explorer/
 │   └── engines/                  # 63 engine scripts (Lua)
 │       ├── agos/engine.lua       # Simon the Sorcerer 1 & 2
 │       ├── anotherworld/engine.lua # Another World (original DOS)
-│       ├── asylum/engine.lua      # Sanitarium (Windows; demo verified)
+│       ├── asylum/engine.lua      # Sanitarium (Windows demo and retail CD 1)
 │       ├── amazon/engine.lua      # Amazon: Guardians of Eden
 │       ├── aitd/engine.lua       # Alone in the Dark series
 │       ├── cine/engine.lua       # Future Wars / Operation Stealth
@@ -395,7 +395,7 @@ adventure-explorer/
 - [x] Support for Capstone games (Genus GXL and Manley/Synergistic resource formats; driver audio remains metadata)
 - [x] Support for Curse of Enchantia & Universe
 - [ ] Support for The Neverhood
-- [x] Support for Sanitarium (Windows resource formats; official demo verified)
+- [x] Support for Sanitarium (Windows demo and retail CD 1 resources)
 - [x] Support for Microprose adventures
 - [x] Support for Tsunami games
 - [x] Support for Noctropolis

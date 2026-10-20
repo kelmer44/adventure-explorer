@@ -134,12 +134,16 @@ local function text_data(data)
     if not body:find("%S") then return nil end
     return (body:gsub("[\128-\255]", function(c) return CP1252[c:byte() - 127] end))
 end
-local function scene_header(data)
+local function scene_header(data, demo)
     if #data < 6 + 0xA0 or data:sub(1, 6) ~= "DFISCN" then return nil end
-    return { chapter = u32(data, 15), background = u32(data, 43), palette = u32(data, 111),
+    local scene = { chapter = u32(data, 15), background = u32(data, 43), palette = u32(data, 111),
         fonts = {u32(data, 99), u32(data, 103), u32(data, 107)},
         width = u32(data, 143), height = u32(data, 147),
         objects = u32(data, 163), actions = u32(data, 159) }
+    -- WorldStats::load has eight coordinate words in the demo, seven in retail.
+    local title = 6 + 0x2C0 + (demo and 4 or 0)
+    if #data >= title + 8 then scene.title, scene.title_palette = u32(data, title + 1), u32(data, title + 5) end
+    return scene
 end
 local function resource_key(pack, index) return pack .. ":" .. index end
 local function from_resource_id(id)
@@ -186,17 +190,22 @@ local function build_index(game_path)
     if cache and cache.path == game_path then return cache end
     local requested_path = game_path
     game_path = data_root(game_path) or game_path
-    local idx = { path = requested_path, packs = {}, entries = {}, scenes = {}, palettes = {}, backgrounds = {}, fonts = {}, videos = {} }
+    local marker = file_open(game_path .. "/SNTRM.DAT") or file_open(game_path .. "/ASYLUM.DAT")
+    local demo = marker and file_size(marker) == 326
+    if marker then file_close(marker) end
+    local idx = { path = requested_path, packs = {}, entries = {}, scenes = {}, palettes = {}, backgrounds = {}, fonts = {}, videos = {}, titles = {}, fixed_palettes = {} }
     for _, name in ipairs(index_files(game_path)) do
         local upper = name:match("[^/]+$"):upper()
         if upper:match("^SCN%.%d%d%d$") then
-            local data = read_slice(game_path .. "/" .. name, 0, 166)
-            local scene = data and scene_header(data)
+            local data = read_slice(game_path .. "/" .. name, 0, 722)
+            local scene = data and scene_header(data, demo)
             if scene then
                 scene.name, scene.file = upper, name
                 scene.background_key, scene.palette_key = from_resource_id(scene.background), from_resource_id(scene.palette)
                 idx.scenes[#idx.scenes + 1] = scene
                 if scene.background_key then idx.backgrounds[scene.background_key] = scene end
+                local title_key = from_resource_id(scene.title)
+                if title_key then idx.titles[title_key] = from_resource_id(scene.title_palette) end
                 for _, font in ipairs(scene.fonts) do
                     local key = from_resource_id(font)
                     if key then idx.fonts[key] = scene end
@@ -258,16 +267,34 @@ local function build_index(game_path)
             idx.videos[#idx.videos + 1] = { name = name, path = game_path .. "/" .. name }
         end
     end
+    -- References: menu.h/menu.cpp, scenetitle.cpp, video.cpp and insertdisc.cpp.
+    local shared_fonts = { [16]=17, [22]=17, [25]=26, [32]=31, [57]=false }
+    for number, palette in pairs(shared_fonts) do
+        local key = resource_key("RES.001", number)
+        if idx.entries[key] and idx.entries[key].kind == "graphic" then
+            idx.fonts[key] = { palette_key = palette and resource_key("RES.001", palette) or nil }
+        end
+    end
+    for _, number in ipairs({18, 19}) do
+        local key = resource_key("RES.018", number)
+        if idx.entries[key] and idx.entries[key].kind == "graphic" then idx.fonts[key] = { palette_key = "RES.018:11" } end
+    end
+    idx.fixed_palettes["RES.001:23"], idx.fixed_palettes["RES.001:33"] = "RES.001:26", "RES.001:31"
+    for disc = 1, 3 do
+        idx.fixed_palettes[resource_key("RES.018", 7 + disc)] = resource_key("RES.018", 10 + disc)
+        idx.fixed_palettes[resource_key("RES.018", 13 + disc)] = resource_key("RES.018", 10 + disc)
+    end
     for _, pack in ipairs(idx.packs) do
         local scene
         for _, s in ipairs(idx.scenes) do if s.name:sub(5) == pack.name:sub(5) then scene = s; break end end
         for _, e in ipairs(pack.entries) do
             if e.kind == "graphic" then
                 local context = idx.backgrounds[e.key] or idx.fonts[e.key] or scene
-                local pal = context and idx.entries[context.palette_key]
-                -- Scene background/font bindings are authoritative. Other images
-                -- can use palettes swapped by scripts; offer a same-pack fallback.
-                if not (idx.backgrounds[e.key] or idx.fonts[e.key]) then
+                local palette_key = idx.titles[e.key] or idx.fixed_palettes[e.key] or (context and context.palette_key)
+                local pal = palette_key and idx.entries[palette_key]
+                -- Alternate palettes can precede room sprites in retail packs.
+                -- Keep scene bindings first; infer archive order only without one.
+                if not pal or pal.kind ~= "palette" then
                     for _, p in ipairs(pack.palettes) do if p.index <= e.index then pal = p end end
                 end
                 if not pal or pal.kind ~= "palette" then pal = pack.palettes[1] or idx.palettes[1] end
@@ -405,7 +432,9 @@ function engine.load_resource(game_path, resource_id, palette_id)
             if palette_id then pk = palette_id:match("^pal:(RES%.%d%d%d:%d+)$") end
             local palette = pk and idx.entries[pk]
             if not palette or palette.kind ~= "palette" then return error_result("Missing or invalid palette for " .. e.key) end
-            local pal, opaque = palette.palette, idx.backgrounds[e.key] ~= nil
+            local pal, opaque = palette.palette, idx.backgrounds[e.key] ~= nil or idx.titles[e.key] ~= nil
+                or e.key == "RES.001:23" or e.key == "RES.001:33"
+                or e.key:match("^RES%.018:[89]$") ~= nil or e.key == "RES.018:10"
             if kind == "frame" then
                 local frame = e.frames[tonumber(frame_index) + 1]
                 if not frame or frame.width == 0 or frame.height == 0 then return error_result("Absent/empty frame: " .. resource_id) end

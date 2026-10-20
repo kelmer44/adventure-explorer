@@ -53,9 +53,10 @@ Local reference: `scummvm-fork/engines/asylum/`:
 - `system/sound.cpp` and `system/text.cpp`: RIFF/WAVE audio and NUL-terminated text;
   retain dialogue control markup and convert Western Windows text from CP1252.
 
-Verified data: official Windows demo, downloaded from
+Verified demo data: official Windows demo, downloaded from
 https://www.scummvm.org/frs/demos/asylum/asylum-demo.zip and installed at
-`/Users/gabriel/Desktop/ags/Sanitarium`. The 5 RES packs contain 2,051 nonempty
+`/Users/gabriel/Desktop/ags/Sanitarium-demo` (moved aside when retail CD 1 was copied).
+The 5 RES packs contain 2,051 nonempty
 frames, 89 non-font animation banks, 7 masks, 3 palettes, 171 WAV clips, 158 text
 strings, and 5 unknown lookup/script resources exposed as bounded hex reports.
 There are also 5 archive directories, 1 scene-header report and 4 video reports.
@@ -65,8 +66,20 @@ and an optional full sweep. `AsylumDecoderTest` repeats synthetic cases in LuaJ;
 `SANITARIUM_TEST_PATH=... ./gradlew --offline test --tests '*AsylumIntegrationTest'`
 checks every demo leaf and PNG/WAV/animation/text/palette export. Background RGB
 was also byte-identical to an independent Python/Pillow decode.
-Retail, script-driven palette changes/composition, and Smacker decoding are not
-verified by this demo; do not infer complete retail compatibility from these counts.
+Retail CD 1 validation: `/Volumes/SANITARIUM1/Data`, copied with SHA-256 checks
+(31 files / 501310805 bytes) into `/Users/gabriel/Desktop/ags/Sanitarium`.
+The loader accepts the CD root/Data folder and nested Music/MUS.xxx tracks.
+An independent archive inventory confirms 14,320 nonempty graphics frames,
+29 masks, 1,723 WAV clips, 27 palettes, 3,911 strings and 130 reports. Seven
+shared/menu fonts are separated from animation banks, leaving 666 previews.
+`views/menu.cpp/menu.h`, `scenetitle.cpp`, `insertdisc.cpp` and `video.cpp` provide
+menu-font/title/screen bindings. WorldStats title/palette fields serialize at
++0x2C0/+0x2C4 in retail, +4 bytes in the demo. Scene palettes take priority over
+archive-order inference; alternate palettes must not recolour subsequent sprites.
+`SANITARIUM_RETAIL_TEST_PATH=... ./gradlew --offline test --tests '*AsylumIntegrationTest.retail*'`
+checks the complete CD 1 catalog and representative exports. CD 2/3, digital
+release quirks, script-driven effects/composition and Smacker decoding remain
+outside this verified CD 1 coverage.
 
 ### SCI
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)

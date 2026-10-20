@@ -49,7 +49,7 @@ class AsylumIntegrationTest {
                         if (node.id == "frame:RES.005:0:0") {
                             assertEquals(1095, image.width); assertEquals(897, image.height)
                             assertFalse(image.colorModel.hasAlpha())
-                        } else if (node.id.startsWith("frame:")) assertTrue(node.id, image.colorModel.hasAlpha())
+                        } else if (node.id == "frame:RES.005:24:0") assertTrue(node.id, image.colorModel.hasAlpha())
                         if (node.id in setOf("frame:RES.005:0:0", "frame:RES.005:24:0", "frame:RES.005:13:33", "mask:RES.005:39", "pal:RES.005:20")) {
                             ImageIO.write(image, "png", File(previews, node.id.replace(':', '_') + ".png"))
                         }
@@ -103,4 +103,73 @@ class AsylumIntegrationTest {
             println("Sanitarium demo: all ${all.size} leaves decoded; PNG/alpha, WAV, animation, text and palette export verified")
         } finally { mgr.close() }
     }
+    @Test fun `retail Sanitarium CD1 resources including nested music decode and export`() = runBlocking {
+        val path = System.getenv("SANITARIUM_RETAIL_TEST_PATH")
+        assumeTrue("Set SANITARIUM_RETAIL_TEST_PATH to CD1 or its copied Data folder", path != null)
+        val input = File(path!!)
+        val root = if (File(input, "RES.000").exists()) input else input.listFiles()!!.first { it.name.equals("Data", true) }
+        assumeTrue("These coverage counts are for retail CD1", File(root, "SNTRM.DAT").length() == 8930L)
+        val mgr = ScriptManager()
+        try {
+            val game = mgr.detectGame(path)!!
+            assertEquals("asylum", game.engineId)
+            fun leaves(nodes: List<ResourceNode>): List<ResourceNode> = nodes.flatMap {
+                if (it.isCategory) leaves(it.children) else listOf(it)
+            }
+            val all = leaves(game.resources)
+            assertEquals(all.size, all.map { it.id }.toSet().size)
+            assertEquals(14349, all.count { it.type == "image" })
+            assertEquals(666, all.count { it.type == "animation" })
+            assertEquals(1723, all.count { it.type == "sound" })
+            assertEquals(27, all.count { it.type == "palette" })
+            assertEquals(4041, all.count { it.type == "text" })
+            assertEquals(11, all.count { it.id.startsWith("sound:MUS.") })
+            assertEquals(972, all.count { it.id.startsWith("sound:RES.104:") })
+            val backgrounds = leaves(game.resources.first { it.id == "backgrounds" }.children)
+            assertEquals(3, backgrounds.size)
+            assertEquals("pal:RES.005:20", mgr.defaultPaletteFor(path, "frame:RES.005:29:0"))
+            assertEquals("pal:RES.006:20", mgr.defaultPaletteFor(path, "frame:RES.006:37:0"))
+            assertEquals("pal:RES.005:205", mgr.defaultPaletteFor(path, "frame:RES.005:204:0"))
+            assertFalse(all.any { it.id == "anim:RES.001:25" || it.id == "anim:RES.018:18" })
+            val previews = File("build/sanitarium-research/retail-previews").apply { mkdirs() }
+            var checked = 0
+            for (node in all) {
+                val r = mgr.loadResource(path, node.id) ?: error(node.id)
+                when (node.type) {
+                    "image", "palette" -> {
+                        val image = r.image ?: error("${node.id}: ${r.textContent}")
+                        if (node in backgrounds || node.id in setOf("frame:RES.005:204:0", "frame:RES.006:677:0", "frame:RES.007:400:0")) {
+                            assertFalse(node.id, image.colorModel.hasAlpha())
+                            ImageIO.write(image, "png", File(previews, node.id.replace(':', '_') + ".png"))
+                        }
+                        if (node.id == "frame:RES.005:29:0") {
+                            assertTrue(image.colorModel.hasAlpha())
+                            ImageIO.write(image, "png", File(previews, "tower-sprite.png"))
+                        }
+                    }
+                    "animation" -> {
+                        val frames = r.frames ?: error("${node.id}: ${r.textContent}")
+                        assertTrue(node.id, frames.size > 1)
+                        assertTrue(node.id, frames.all { it.width == frames[0].width && it.height == frames[0].height })
+                    }
+                    "sound" -> assertTrue("${node.id}: ${r.textContent}", r.soundData?.samples?.isNotEmpty() == true)
+                    "text" -> assertFalse(node.id, r.textContent.isNullOrEmpty())
+                }
+                mgr.releaseDecodedResources()
+                checked++
+                if (checked % 1000 == 0) println("Retail CD1: $checked/${all.size} leaves verified")
+            }
+            val chosen = backgrounds + all.first { it.id.startsWith("sound:MUS.") } +
+                all.first { it.id.startsWith("sound:RES.104:") } + all.first { it.id == "pal:RES.005:20" } +
+                all.first { it.id.startsWith("text:") } + all.first { it.id.startsWith("mask:") } +
+                all.first { it.id == "frame:RES.005:204:0" }
+            val selected = chosen.map { it.copy(name = it.id.replace(':', '_')) }
+            val exported = ResourceExporter({ mgr.loadResource(path, it.id) }, mgr::releaseDecodedResources)
+                .export(selected, temporary.newFolder("retail-export"))
+            assertEquals(9, exported.exported)
+            assertTrue(exported.failures.toString(), exported.failures.isEmpty())
+            println("Sanitarium retail CD1: all ${all.size} leaves verified, including 11 music tracks and 972 shared speech clips; representative exports passed")
+        } finally { mgr.close() }
+    }
+
 }

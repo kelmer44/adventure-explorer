@@ -4204,3 +4204,42 @@ Retail formats follow ScummVM's source layouts but have not been tested with
 retail CD/GOG/Steam assets. In particular, multi-disc/shared-audio archive quirks,
 localized encodings beyond Western CP1252, and script-driven visual state are not
 established by this demo sweep. Opening a folder does not claim game execution.
+
+
+## Sanitarium retail CD 1 follow-up
+
+The user mounted retail CD 1 at `/Volumes/SANITARIUM1`. Loose files in `Data/`
+include RES.000/001/003/005/006/007/018/104, SCN.005/006/007, SNTRM.DAT,
+Music/MUS.005/006/007, Vids/ movies and vids.cap. No installer is needed. The 31
+files (501310805 bytes) were copied and SHA-256 verified into
+`/Users/gabriel/Desktop/ags/Sanitarium`. The previous official demo was preserved
+at `/Users/gabriel/Desktop/ags/Sanitarium-demo` before replacing the root folder.
+
+The loader now accepts either the Data folder or a disc root containing Data/,
+and discovers Music/MUS.xxx without flattening the copied disc layout. Root music
+archives win over nested duplicates. A separate mmap/struct inventory validates
+all resource and frame ranges. CD 1 contains 14,320 nonempty raw graphics frames,
+29 LSB-first masks, 27 palettes, 1,723 WAV clips (11 in nested music packs, 972 in
+the sparse RES.104 speech pack), 3,911 text strings and 130 metadata reports.
+
+Retail exposed a palette-default bug in the initial implementation: alternate
+palettes at RES.005 indices 24-28 occur before ordinary sprites, which must keep
+the scene's palette 20. Scene bindings now take precedence over archive order.
+Chapter titles have explicit graphics/palette fields in WorldStats, serializing
+at WS +0x2C0/+0x2C4 in retail and +4 bytes in the demo. Examples: RES.005 204/205,
+RES.006 677/678, RES.007 400/401. The title images remain opaque and use those
+palettes, rather than the room palette.
+
+Source references in menu.cpp/menu.h, scenetitle.cpp, insertdisc.cpp and video.cpp
+identify seven shared/menu font banks. They are grouped as glyphs rather than
+animation previews. Retail menu/credit and insert-disc screens have explicit
+palette bindings; subtitle and other dynamic assets may still need manual palette
+selection. The resulting CD 1 tree has 20,806 leaves, including 666 animation
+previews, 2,818 font glyphs, 11,499 sprite/UI frames and three room backgrounds.
+
+AsylumIntegrationTest has separate demo and retail CD1 modes. The retail test
+checks every leaf and representative background, title, music, speech, palette,
+text and mask exports. The asset-free Lua/LuaJ tests also cover disc-root discovery,
+nested-music duplicate precedence and demo-versus-retail title-header offsets.
+CD 2/3 and digital releases still require their own data validation; CD 1 coverage
+must not be described as validation of the complete three-disc game.
