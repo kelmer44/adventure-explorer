@@ -353,6 +353,8 @@ local function parse_room(data, room_offset, data_size)
             result.width       = u32le(data, rmhd.data_start + 4)
             result.height      = u32le(data, rmhd.data_start + 8)
             result.num_objects = u32le(data, rmhd.data_start + 12)
+            -- V8 keeps the transparent colour in RMHD (after numZBuffers)
+            result.transparent_color = u32le(data, rmhd.data_start + 20) % 256
         elseif version >= 700 and version < 1000 then
             result.version     = version
             result.width       = u16le(data, rmhd.data_start + 4)
@@ -513,11 +515,10 @@ local function parse_room(data, room_offset, data_size)
                     -- V5/V6 ("old") IMHD: u16 objId, u16 imageCount,
                     -- u16 unk, u8 flags, u8 unk1, u16 unk2[2],
                     -- u16 width, u16 height, u16 hotspotCount, i16 hotspot[15][2]
+                    -- The position lives in the object's OBCD/CDHD (see below).
                     obj = {
                         obj_id = u16le(data, imhd.data_start),
                         states = u16le(data, imhd.data_start + 2),
-                        x      = u16le(data, imhd.data_start + 4),
-                        y      = u16le(data, imhd.data_start + 6),
                         width  = u16le(data, imhd.data_start + 12),
                         height = u16le(data, imhd.data_start + 14),
                         images = {}
@@ -552,6 +553,45 @@ local function parse_room(data, room_offset, data_size)
             if obj and #obj.images > 0 then
                 result.objects[#result.objects + 1] = obj
             end
+        end
+    end
+
+    -- OBCD blocks: CDHD code header (V5/V6 position) and OBNA object name.
+    --   V5 CDHD (13 bytes): u16 objId, u8 x, y, w, h in 8-pixel units, ...
+    --   V6 CDHD (17 bytes): u16 objId, i16 x, y, u16 w, h in pixels, ...
+    --   V7/V8 CDHD: u32 version, u16 objId, ... (position is in IMHD)
+    local codes = {}
+    for _, obcd in ipairs(room_blocks) do
+        if obcd.tag == "OBCD" then
+            local inner = scan_blocks(data, obcd.data_start, obcd.offset + obcd.size - 1)
+            local cdhd = find_block(inner, "CDHD")
+            local obna = find_block(inner, "OBNA")
+            local code = {}
+            local n = cdhd and (cdhd.size - 8) or 0
+            if n == 13 then
+                code.obj_id = u16le(data, cdhd.data_start)
+                code.x = u8(data, cdhd.data_start + 2) * 8
+                code.y = u8(data, cdhd.data_start + 3) * 8
+            elseif n == 17 then
+                local function s16(pos) local v = u16le(data, pos); return v >= 0x8000 and v - 0x10000 or v end
+                code.obj_id = u16le(data, cdhd.data_start)
+                code.x = s16(cdhd.data_start + 2)
+                code.y = s16(cdhd.data_start + 4)
+            elseif n >= 6 then
+                code.obj_id = u16le(data, cdhd.data_start + 4)
+            end
+            if obna and code.obj_id then
+                code.name = data:sub(obna.data_start, obna.offset + obna.size - 1)
+                    :gsub("%z.*", ""):gsub("[^\32-\126]", ""):gsub("@+$", "")
+            end
+            if code.obj_id then codes[code.obj_id] = code end
+        end
+    end
+    for _, obj in ipairs(result.objects) do
+        local code = codes[obj.obj_id]
+        if code then
+            if obj.x == nil then obj.x, obj.y = code.x, code.y end
+            if (obj.name == nil or obj.name == "") and code.name ~= "" then obj.name = code.name end
         end
     end
 
@@ -857,7 +897,17 @@ end
 -- (not its payload), so every offset is resolved against smap_offset.
 -- num_strips is counted in 8-pixel strips; width/height are in pixels.
 
-local function decode_smap(data, smap_offset, smap_size, width, height, num_strips, trans_color)
+-- Transparent strip codecs (ZIGZAG_VT/HT, MAJMIN_HT, RMAJMIN_HT) skip pixels of
+-- the room's TRNS colour; opaque codecs draw that index like any other colour.
+local function is_transparent_codec(code)
+    return (code >= 34 and code <= 38) or (code >= 44 and code <= 48)
+        or (code >= 84 and code <= 88) or (code >= 124 and code <= 128)
+end
+
+-- trans_out (optional): value written for transparent pixels and missing strips,
+-- e.g. 256 to pair with image_create_indexed(..., 256) for an alpha channel.
+-- all_transparent: treat every strip as transparent (V8 objects, as in ScummVM).
+local function decode_smap(data, smap_offset, smap_size, width, height, num_strips, trans_color, trans_out, all_transparent)
     if not smap_offset or not smap_size or not width or not height then
         return nil
     end
@@ -873,7 +923,8 @@ local function decode_smap(data, smap_offset, smap_size, width, height, num_stri
 
     -- Pixel buffer: row-major, width * height
     local pixels = {}
-    for i = 1, width * height do pixels[i] = 0 end
+    local fill = trans_out or 0
+    for i = 1, width * height do pixels[i] = fill end
 
     local decoded_count = 0
 
@@ -896,14 +947,17 @@ local function decode_smap(data, smap_offset, smap_size, width, height, num_stri
 
                 if strip_pixels then
                     decoded_count = decoded_count + 1
+                    local masked = trans_out and (all_transparent or is_transparent_codec(u8(strip_data, 1)))
                     -- Blit strip into pixel buffer
                     local base_x = s * 8
                     for row = 0, height - 1 do
                         for col = 0, 7 do
                             local src_idx = row * 8 + col + 1
                             local dst_idx = row * width + base_x + col + 1
-                            if src_idx <= #strip_pixels and dst_idx <= width * height then
-                                pixels[dst_idx] = strip_pixels[src_idx]
+                            if src_idx <= #strip_pixels and dst_idx <= width * height
+                                    and base_x + col < width then
+                                local v = strip_pixels[src_idx]
+                                pixels[dst_idx] = (masked and v == trans_color) and trans_out or v
                             end
                         end
                     end
@@ -1681,6 +1735,12 @@ function engine.get_resources(game_path)
                 -- this costs one room read per room.
                 local sprites = sprite_children(game, room)
                 if sprites and #sprites > 0 then
+                    -- Background with every object image placed at its position
+                    table.insert(children, 2, {
+                        id   = "comp:" .. game.base_name .. ":" .. room.id,
+                        name = display .. " — Composite",
+                        type = "composite"
+                    })
                     children[#children + 1] = {
                         id = "sprites:" .. game.base_name .. ":" .. room.id,
                         name = string.format("Room %d — Object sprites (%d)",
@@ -2029,6 +2089,56 @@ function engine.load_resource(game_path, resource_id, palette_id)
         log_warn(string.format("Object %d state %d not found in room %d",
             id.obj_id, id.state, id.room_id))
         return nil
+    end
+
+    -- ── Room composite: background plus positioned object images ──
+    if id.res_type == "comp" then
+        local pixels, width, height = decode_room_background(room_data, room_info)
+        if not pixels then
+            return { type = "text", text = string.format(
+                "Room %d: failed to decode SMAP background", id.room_id) }
+        end
+        local palette = resolve_palette(game, id.room_id, room_info, palette_id)
+        local trans = room_info.transparent_color or 255  -- ScummVM default without TRNS
+        local v8 = room_info.version ~= nil and room_info.version >= 800
+        local layers = {
+            { name = "Background", group = "Background", x = 0, y = 0,
+              image = image_create_indexed(width, height, pixels, palette) }
+        }
+        local placed, unplaced = 0, 0
+        for _, obj in ipairs(room_info.objects or {}) do
+            if obj.x then
+                placed = placed + 1
+                local label = (obj.name and obj.name ~= "")
+                    and string.format("Object %d: %s", obj.obj_id, obj.name)
+                    or  string.format("Object %d", obj.obj_id)
+                for _, img in ipairs(obj.images) do
+                    local px, w, h = decode_smap(room_data, img.smap_offset, img.smap_size,
+                        img.width, img.height, nil, trans, 256, v8)
+                    if px then
+                        layers[#layers + 1] = {
+                            name    = string.format("%s — state %d", label, img.state),
+                            group   = img.state == 1 and "Objects (state 1)" or "Objects (other states)",
+                            visible = img.state == 1,
+                            x = obj.x, y = obj.y,
+                            image = image_create_indexed(w, h, px, palette, 256)
+                        }
+                    end
+                end
+            else
+                unplaced = unplaced + 1
+            end
+        end
+        return {
+            type = "composite",
+            width = width,
+            height = height,
+            layers = layers,
+            description = string.format(
+                "Room %d%s — composite, %d placed object(s)%s", id.room_id,
+                room_name ~= "" and (" (" .. room_name .. ")") or "", placed,
+                unplaced > 0 and string.format(", %d without a position", unplaced) or "")
+        }
     end
 
     -- ── Room background ──────────────────────────────────────────

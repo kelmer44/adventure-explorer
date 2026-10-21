@@ -75,7 +75,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [SCUMM V2 (Maniac Mansion, Zak McKracken)](engine-details.md#scummv2) | 1988-89 | `scummv2` | Backgrounds, object sprites, occlusion masks, object data, EGA palette | ✅ Working |
 | [SCUMM V3 EGA (tested: Loom)](engine-details.md#scumm) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | [SCUMM V4 EGA (tested: Monkey Island)](engine-details.md#scumm) | 1990 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
-| [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
+| [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Room Composites, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | [Shadow of the Comet](engine-details.md#comet) | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | [Simon the Sorcerer 1 & 2](engine-details.md#agos) | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
@@ -236,11 +236,11 @@ return engine
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `image_create_indexed(w, h, pixels, palette)` | handle | Create image from indexed pixels + palette |
+| `image_create_indexed(w, h, pixels, palette [, transparent])` | handle | Create image from indexed pixels + palette; pixels equal to `transparent` become fully transparent |
 | `image_create_rgb(w, h, rgb_data)` | handle | Create image from RGB triplets |
 | `image_load_png(data)` | handle | Load image from PNG binary data |
 
-- `pixels`: Lua table (1-indexed), values 0–255 (color indices)
+- `pixels`: Lua table (1-indexed), values 0–255 (color indices). A `transparent` value outside 0–255, such as 256, marks transparency without giving up a palette colour
 - `palette`: Lua table (1-indexed), 768 entries (R,G,B triplets, 0–255)
 - `rgb_data`: Lua table (1-indexed), w×h×3 entries (R,G,B, 0–255)
 
@@ -253,6 +253,25 @@ return engine
 
 - `image_handles`: Lua table of image handles (from `image_create_*` calls)
 - `delay_ms`: Frame delay in milliseconds (default: 100)
+
+#### Composites
+
+`load_resource` may return `type = "composite"` for a layered view such as a room
+background with its objects in place. The preview lists the layers so they can be
+toggled, and exports flatten the layers that are visible by default.
+
+```lua
+return {
+    type = "composite",
+    width = 320, height = 200,          -- optional; defaults to the extent of all layers
+    layers = {                          -- drawn in order, later layers on top
+        { name = "Background", image = bg, group = "Background" },
+        { name = "Door (open)", image = door, x = 120, y = 64,
+          group = "Objects", visible = false },
+    },
+    description = "Room 1 composite"
+}
+```
 
 #### Sound
 

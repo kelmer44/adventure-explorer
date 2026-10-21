@@ -36,7 +36,7 @@ import javax.imageio.ImageIO
  *   file_size(handle) -> number
  *   file_read(handle, offset, length) -> string (binary)
  *   list_files(path) -> table of filenames
- *   image_create_indexed(w, h, pixel_table, palette_table) -> image_handle
+ *   image_create_indexed(w, h, pixel_table, palette_table [, transparent_index]) -> image_handle
  *   image_create_rgb(w, h, rgb_table) -> image_handle
  *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
  *   sound_create_gob_adl(data) -> sound_handle
@@ -268,9 +268,12 @@ class LuaEngine {
                 val totalPixels = width * height
                 val rgbArray = IntArray(totalPixels)
                 for (i in 0 until totalPixels) {
-                    val colorIdx = pixelTable.rawget(i + 1).optint(0).coerceIn(0, 255)
+                    // Compare before clamping so callers can mark transparency with an
+                    // out-of-palette value such as 256 and keep all 256 colours usable.
+                    val rawIdx = pixelTable.rawget(i + 1).optint(0)
+                    val colorIdx = rawIdx.coerceIn(0, 255)
                     rgbArray[i] = if (transparentIndex >= 0) {
-                        if (colorIdx == transparentIndex) 0 else palette[colorIdx] or (0xFF shl 24)
+                        if (rawIdx == transparentIndex) 0 else palette[colorIdx] or (0xFF shl 24)
                     } else palette[colorIdx]
                 }
                 image.setRGB(0, 0, width, height, rgbArray, 0, width)

@@ -429,6 +429,7 @@ private fun TreeRowItem(
                 "category" -> "\uD83D\uDCC1"
                 "model"    -> "◇"
                 "image"    -> "\uD83D\uDDBC"
+                "composite" -> "\uD83E\uDDE9"
                 "animation" -> "\uD83C\uDFAC"
                 "sound"    -> "\uD83D\uDD0A"
                 "midi"     -> "\uD83C\uDFB9"

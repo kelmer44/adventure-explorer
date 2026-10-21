@@ -179,6 +179,7 @@ fun App(searchFocusRequester: FocusRequester = remember { FocusRequester() }) {
                         onExportPaletteBin = { scope.launch(Dispatchers.IO) { showExportPaletteBinDialog(appState) } },
                         frames = appState.previewFrames,
                         frameDelayMs = appState.previewFrameDelayMs,
+                        layers = appState.previewLayers,
                         onExportFrame = { frame ->
                             scope.launch(Dispatchers.IO) { showExportFrameDialog(appState, frame) }
                         },

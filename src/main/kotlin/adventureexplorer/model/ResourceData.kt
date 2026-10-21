@@ -6,7 +6,7 @@ import java.awt.image.BufferedImage
  * Data returned when loading a specific resource from a Lua engine script.
  */
 data class ResourceData(
-    val type: String,               // "image", "sound", "text", "animation", etc.
+    val type: String,               // "image", "composite", "sound", "text", "animation", etc.
     val image: BufferedImage?,       // non-null for image resources
     val description: String?,        // human-readable description
     val textContent: String? = null, // non-null for text resources
@@ -16,5 +16,6 @@ data class ResourceData(
     val frameDelayMs: Int = 100,     // milliseconds per frame for animation playback
     val soundData: SoundData? = null, // non-null for sound resources
     val midiData: MidiData? = null,  // non-null for midi resources
-    val modelData: ModelData? = null // static 3D geometry
+    val modelData: ModelData? = null, // static 3D geometry
+    val layers: List<CompositeLayer>? = null // non-null for composite resources; image is the flattened default
 )

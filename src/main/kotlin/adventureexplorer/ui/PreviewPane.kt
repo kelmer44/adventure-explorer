@@ -52,6 +52,7 @@ fun PreviewPane(
     onExportMidi: () -> Unit,
     modelData: adventureexplorer.model.ModelData? = null,
     onModelTextureSelected: (String?) -> Unit = {},
+    layers: List<adventureexplorer.model.CompositeLayer>? = null,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
@@ -69,6 +70,17 @@ fun PreviewPane(
                 onExportPaletteBin = onExportPaletteBin,
                 onExportFrame = onExportFrame,
                 onExportAllFrames = onExportAllFrames
+            )
+            layers != null && layers.isNotEmpty() -> CompositePreview(
+                layers = layers,
+                onExportImage = onExportFrame,
+                paletteImage = paletteImage,
+                paletteOptions = paletteOptions,
+                selectedPaletteIndex = selectedPaletteIndex,
+                onPaletteSelected = onPaletteSelected,
+                description = description,
+                canExportPalette = canExportPalette,
+                onExportPaletteBin = onExportPaletteBin
             )
             image != null -> ImagePreview(
                 image = image,
@@ -194,7 +206,7 @@ private fun ImagePreview(
 // ── Zoom buttons ──────────────────────────────────────────────
 
 @Composable
-private fun ZoomButtons(current: Int, options: List<Int>, onSelect: (Int) -> Unit) {
+internal fun ZoomButtons(current: Int, options: List<Int>, onSelect: (Int) -> Unit) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -220,7 +232,7 @@ private fun ZoomButtons(current: Int, options: List<Int>, onSelect: (Int) -> Uni
 // ── Palette side pane ─────────────────────────────────────────
 
 @Composable
-private fun PalettePane(
+internal fun PalettePane(
     paletteImage: BufferedImage?,
     paletteOptions: List<ResourceNode>,
     selectedPaletteIndex: Int,
@@ -523,7 +535,7 @@ private fun AnimationPreview(
 }
 
 @Composable
-private fun ControlButton(label: String, onClick: () -> Unit) {
+internal fun ControlButton(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .background(Color(0xFF333333), RoundedCornerShape(4.dp))
@@ -866,7 +878,7 @@ private fun EmptyPreview() {
 
 // ── Utility ──────────────────────────────────────────────────
 
-private fun BufferedImage.toImageBitmap(): ImageBitmap {
+internal fun BufferedImage.toImageBitmap(): ImageBitmap {
     val baos = ByteArrayOutputStream()
     ImageIO.write(this, "png", baos)
     return org.jetbrains.skia.Image.makeFromEncoded(baos.toByteArray()).toComposeImageBitmap()

@@ -32,7 +32,7 @@ object ResourceCategories {
 
     private fun categories(node: ResourceNode, roles: Set<ExportCategory>): Set<ExportCategory> = buildSet {
         when (node.type) {
-            "image" -> {
+            "image", "composite" -> {
                 add(ExportCategory.IMAGES)
                 addAll(roles)
             }

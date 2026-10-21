@@ -1,5 +1,8 @@
 package adventureexplorer.scripting
 
+import adventureexplorer.graphics.Composite
+import adventureexplorer.model.CompositeLayer
+
 import adventureexplorer.model.*
 import org.luaj.vm2.LuaTable
 import org.luaj.vm2.LuaValue
@@ -122,6 +125,13 @@ class ScriptManager {
                     val image = lua.getImage(imgHandle)
                     ResourceData(type, image, description)
                 }
+                "composite" -> {
+                    val layers = parseCompositeLayers(lua, table.get("layers"))
+                    val (w, h) = Composite.canvasSize(layers,
+                        table.get("width").takeIf { it.isnumber() }?.toint(),
+                        table.get("height").takeIf { it.isnumber() }?.toint())
+                    ResourceData(type, Composite.flatten(layers, w, h), description, layers = layers)
+                }
                 "animation" -> {
                     val animHandle = table.get("animation").checkint()
                     val anim = lua.getAnimation(animHandle)
@@ -181,6 +191,24 @@ class ScriptManager {
     }
 
     // ── Internal helpers ────────────────────────────────────────────
+
+    /** `layers` entries: { image = handle, x, y, name, group, visible = true }. */
+    private fun parseCompositeLayers(lua: LuaEngine, value: LuaValue): List<CompositeLayer> {
+        if (!value.istable()) return emptyList()
+        val table = value.checktable()
+        return (1..table.length()).mapNotNull { i ->
+            val entry = table.get(i).takeIf { it.istable() } ?: return@mapNotNull null
+            val image = lua.getImage(entry.get("image").optint(-1)) ?: return@mapNotNull null
+            CompositeLayer(
+                name = entry.get("name").optjstring("Layer $i"),
+                image = image,
+                x = entry.get("x").optint(0),
+                y = entry.get("y").optint(0),
+                group = entry.get("group").optjstring("Layers"),
+                visible = entry.get("visible").optboolean(true)
+            )
+        }
+    }
 
     private fun parseLuaResourceTable(table: LuaTable): List<ResourceNode> {
         val result = mutableListOf<ResourceNode>()

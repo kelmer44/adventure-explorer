@@ -1012,6 +1012,14 @@ archive/detection regressions and a complete LuaJ graphics scan.
 SCUMM V5-V8 supports per-room object sprites and actor costumes (`COST` for V5/V6,
 `AKOS` for V7/V8), with cel sheets and animation previews.
 
+Each room with object images also has a **Composite** entry: the background with
+every object image placed at its position (`CDHD` for V5/V6, `IMHD` for V7/V8) and
+named from `OBNA`. State 1 images are shown by default; other states are listed
+and can be switched on. Transparency follows ScummVM: only the transparent strip
+codecs skip the room's `TRNS` colour, except in V8, where every object strip does
+and the colour comes from `RMHD`. Some objects are solid placeholder images (for
+example two in Monkey Island 2's Woodtick) that the game rarely or never draws.
+
 Music includes MIDI tracks from sound resources and digital iMUSE audio, including
 `.BUN` music bundles for The Dig and The Curse of Monkey Island. Sound effects and
 speech are also available when present in the game data. See [SCUMM V2](#scummv2) for its separate background, object, mask and data coverage.

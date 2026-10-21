@@ -6,7 +6,7 @@ package adventureexplorer.model
 data class ResourceNode(
     val id: String,
     val name: String,
-    val type: String, // "category", "image", "sound", "text", "palette", "animation", "model", "data"
+    val type: String, // "category", "image", "composite", "sound", "text", "palette", "animation", "model", "data"
     val children: List<ResourceNode> = emptyList()
 ) {
     val isLeaf: Boolean get() = children.isEmpty() && type != "category"

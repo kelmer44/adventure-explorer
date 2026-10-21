@@ -3,6 +3,7 @@ package adventureexplorer.app
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import adventureexplorer.model.CompositeLayer
 import adventureexplorer.model.DetectionResult
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
@@ -41,6 +42,7 @@ class AppState {
     var previewSoundData by mutableStateOf<SoundData?>(null)
     var previewModelData by mutableStateOf<ModelData?>(null)
     var previewMidiData  by mutableStateOf<MidiData?>(null)
+    var previewLayers    by mutableStateOf<List<CompositeLayer>?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
     var isExporting      by mutableStateOf(false)
@@ -96,6 +98,7 @@ class AppState {
         previewSoundData = null
         previewMidiData = null
         previewModelData = null
+        previewLayers = null
         selectedNode = null
         previewNode = null
         nodeById.clear()
@@ -189,6 +192,7 @@ class AppState {
                         previewSoundData = data.soundData
                         previewMidiData = data.midiData
                         previewModelData = data.modelData
+                        previewLayers = bgWithPal?.layers ?: data.layers
                         previewPaletteOptions = allPalsCopy
                         if (useIdx >= 0) {
                             selectedPaletteIndex = useIdx
@@ -212,6 +216,7 @@ class AppState {
                         previewSoundData = null
                         previewMidiData = null
                         previewModelData = null
+                        previewLayers = null
                         statusMessage = "Failed to load ${node.name}"
                     }
                 }
@@ -260,6 +265,7 @@ class AppState {
                     if (bgData?.image != null) {
                         previewImage = bgData.image
                         previewDesc = bgData.description ?: previewDesc
+                        if (bgData.layers != null) previewLayers = bgData.layers
                         // Also update animation frames if the re-render returned an animation
                         if (bgData.frames != null) {
                             previewFrames = bgData.frames
