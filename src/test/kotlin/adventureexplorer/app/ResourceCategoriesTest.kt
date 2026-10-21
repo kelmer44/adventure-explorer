@@ -79,4 +79,34 @@ class ResourceCategoriesTest {
         assertTrue(ResourceCategories.filter(nodes, ExportCategory.SPRITES).isEmpty())
     }
 
+
+    @Test fun `blank search without a category returns the tree unchanged`() {
+        assertSame(tree, ResourceCategories.filter(tree, null, "  "))
+    }
+
+    @Test fun `search matches names and ids case-insensitively and keeps ancestors`() {
+        val result = ResourceCategories.filter(tree, null, "COSTUME")
+        assertEquals(listOf("actors"), result.map { it.id })
+        assertEquals(listOf(sprite), result.single().children)
+        assertEquals(listOf(sprite), ResourceCategories.filter(tree, null, "cost:1").single().children)
+    }
+
+    @Test fun `every search term must match across the folder path`() {
+        val result = ResourceCategories.filter(tree, null, "room 1 notes")
+        val room = result.single().children.single()
+        assertEquals("room_1", room.id)
+        assertEquals(listOf("notes"), room.children.map { it.id })
+        assertTrue(ResourceCategories.filter(tree, null, "room notes sound").isEmpty())
+    }
+
+    @Test fun `folder name matches keep its whole non-empty subtree`() {
+        val room = ResourceCategories.filter(tree, null, "room 1").single().children.single()
+        assertEquals(listOf("room_bg_1", "pal_1", "notes"), room.children.map { it.id })
+    }
+
+    @Test fun `search combines with a category`() {
+        val result = ResourceCategories.filter(tree, ExportCategory.IMAGES, "frame")
+        assertEquals(listOf("pixels"), result.single().children.map { it.id })
+        assertTrue(ResourceCategories.filter(tree, ExportCategory.SOUNDS, "frame").isEmpty())
+    }
 }

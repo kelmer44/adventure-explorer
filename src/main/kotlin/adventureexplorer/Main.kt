@@ -1,5 +1,8 @@
 package adventureexplorer
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
@@ -27,13 +30,22 @@ fun main() {
 
     application {
         val windowState = rememberWindowState(size = DpSize(1280.dp, 800.dp))
+        val searchFocusRequester = remember { FocusRequester() }
         Window(
             onCloseRequest = ::exitApplication,
+            // Cmd+F / Ctrl+F jumps to the resource search box
+            onPreviewKeyEvent = { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.F &&
+                    (event.isMetaPressed || event.isCtrlPressed)) {
+                    // Not attached until a game is loaded
+                    runCatching { searchFocusRequester.requestFocus() }.isSuccess
+                } else false
+            },
             title = "Adventure Explorer",
             icon = painterResource("icons/fedora.png"),
             state = windowState
         ) {
-            App()
+            App(searchFocusRequester)
         }
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,7 +54,7 @@ private val DarkColors = darkColors(
 )
 
 @Composable
-fun App() {
+fun App(searchFocusRequester: FocusRequester = remember { FocusRequester() }) {
     val appState = remember { AppState() }
     val scope = rememberCoroutineScope()
     var exportMenuExpanded by remember { mutableStateOf(false) }
@@ -153,7 +154,8 @@ fun App() {
                         ResourceTreeView(
                             resources = appState.resourceTree,
                             selectedNode = appState.selectedNode,
-                            onNodeSelected = { appState.selectResource(it) }
+                            onNodeSelected = { appState.selectResource(it) },
+                            searchFocusRequester = searchFocusRequester
                         )
                     }
 

@@ -60,15 +60,25 @@ object ResourceCategories {
         return counts
     }
 
-    /** Keep ancestors of matching resources, pruning all unrelated and empty folders. */
-    fun filter(nodes: List<ResourceNode>, category: ExportCategory): List<ResourceNode> {
-        fun keep(node: ResourceNode, inherited: Set<ExportCategory>): ResourceNode? {
+    /**
+     * Keep ancestors of matching resources, pruning all unrelated and empty folders.
+     * A null [category] accepts every type. Every whitespace-separated [query] term must
+     * appear in the resource's name, its ID or one of its ancestor folder names.
+     */
+    fun filter(nodes: List<ResourceNode>, category: ExportCategory?, query: String = ""): List<ResourceNode> {
+        val terms = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (category == null && terms.isEmpty()) return nodes
+        fun keep(node: ResourceNode, inherited: Set<ExportCategory>, path: String): ResourceNode? {
             val context = inherited + roles(node)
             return if (node.isCategory) {
-                val children = node.children.mapNotNull { keep(it, context) }
+                val childPath = "$path ${node.name.lowercase()}"
+                val children = node.children.mapNotNull { keep(it, context, childPath) }
                 if (children.isEmpty()) null else node.copy(children = children)
-            } else node.takeIf { category in categories(it, context) }
+            } else node.takeIf {
+                val text = "$path ${it.name.lowercase()} ${it.id.lowercase()}"
+                (category == null || category in categories(it, context)) && terms.all { term -> term in text }
+            }
         }
-        return nodes.mapNotNull { keep(it, emptySet()) }
+        return nodes.mapNotNull { keep(it, emptySet(), "") }
     }
 }
