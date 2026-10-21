@@ -77,7 +77,6 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [SCUMM V4 EGA (tested: Monkey Island)](engine-details.md#scumm) | 1990 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
 | [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | [Shadow of the Comet](engine-details.md#comet) | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
-| [Sherlock Holmes: Consulting Detective](engine-details.md#sherlock2) | 1991-93 | `sherlock2` | — | ⚠️ No engine script |
 | [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
 | [Simon the Sorcerer 1 & 2](engine-details.md#agos) | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
 | [Star Trek: 25th Anniversary / Judgment Rites (DOS)](engine-details.md#startrek) | 1992/93 | `startrek` | Backgrounds, Sprites, Animation Previews, Priority Masks, Palettes, Text, VOC Sound, XMIDI Music, Data | ✅ Working* |
@@ -85,7 +84,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [The Last Express](engine-details.md#lastexpress) | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
 | [The Legend of Kyrandia](engine-details.md#kyra1) | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
 | [The Legend of Kyrandia: Hand of Fate](engine-details.md#kyra2) | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
-| [The Lost Files of Sherlock Holmes](engine-details.md#sherlock) | 1992/96 | `sherlock` | Backgrounds, Palettes, Object Sprites, Animations, Sound Effects, Speech | ✅ Working |
+| [The Lost Files of Sherlock Holmes: The Case of the Serrated Scalpel / The Case of the Rose Tattoo](engine-details.md#sherlock) | 1992/96 | `sherlock` | Backgrounds, Palettes, Object Sprites, Animations, Sound Effects, Speech | ✅ Working |
 | [The Neverhood](engine-details.md#neverhood) | 1996 | `neverhood` | Bitmaps, Animations, Palettes, Sounds, Music, Text, Data, Videos | ✅ Working |
 | [Toonstruck](engine-details.md#toonstruck) | 1996 | `toonstruck` | Backgrounds, Masks, Sprites & Animations, Palettes, Dialogue, Speech, Sound, Music, Data | ✅ Working* |
 | [Touché: Adventures of the Fifth Musketeer](engine-details.md#touche) | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |

@@ -7,8 +7,7 @@ engine below. The app detects the engine automatically; you do not need to selec
 engine ID. Keep the game's data files and directory layout together. Opening a parent
 folder only works where the entry explicitly says so.
 
-The entries cover every implemented engine and the unimplemented `sherlock2`
-placeholder. Opening instructions follow the current Lua detection rules; release
+The entries cover every implemented engine. Opening instructions follow the current Lua detection rules; release
 coverage and known limitations are described where available. See also
 [3D model previews](#3d-model-previews) for shared viewer controls.
 
@@ -61,7 +60,6 @@ coverage and known limitations are described where available. See also
 | [SCUMM V2](#scummv2) | `scummv2` |
 | [SCUMM V3–V8](#scumm) | `scumm` |
 | [Shadow of the Comet](#comet) | `comet` |
-| [Sherlock Holmes: Consulting Detective](#sherlock2) | `sherlock2` |
 | [Sierra SCI](#sci) | `sci` |
 | [Simon the Sorcerer 1 & 2](#agos) | `agos` |
 | [Star Trek: 25th Anniversary / Judgment Rites](#startrek) | `startrek` |
@@ -69,7 +67,7 @@ coverage and known limitations are described where available. See also
 | [The Last Express](#lastexpress) | `lastexpress` |
 | [The Legend of Kyrandia](#kyra1) | `kyra1` |
 | [The Legend of Kyrandia: Hand of Fate](#kyra2) | `kyra2` |
-| [The Lost Files of Sherlock Holmes](#sherlock) | `sherlock` |
+| [The Lost Files of Sherlock Holmes: Serrated Scalpel / Rose Tattoo](#sherlock) | `sherlock` |
 | [The Neverhood](#neverhood) | `neverhood` |
 | [Toonstruck](#toonstruck) | `toonstruck` |
 | [Touché: Adventures of the Fifth Musketeer](#touche) | `touche` |
@@ -1027,16 +1025,6 @@ speech are also available when present in the game data. See [SCUMM V2](#scummv2
 Open the game data folder containing `R00.CC4`. Keep the other CC4 files and PAK
 archives, including `RES.PAK`, in the same folder.
 
-<a id="sherlock2"></a>
-
-## Sherlock Holmes: Consulting Detective
-
-**Engine ID:** `sherlock2`
-
-This checkout has no `scripts/engines/sherlock2/engine.lua`. The engine cannot currently
-be auto-detected or opened; its README listing is a placeholder rather than working
-support.
-
 <a id="sci"></a>
 
 ## Sierra SCI
@@ -1172,8 +1160,13 @@ the remaining PAK and audio resources together.
 
 **Engine ID:** `sherlock`
 
-Open the game data folder containing both `VGS.LIB` and `TALK.LIB`, with the remaining
-LIB archives and audio resources alongside them.
+Covers both games: *The Case of the Serrated Scalpel* (1992) and *The Case of the Rose
+Tattoo* (1996). Open the game data folder containing both `VGS.LIB` and `TALK.LIB`, with
+the remaining LIB archives and audio resources alongside them. Rose Tattoo is recognised
+by `WALK.LIB` and reads its rooms from the standalone `RESnn.RRM` files in the same folder.
+
+Rose Tattoo lists its 640×480 room backgrounds with palettes and per-room sprites, plus
+character, inventory, interface, map and screen sprites, sound effects and speech.
 
 <a id="neverhood"></a>
 
