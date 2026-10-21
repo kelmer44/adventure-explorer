@@ -369,9 +369,11 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = anim_cat
     end
 
+    for _, node in ipairs(engine.extra_resources(game_path, all_files)) do
+        resources[#resources + 1] = node
+    end
     return resources
 end
-
 
 local function find_clu_file(game_path, label)
     local candidates = { label .. ".clu", label .. ".CLU",
@@ -405,6 +407,128 @@ local function read_screen_resource(game_path, clu_label, res_index)
     file_close(f)
     return data
 end
+
+-- ============================================================================
+-- Text, speech and music
+-- References (ScummVM engines/sword2): protocol.cpp (fetchTextLine), header.h
+-- (ResHeader, TEXT_FILE = 8), music.cpp (getAudioStream compressed clusters).
+-- ============================================================================
+
+local function latin1_to_utf8(str)
+    return (str:gsub("[\128-\255]", function(c)
+        local b = c:byte()
+        return string.char(0xC0 + math.floor(b / 64), 0x80 + b % 64)
+    end))
+end
+
+-- speechN.cl3 / musicN.cl3 (ScummVM compression tool): u32 entry count, then
+-- from byte 12 one (offset, sample count, encoded length) triple per clip.
+local function read_audio_index(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local head = file_read(f, 0, 4)
+    local count = head and #head == 4 and u32le(head, 1) or 0
+    local fsize = file_size(f)
+    local clips = {}
+    if count > 0 and 12 + count * 12 <= fsize then
+        local tab = file_read(f, 12, count * 12)
+        for i = 0, count - 1 do
+            local pos, len = u32le(tab, i * 12 + 1), u32le(tab, i * 12 + 9)
+            if pos > 0 and len > 0 and pos + len <= fsize then clips[#clips + 1] = { id = i, offset = pos, length = len } end
+        end
+    end
+    file_close(f)
+    return clips
+end
+
+local function audio_files(game_path, all_files)
+    local out = {}
+    for _, fname in ipairs(all_files) do
+        local kind, cd = fname:lower():match("^(%a+)(%d)%.cl3$")
+        if kind == "speech" or kind == "music" then out[#out + 1] = { kind = kind, cd = tonumber(cd), name = fname } end
+    end
+    table.sort(out, function(a, b) if a.kind ~= b.kind then return a.kind > b.kind end return a.cd < b.cd end)
+    return out
+end
+
+function engine.extra_resources(game_path, all_files)
+    local out = {}
+    local text_path = find_clu_file(game_path, "text")
+    local f = text_path and file_open(text_path)
+    if f then
+        local leaves = {}
+        for _, entry in ipairs(read_clu_index(f) or {}) do
+            local hdr = file_read(f, entry.offset, 48)
+            if hdr and #hdr >= 48 and u8(hdr, 1) == 8 then
+                local name = hdr:sub(11, 44):match("^[^%z]*")
+                leaves[#leaves + 1] = { id = "txt2_" .. entry.index,
+                    name = string.format("Text %d (%d lines)", entry.index, u32le(hdr, 45)), type = "text" }
+            end
+        end
+        file_close(f)
+        if #leaves > 0 then out[#out + 1] = { id = "text", name = string.format("Text (%d)", #leaves), type = "category", children = leaves } end
+    end
+
+    local groups = { speech = {}, music = {} }
+    for _, af in ipairs(audio_files(game_path, all_files)) do
+        local clips = read_audio_index(game_path .. "/" .. af.name) or {}
+        local blocks, block = {}, nil
+        for _, c in ipairs(clips) do
+            local b = math.floor(c.id / 100)
+            if not block or block.n ~= b then
+                block = { n = b, node = { id = string.format("%s%d_blk_%d", af.kind, af.cd, b),
+                    name = string.format("%d-%d", b * 100, b * 100 + 99), type = "category", children = {} } }
+                blocks[#blocks + 1] = block.node
+            end
+            block.node.children[#block.node.children + 1] = { id = string.format("cl3_%s_%d", af.name, c.id),
+                name = string.format("%s %d", af.kind == "speech" and "Line" or "Track", c.id), type = "sound" }
+        end
+        if #clips > 0 then
+            local list = groups[af.kind]
+            list[#list + 1] = { id = af.kind .. "_cd" .. af.cd, name = string.format("CD %d (%d)", af.cd, #clips),
+                type = "category", children = #clips > 100 and blocks or blocks[1].children }
+        end
+    end
+    if #groups.speech > 0 then out[#out + 1] = { id = "speech", name = "Speech", type = "category", children = groups.speech } end
+    if #groups.music > 0 then out[#out + 1] = { id = "music", name = "Music", type = "category", children = groups.music } end
+    return out
+end
+
+local function load_extra(game_path, resource_id)
+    local idx = tonumber(resource_id:match("^txt2_(%d+)$") or "")
+    if idx then
+        local data = read_screen_resource(game_path, "text", idx)
+        if not data or #data < 48 or u8(data, 1) ~= 8 then return nil end
+        local count = u32le(data, 45)
+        local lines = {}
+        for n = 0, math.min(count, 20000) - 1 do
+            local off = u32le(data, 49 + n * 4)
+            if off > 0 and off + 2 <= #data then
+                -- The u16 before the string is the line's official text number, which
+                -- is also its speech clip id (function.cpp, fnISpeak)
+                local number = u16le(data, off + 1)
+                local str = data:match("^[^%z]*", off + 3) or ""
+                lines[#lines + 1] = string.format("%4d  [speech %d] %s", n, number, latin1_to_utf8(str))
+            end
+        end
+        local name = data:sub(11, 44):match("^[^%z]*")
+        return { type = "text", text = table.concat(lines, "\n"),
+            description = string.format("Text %d — %d lines (%s)", idx, count, name) }
+    end
+    local file, clip = resource_id:match("^cl3_(.+)_(%d+)$")
+    if file then
+        for _, c in ipairs(read_audio_index(game_path .. "/" .. file) or {}) do
+            if c.id == tonumber(clip) then
+                local f = file_open(game_path .. "/" .. file)
+                local data = f and file_read(f, c.offset, c.length)
+                if f then file_close(f) end
+                local snd = data and sound_create_encoded(data)
+                return snd and { type = "sound", sound = snd, description = string.format("%s clip %s — MP3", file, clip) }
+            end
+        end
+    end
+end
+
 
 function load_screen_bg(game_path, clu_label, res_index, pal_clu, pal_idx)
     local data = read_screen_resource(game_path, clu_label, res_index)
@@ -707,6 +831,7 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^txt2_") or resource_id:match("^cl3_") then return load_extra(game_path, resource_id) end
     -- Animation resources: anim_CLUNAME_INDEX[_palN]
     local anim_clu, anim_idx_str, pal_screen = resource_id:match("^anim_(.+)_(%d+)_pal(%d+)$")
     if not anim_clu then

@@ -29,9 +29,9 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Amazon: Guardians of Eden](engine-details.md#amazon) | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
 | [Alone in the Dark series](engine-details.md#aitd) | 1992-95 | `aitd` | Backgrounds, 3D Models | ✅ Working |
 | [Another World / Out of This World (DOS)](engine-details.md#anotherworld) | 1991 | `anotherworld` | Bitmaps, Polygon Artwork, VGA/EGA Palettes, Sound Samples, Scripts, Data | ✅ Working* |
-| [Beneath a Steel Sky](engine-details.md#sky) | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes | ✅ Working |
-| [Broken Sword: Shadow of the Templars](engine-details.md#sword1) | 1996 | `sword1` | Backgrounds, Palettes, Sprites | ✅ Working |
-| [Broken Sword II: The Smoking Mirror](engine-details.md#sword2) | 1997 | `sword2` | Backgrounds, Palettes, Sprites | ✅ Working |
+| [Beneath a Steel Sky](engine-details.md#sky) | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes, Sound Effects, Music (→ MIDI), Text (8 languages), Fonts | ✅ Working* |
+| [Broken Sword: Shadow of the Templars](engine-details.md#sword1) | 1996 | `sword1` | Backgrounds, Palettes, Sprites, Text (6 languages), Speech (MP3 clusters), Music (MP3/WAV) | ✅ Working* |
+| [Broken Sword II: The Smoking Mirror](engine-details.md#sword2) | 1997 | `sword2` | Backgrounds, Palettes, Sprites, Text, Speech and Music (MP3 clusters) | ✅ Working* |
 | [Bud Tucker in Double Trouble](engine-details.md#tucker) | 1996 | `tucker` | Background Tiles, Sprite Sheets/Frames, Animation Previews, Inventory Sprites, Masks, Palettes, Speech, Sound, Music, Text, Data | ✅ Working* |
 | [Bureau 13 / Hell: A Cyberpunk Thriller](engine-details.md#take2) | 1995/94 | `take2` | Backgrounds, Sprites, Palettes, FLC Previews (Hell), Dialogue (Bureau 13), WAV/VOC Speech and Sound, MIDI (Bureau 13), Data | ✅ Working* |
 | [The City of Lost Children](engine-details.md#city) | 1997 | `city` | Backgrounds, Fonts, Texture Atlases/Crops, Depth Masks, Palettes, Speech, Sound Effects, Dialogue, Data | ✅ Working* |
@@ -63,7 +63,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Leather Goddesses of Phobos 2](engine-details.md#lgop2) | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
 | [Les Manley 2: Lost in L.A.](engine-details.md#les2) | 1991 | `les2` | Scenes, Sprites, Animation Previews, Palettes, Text and Data | ✅ Working* |
 | [Little Big Adventure 1 / Twinsen's Odyssey](engine-details.md#twine) | 1994/97 | `twine` | Isometric Scenery, Screens, Sprites, Bricks, LBA2 3D Models, Palettes, Dialogue, Speech, Effects, Music, Data | ✅ Working* |
-| [Lure of the Temptress](engine-details.md#lure) | 1992 | `lure` | Screens, Palettes | ✅ Working* |
+| [Lure of the Temptress](engine-details.md#lure) | 1992 | `lure` | Screens, Palettes, Music and Sound Effects (MIDI); with ScummVM's `lure.dat`: Character Sprites/Animations, Text | ✅ Working* |
 | [MicroProse MADS games (Return of the Phantom, Rex Nebular and the Cosmic Gender Bender, Dragonsphere)](engine-details.md#mads) | 1991-94 | `mads` | Backgrounds, Tiles, Sprites & Animations, Palettes, Fonts, Sound & Speech, Scene Data & Hex, Text | ✅ Working |
 | [Noctropolis](engine-details.md#noctropolis) | 1994 | `noctropolis` | Backgrounds, Screens, Sprites | ✅ Working* |
 | [Pink Panther: Passport to Peril / Hokus Pokus Pink](engine-details.md#pink) | 1996/98 | `pink` | CEL Backgrounds, Sprites & Animations, Speech, Sound, Music, Text | ✅ Working* |
@@ -74,7 +74,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Sanitarium](engine-details.md#asylum) | 1998 | `asylum` | Backgrounds, Sprites/UI, Fonts, Aligned Animation Previews, Masks, Palettes, WAV Audio, Text, Data | ✅ Working* |
 | [SCUMM V2 (Maniac Mansion, Zak McKracken)](engine-details.md#scummv2) | 1988-89 | `scummv2` | Backgrounds, object sprites, occlusion masks, object data, EGA palette | ✅ Working |
 | [SCUMM V3 EGA (tested: Loom)](engine-details.md#scumm) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
-| [SCUMM V4 EGA (tested: Monkey Island)](engine-details.md#scumm) | 1990 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
+| [SCUMM V4 EGA/VGA (tested: Monkey Island)](engine-details.md#scumm) | 1990-91 | `scumm` | Backgrounds, Room Composites, EGA/VGA Palettes, Object & Actor Sprites, Costume Animations, Music (AdLib/Roland → MIDI), Fonts | ✅ Working* |
 | [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Room Composites, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | [Shadow of the Comet](engine-details.md#comet) | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
@@ -367,7 +367,7 @@ adventure-explorer/
 │       ├── runaway/engine.lua   # Runaway: A Road Adventure
 │       ├── sci/engine.lua        # Sierra SCI (SCI0/SCI1/SCI1.1)
 │       ├── saga/engine.lua       # I Have No Mouth, and I Must Scream
-│       ├── scumm/engine.lua      # SCUMM V3/V4 EGA / V5-V8 (+ scumm_v3/v4/cost/snd/nut/util.lua modules)
+│       ├── scumm/engine.lua      # SCUMM V3 EGA / V4 EGA+VGA / V5-V8 (+ scumm_v3/v4/cost/snd/nut/util.lua modules)
 │       ├── scummv2/engine.lua    # SCUMM V2
 │       ├── sherlock/engine.lua   # Sherlock Holmes (Lost Files)
 │       ├── sky/engine.lua        # Beneath a Steel Sky

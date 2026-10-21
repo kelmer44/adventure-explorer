@@ -60,8 +60,8 @@ class ScummV4DecoderTest {
         } finally { lua.cleanup() }
     }
 
-    @Test fun `V4 rejects truncated directories invalid archive offsets and VGA strips`() {
-        for (variant in listOf("index", "archive", "offset", "vga")) {
+    @Test fun `V4 rejects truncated directories invalid archive offsets and bad strip tables`() {
+        for (variant in listOf("index", "archive", "offset", "strips")) {
             val folder = fixture()
             if (variant == "index") {
                 val index = File(folder, "000.LFL")
@@ -72,7 +72,7 @@ class ScummV4DecoderTest {
                     when (variant) {
                         "archive" -> data[0] = 0 // bad enclosing size
                         "offset" -> le(0x7fffffff, 4).copyInto(data, 14)
-                        "vga" -> {
+                        "strips" -> {
                             // First EGA strip offset must match the width's u16 table.
                             data[data.size - 4] = 8
                         }
@@ -130,13 +130,14 @@ class ScummV4DecoderTest {
             for (node in all) {
                 val result = manager.loadResource(root, node.id) ?: error("Failed ${node.id}")
                 if (result.type == "text") assertTrue(node.id, result.textContent!!.contains("no visible cels"))
+                else if (node.type == "midi") assertTrue(node.id, result.midiData!!.bytes.copyOfRange(0, 4).contentEquals("MThd".toByteArray()))
                 else assertTrue(node.id, result.image != null || !result.frames.isNullOrEmpty())
                 if (node.id in exportIds && result.image != null) {
                     ImageIO.write(result.image, "png", File(previews, node.id.replace(':', '_') + ".png"))
                 }
                 manager.releaseDecodedResources()
             }
-            println("SCUMM V4: ${all.size} graphics leaves decoded through LuaJ")
+            println("SCUMM V4: ${all.size} leaves decoded through LuaJ")
         } finally { manager.close() }
     }
 }

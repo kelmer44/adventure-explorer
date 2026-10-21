@@ -20,6 +20,8 @@
 -- ============================================================================
 
 local engine = {}
+local Extra = require("sky_extra")
+local tree_cache = {} -- "<game path>|<language>" -> Huffman table version
 engine.name        = "Beneath a Steel Sky"
 engine.id          = "sky"
 engine.description = "Beneath a Steel Sky (Revolution Software, 1994)"
@@ -312,6 +314,21 @@ local function load_file(dsk, entry)
     return hdr, pixels
 end
 
+-- Load any file the way Disk::loadFile does: RNC-packed files decompress to
+-- their payload, prefixed with the 22-byte header unless the DNR says otherwise.
+local function load_raw(dsk, entry)
+    local raw = read_at(dsk, entry.offset, entry.size)
+    if entry.compressed and #raw > 26 and band(rshift(u16le(raw, 1), 7), 1) == 1
+        and raw:sub(23, 26) == "RNC\1" then
+        local dec, dlen = rnc_unpack(raw:sub(23))
+        if dec then
+            local body = packbytes(dec, dlen)
+            return entry.incHeader and body or (raw:sub(1, 22) .. body)
+        end
+    end
+    return raw
+end
+
 -- ============================================================================
 -- Palette helpers (6-bit VGA components expanded to 8-bit)
 -- ============================================================================
@@ -405,6 +422,50 @@ function engine.get_resources(game_path)
         end
     end
 
+    local version = Extra.game_version(u32le(dnr, 1), file_size(dsk))
+    local sfx_sections, music_sections, texts, fonts = {}, {}, {}, {}
+    for section = 0, 15 do
+        local e = map[60203 + section * 4]
+        local list = e and version and Extra.parse_sfx(load_raw(dsk, e), version)
+        if list and #list > 0 then
+            local leaves = {}
+            for _, snd in ipairs(list) do
+                leaves[#leaves + 1] = { id = string.format("sky_sfx_%d_%d", section, snd.index),
+                    name = string.format("Sound %d (%d Hz, %d ms)", snd.index, snd.rate, math.floor(snd.size * 1000 / snd.rate)), type = "sound" }
+            end
+            sfx_sections[#sfx_sections + 1] = { id = "sky_sfxsec_" .. section,
+                name = string.format("Section %d (%d)", section, #leaves), type = "category", children = leaves }
+        end
+        local m = map[60200 + section * 4]
+        local count = m and version and Extra.song_count(load_raw(dsk, m), version) or 0
+        if count > 0 and count < 64 then
+            local leaves = {}
+            for song = 1, count do
+                leaves[#leaves + 1] = { id = string.format("sky_mus_%d_%d", section, song),
+                    name = string.format("Section %d song %d", section, song), type = "midi" }
+            end
+            music_sections[#music_sections + 1] = { id = "sky_mussec_" .. section,
+                name = string.format("Section %d (%d)", section, count), type = "category", children = leaves }
+        end
+    end
+    for lang = 0, 7 do
+        local leaves = {}
+        for section = 0, 7 do
+            if map[60600 + lang * 8 + section] then
+                leaves[#leaves + 1] = { id = string.format("sky_txt_%d_%d", lang, section),
+                    name = string.format("Text section %d", section), type = "text" }
+            end
+        end
+        if #leaves > 0 and version then
+            texts[#texts + 1] = { id = "sky_lang_" .. lang, name = Extra.LANGUAGES[lang],
+                type = "category", children = leaves }
+        end
+    end
+    for _, f in ipairs({ { 60150, "Main font" }, { 60520, "Control panel font" }, { 60521, "Link font" } }) do
+        if map[f[1]] then
+            fonts[#fonts + 1] = { id = "sky_font_" .. f[1], name = string.format("%s (%d)", f[2], f[1]), type = "image" }
+        end
+    end
     file_close(dsk)
 
     local resources = {}
@@ -416,6 +477,18 @@ function engine.get_resources(game_path)
     end
     if #palettes > 0 then
         resources[#resources + 1] = { id = "sky_palettes", name = "Palettes (" .. #palettes .. ")", type = "category", children = palettes }
+    end
+    if #sfx_sections > 0 then
+        resources[#resources + 1] = { id = "sky_sfx", name = "Sound effects", type = "category", children = sfx_sections }
+    end
+    if #music_sections > 0 then
+        resources[#resources + 1] = { id = "sky_music", name = "Music (General MIDI)", type = "category", children = music_sections }
+    end
+    if #texts > 0 then
+        resources[#resources + 1] = { id = "sky_text", name = "Text", type = "category", children = texts }
+    end
+    if #fonts > 0 then
+        resources[#resources + 1] = { id = "sky_fonts", name = "Fonts", type = "category", children = fonts }
     end
     return resources
 end
@@ -442,9 +515,50 @@ function engine.load_resource(game_path, resource_id, palette_id)
     local map = parse_dnr(dnr, file_size(dsk))
 
     local num = tonumber(resource_id:match("^sky_%a+_(%d+)$"))
+    local version = Extra.game_version(u32le(dnr, 1), file_size(dsk))
+    local kind, a, b = resource_id:match("^sky_(%a+)_(%d+)_(%d+)$")
+    a, b = tonumber(a), tonumber(b)
 
     local result = nil
-    if num and map[num] and resource_id:match("^sky_pal_") then
+    if kind == "sfx" and version and map[60203 + a * 4] then
+        local data = load_raw(dsk, map[60203 + a * 4])
+        for _, snd in ipairs(Extra.parse_sfx(data, version) or {}) do
+            if snd.index == b then
+                result = { type = "sound", sound = sound_create_pcm(snd.rate, 8, 1, false,
+                    data:sub(snd.offset + 1, snd.offset + snd.size)),
+                    description = string.format("Section %d sound %d — %d Hz unsigned 8-bit", a, b, snd.rate) }
+            end
+        end
+    elseif kind == "mus" and version and map[60200 + a * 4] then
+        local midi = Extra.song_to_midi(load_raw(dsk, map[60200 + a * 4]), version, b)
+        if midi then
+            result = { type = "midi", midi = midi_create_raw(midi), description = string.format(
+                "Section %d song %d — General MIDI/MT-32 sequence (instruments mapped to GM); loops play once", a, b) }
+        end
+    elseif kind == "txt" and version and map[60600 + a * 8 + b] then
+        local used = tree_cache[game_path .. "|" .. a]
+        if not used then
+            local sections = {}
+            for sec = 0, 7 do
+                local e = map[60600 + a * 8 + sec]
+                if e then sections[sec] = load_raw(dsk, e) end
+            end
+            used = Extra.pick_tree(sections, version, a)
+            tree_cache[game_path .. "|" .. a] = used
+        end
+        local messages = used and Extra.decode_text_section(load_raw(dsk, map[60600 + a * 8 + b]), used, b)
+        if messages then
+            local lines = {}
+            for _, m in ipairs(messages) do lines[#lines + 1] = string.format("0x%04X  %s", m.number, m.text) end
+            result = { type = "text", text = table.concat(lines, "\n"), description = string.format(
+                "%s text section %d — %d messages (v0.0%d Huffman table)", Extra.LANGUAGES[a], b, #messages, used) }
+        end
+    elseif resource_id:match("^sky_font_") and num and map[num] then
+        local img, w, h, glyphs = Extra.render_font(load_raw(dsk, map[num]), 12)
+        if img then
+            result = { type = "image", image = img, description = string.format("Font %d — %d glyphs (characters 32-%d), 12 px", num, glyphs, 31 + glyphs) }
+        end
+    elseif num and map[num] and resource_id:match("^sky_pal_") then
         -- Palette resource: show as a 16x16 swatch grid (each cell 8x8)
         local pal = palette_table_from(read_at(dsk, map[num].offset, map[num].size))
         if pal then
@@ -537,7 +651,8 @@ end
 -- ============================================================================
 
 function engine.default_palette(game_path, resource_id)
-    return "sky_pal_60111"
+    if resource_id:match("^sky_bg_") or resource_id:match("^sky_spr_") then return "sky_pal_60111" end
+    return nil
 end
 
 return engine

@@ -78,6 +78,7 @@
 -- ============================================================================
 
 local engine = {}
+local Extra = require("sword1_extra")
 engine.name        = "Broken Sword: Shadow of the Templars"
 engine.id          = "sword1"
 engine.description = "Broken Sword: The Shadow of the Templars (1996, Revolution Software)"
@@ -747,7 +748,163 @@ function engine.get_resources(game_path)
         end
     end
 
+    for _, node in ipairs(engine.extra_resources(game_path, data_dir, rif)) do
+        resources[#resources + 1] = node
+    end
     return resources
+end
+
+-- ── Text, speech and music ───────────────────────────────────────
+
+local function find_text_cluster(rif)
+    for ci, cluster in pairs(rif.clusters) do
+        if cluster and cluster.label and cluster.label:lower() == "text" then return ci, cluster end
+    end
+end
+
+local function speech_files(game_path, data_dir)
+    local out = {}
+    for cd = 1, 2 do
+        for _, dir in ipairs({ game_path .. "/SPEECH", game_path .. "/speech", game_path, data_dir }) do
+            local p = dir .. "/SPEECH" .. cd .. ".CL3"
+            if not file_exists(p) then p = dir .. "/speech" .. cd .. ".cl3" end
+            if file_exists(p) then out[#out + 1] = { cd = cd, path = p }; break end
+        end
+    end
+    return out
+end
+
+local cow_cache = {}
+local function cow(path)
+    if cow_cache[path] then return cow_cache[path] end
+    local f = file_open(path)
+    if not f then return nil end
+    local size = u32le(file_read(f, 0, 4), 1)
+    local rooms = size and size < 0x1000000 and Extra.parse_cow(file_read(f, 0, size))
+    file_close(f)
+    cow_cache[path] = rooms or false
+    return rooms
+end
+
+local function music_dir(game_path)
+    for _, d in ipairs({ "/MUSIC", "/music", "/Music" }) do
+        if file_exists(game_path .. d) or #(list_files(game_path .. d) or {}) > 0 then return game_path .. d end
+    end
+end
+
+function engine.extra_resources(game_path, data_dir, rif)
+    local out = {}
+    local ci, cluster = find_text_cluster(rif)
+    if cluster then
+        local langs = {}
+        local gis = {}
+        for gi in pairs(cluster.groups) do gis[#gis + 1] = gi end
+        table.sort(gis)
+        for _, gi in ipairs(gis) do
+            local leaves = {}
+            local ris = {}
+            for ri in pairs(cluster.groups[gi].resources) do ris[#ris + 1] = ri end
+            table.sort(ris)
+            for _, ri in ipairs(ris) do
+                leaves[#leaves + 1] = { id = string.format("txt_%d_%d", gi, ri), name = "Section " .. ri, type = "text" }
+            end
+            if #leaves > 0 then
+                langs[#langs + 1] = { id = "txtlang_" .. gi, name = Extra.LANGUAGES[gi] or ("Language " .. gi),
+                    type = "category", children = leaves }
+            end
+        end
+        if #langs > 0 then out[#out + 1] = { id = "text", name = "Text", type = "category", children = langs } end
+    end
+
+    local cds = {}
+    for _, sf in ipairs(speech_files(game_path, data_dir)) do
+        local rooms = cow(sf.path)
+        if rooms then
+            local room_nodes, total = {}, 0
+            for _, r in ipairs(rooms) do
+                local leaves = {}
+                for _, l in ipairs(r.lines) do
+                    leaves[#leaves + 1] = { id = string.format("spch_%d_%d_%d", sf.cd, r.room, l.line),
+                        name = string.format("Line %d", l.line), type = "sound" }
+                end
+                if #leaves > 0 then
+                    total = total + #leaves
+                    room_nodes[#room_nodes + 1] = { id = string.format("spchroom_%d_%d", sf.cd, r.room),
+                        name = string.format("Room %d (%d)", r.room, #leaves), type = "category", children = leaves }
+                end
+            end
+            cds[#cds + 1] = { id = "spchcd_" .. sf.cd, name = string.format("CD %d (%d lines)", sf.cd, total),
+                type = "category", children = room_nodes }
+        end
+    end
+    if #cds > 0 then out[#out + 1] = { id = "speech", name = "Speech", type = "category", children = cds } end
+
+    local dir = music_dir(game_path)
+    if dir then
+        local tracks = {}
+        local names = list_files(dir) or {}
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local ext = name:match("%.(%w+)$")
+            ext = ext and ext:upper()
+            if ext == "MP3" or ext == "WAV" then
+                tracks[#tracks + 1] = { id = "mus_" .. name, name = name, type = "sound" }
+            end
+        end
+        if #tracks > 0 then out[#out + 1] = { id = "music", name = string.format("Music (%d)", #tracks), type = "category", children = tracks } end
+    end
+    return out
+end
+
+local function load_extra(game_path, resource_id)
+    local data_dir = find_data_dir(game_path)
+    if not data_dir then return nil end
+    local gi, ri = resource_id:match("^txt_(%d+)_(%d+)$")
+    if gi then
+        local rif_file = file_open(data_dir .. "/swordres.rif")
+        local rif = rif_file and parse_rif(rif_file)
+        if rif_file then file_close(rif_file) end
+        if not rif then return nil end
+        local ci, cluster = find_text_cluster(rif)
+        if not cluster then return nil end
+        local id = (ci + 1) * 0x1000000 + tonumber(gi) * 0x10000 + tonumber(ri)
+        local lines, count = Extra.parse_text(read_resource(data_dir, rif, id), tonumber(ri))
+        if not lines then return nil end
+        return { type = "text", text = table.concat(lines, "\n"), description = string.format(
+            "%s text section %s — %d of %d entries", Extra.LANGUAGES[tonumber(gi)] or "Language " .. gi, ri, #lines, count) }
+    end
+    local cd, room, line = resource_id:match("^spch_(%d+)_(%d+)_(%d+)$")
+    if cd then
+        for _, sf in ipairs(speech_files(game_path, data_dir)) do
+            if sf.cd == tonumber(cd) then
+                for _, r in ipairs(cow(sf.path) or {}) do
+                    if r.room == tonumber(room) then
+                        for _, l in ipairs(r.lines) do
+                            if l.line == tonumber(line) then
+                                local f = file_open(sf.path)
+                                local data = f and file_read(f, l.offset, l.size)
+                                if f then file_close(f) end
+                                local snd = data and sound_create_encoded(data)
+                                return snd and { type = "sound", sound = snd, description = string.format(
+                                    "CD %s room %s line %s — MP3 speech", cd, room, line) }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+    local name = resource_id:match("^mus_(.+)$")
+    if name then
+        local dir = music_dir(game_path)
+        local f = dir and file_open(dir .. "/" .. name)
+        if not f then return nil end
+        local data = file_read(f, 0, file_size(f))
+        file_close(f)
+        local snd = sound_create_encoded(data)
+        return snd and { type = "sound", sound = snd, description = "Music track " .. name }
+    end
 end
 
 -- ── Background loader ─────────────────────────────────────────────
@@ -1027,6 +1184,9 @@ end
 -- ── Resource dispatcher ──────────────────────────────────────────
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^txt_") or resource_id:match("^spch_") or resource_id:match("^mus_") then
+        return load_extra(game_path, resource_id)
+    end
     -- Handle general sprite IDs: "spr_gen_GROUP_RESINDEX"
     local gen_grp, gen_ri = resource_id:match("^spr_gen_(%d+)_(%d+)$")
     if gen_grp then

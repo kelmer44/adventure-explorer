@@ -43,7 +43,9 @@ Key references used:
   `scripts/tests/scumm_v2.lua`, `LegacyEngineDecoderTest`, `ScummV2IntegrationTest`.
 - `engines/scumm/resource_v3.cpp` - old-bundle V3 index magic `0x0100`, global object table and byte-counted room/costume/script/sound directories with u16 offsets. Implemented in `scumm_v3.lua`; tested with `ags/SCUMM/LOOM` (DOS EGA).
 - `engines/scumm/resource_v4.cpp` (`readResTypeList`, `readIndexFile`) - plaintext V4 `000.LFL`, LE sizes + two-byte tags, interleaved room/u32-offset directories. `resource.cpp` (`readRoomsOffsets`, `getEncByte`, `loadResource`) - XOR-0x69 `DISKnn.LEC`, offset-12 FO room table, eight-byte LF wrapper before indexed resources. Implemented in `scumm_v4.lua`; tested with `ags/scumm/MONKEYEGA` (81 backgrounds, 606 objects, 115 costume sheets, 2,020 animation previews).
-- `engines/scumm/object.cpp` (`ScummEngine_v4::resetRoomObject`, `getObjectImage`) - V4 OC dimensions and OI image payload at +8. `costume.cpp` (`ClassicCostumeLoader::loadCostume`) - V4 CO base at zero, explicit palette, u16 limb command offsets. V3/V4 share the EGA strip decoder and hardware palette. V4 VGA, audio/fonts and non-DOS variants remain unsupported.
+- `engines/scumm/gfx.cpp` (`Gdi::getStripPtr`, `GF_SMALL_HEADER` branch) - V4 VGA `BM`/`OI` bitmaps: u32 length, then u32 strip offsets from the bitmap start, decoded with the V5 strip codecs; `room.cpp` - `PA` palette (u16 768 + RGB) and the 255 transparent-colour default. `object.cpp` (`resetRoomObject`, V4 branch) - `OC` x/8 at +9, y/8 at +10 (low 7 bits). Tested with the Spanish MI1 VGA floppy (`MONKEY_VGA_TEST_PATH`, `ScummV4AudioFontTest`).
+- `engines/scumm/sound.cpp` (`readSoundResourceSmallHeader`, `convertADResource`) - nested `SO` containers with `AD`/`WA` children or bare `RO`; AdLib music marker 0x80, 0x11-byte header plus eight 16-byte instruments before the MIDI stream, 480 PPQN, tempo `500000 * 256 / ticks`, initial ppqn/3 delay. `midiparser_ro.cpp` - Roland `RO` stream (F0/F1 delays, Ax markers, 00/FF end, 120 PPQN). `charset.cpp` (`CharsetRendererCommon::setCurID`, `CharsetRendererClassic::prepareDraw`, `drawBitsN`) - V4 font data 17 bytes into the charset resource; per-glyph width, height, offsets and a continuous bpp bit stream.
+- `engines/scumm/object.cpp` (`ScummEngine_v4::resetRoomObject`, `getObjectImage`) - V4 OC dimensions and OI image payload at +8. `costume.cpp` (`ClassicCostumeLoader::loadCostume`) - V4 CO base at zero, explicit palette, u16 limb command offsets. V3/V4 EGA share the EGA strip decoder and hardware palette. Non-DOS variants remain unsupported.
 - `engines/scumm/room.cpp`, `object.cpp` (`resetRoomObjects`, `resetRoomObject`) - V3 room dimensions, image offsets and separate object image/code tables. Invisible interaction rectangles can share the next object's image pointer; validate both strip-table width and encoded height before listing sprites.
 - `engines/scumm/gfx.cpp` (`Gdi::drawStrip`, `drawStripEGA`) - u16 strip offsets, solid/alternating/previous-column EGA runs. `costume.cpp` (`ClassicCostumeLoader`) - V3 single-byte limb command offsets and old-bundle palette/offset adjustments.
 - `engines/scumm/object.h` - ImageHeader (old/v7/v8), CodeHeader, RoomHeader layouts
@@ -136,6 +138,29 @@ Sprite/audio format notes (Serrated Scalpel):
 ### BROKEN SWORD SERIES
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/SWORD/
+
+Broken Sword 1 text, speech and music (`scripts/engines/sword1/sword1_extra.lua`):
+- `objectman.cpp` (`ObjectMan::lockText`), `staticres.cpp` (`_textList`), `swordres.h`
+  (`ENGLISH0` = 0x03000000, `FRENCH0` = 0x03010000, ...) - text cluster groups are
+  languages, resources are sections; after the 20-byte header, u32 count and u32
+  offsets at `(n + 1) * 4`, zero-terminated Latin-1 strings.
+- `sound.cpp` (`initCowSystem`, `startSpeech`) - `SPEECHn.CL3`: u32 header size, u32
+  words; room table first (byte offset into the header), line k at word `loc + 2k - 1`
+  (absolute file offset in compressed clusters) and `loc + 2k` (size). Original `.CLU`
+  speech uses a 16-bit run-length scheme from `expandSpeech` and is not decoded.
+- Tested with the English CD release with MP3 speech and music (`SWORD1_TEST_PATH`,
+  `Sword1AudioTextTest`): 6 text languages, 5,995 + 5,833 speech lines, 252 tracks.
+
+Broken Sword II text, speech and music (`scripts/engines/sword2/engine.lua`):
+- `header.h` (`ResHeader`, `TEXT_FILE` = 8), `protocol.cpp` (`fetchTextLine`) - after the
+  44-byte header, u32 line count and u32 offsets from the start of the resource; each
+  line is a u16 official text number followed by a zero-terminated Latin-1 string.
+  `function.cpp` (`fnISpeak`) uses that number as the speech id.
+- `music.cpp` (`getAudioStream`) - compressed clusters: u32 entry count, then from byte
+  12 an (offset, samples, encoded length) triple per clip.
+- Tested with the Spanish release with MP3 audio (`SWORD2_TEST_PATH`,
+  `Sword2AudioTextTest`): 112 text files, 2,841 + 3,265 speech clips, 237 + 257 music
+  clips.
 
 ### TINSEL
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -648,6 +673,27 @@ Games in `ags/sky` (SKY.DSK, SKY.DNR, SKY.CFG, SKY.RST) and `ags/lure`
   run via `inputBits`/`inputValue(raw)`, back-reference `inputValue(pos)+1` and
   `inputValue(len)+2`; bit reader re-syncs from the source after each literal run.
 
+**Lure of the Temptress** (`engines/lure`), additions in `lure_extra.lua`:
+- `sound.cpp` (`musicInterface_Play`, `MidiMusic::MidiMusic`) - banks 0x0C/0x0D (main,
+  Roland/AdLib), 0x30/0x31 (intro), 0xFF10/0xFF11 (end game): count byte, u32 offsets
+  from byte 2, standard MIDI files, optionally packed ('C'/'c' + 256 u16 words + one
+  index byte per word).
+- `disk.cpp` (`openFile`) - `lure.dat`: "lure" + version, (language, u32 offset)
+  records until 0xFF, each block a disk-style volume. `lure.h` (`LureLanguage`): 3
+  English, 5 Russian, 6 French, 7 German, 10 Italian, 17 Spanish.
+- `strings.cpp` (`StringData`) - decoder 0x3F19 (char + '0'/'1' sequence, first bit
+  lowest), string tables 0x10-0x12 (2000 ids each), names resource 9 for codes >= 0xA0.
+  The block whose decoder gives the shortest average strings is used (wrong tables
+  rarely reach the terminator).
+- `res.cpp`, `res_struct.h` - hotspots 0x3F07 (62-byte records: name id +2, size
+  +24/+26, colour offset +40, animation record +42), animations 0x3F0B (18-byte records:
+  id, disk resource, flags). `hotspots.cpp` (`Hotspot::setAnimation`) and `decode.cpp`
+  (`AnimationDecoder::decode_data`) for the frames; game palette 0x3F01 (RGB64).
+- `surface.cpp` - font resource 4 (8x8 glyphs from 32); codes 0x80-0x99 are accented
+  letters, used for the Unicode text.
+- Tested with the Spanish VGA floppy plus `lure.dat` (`LURE_TEST_PATH`, `LureExtraTest`):
+  162 MIDI entries, 102 sprite sets, 3 string tables.
+
 **Lure of the Temptress** (`engines/lure`):
 - `disk.cpp` / `disk.h` - each DISK*.VGA: `"heywow"` ident, `u16BE` file number,
   then 0xBF(191) 8-byte `FileEntry` records (`u16LE id, u8 unused, u8 sizeExtension,
@@ -665,6 +711,27 @@ Games in `ags/sky` (SKY.DSK, SKY.DNR, SKY.CFG, SKY.RST) and `ags/lure`
 - `palette.cpp` - palettes are 660-byte RGB64 resources (220 x 3 bytes, 6-bit
   components expanded with `(v<<2)+(v>>4)`); `PaletteCollection` splits them into
   64-entry sub-palettes.
+
+Sky audio and text (`sky_extra.lua`, `sky_huff.lua`):
+- `sound.cpp` (`Sound::loadSection`, `playSound`) - section driver file `60203 + 4 *
+  section`; signature bytes at `asmOfs` (0x7E, or 0x78/0x7C for v0.0109), sound count at
+  +1, sample-rate table pointer at +0x29, sfx base at +0x31. Big-endian tables: rate per
+  sound (capped at 11025), 8-byte info (paragraph offset from the base, size, loop).
+  Unsigned 8-bit PCM.
+- `music/musicbase.cpp`, `gmmusic.cpp`, `gmchannel.cpp` - files `60200 + 4 * section`,
+  song table at `u16LE(0x7DC)` (0x79B for v0.0109), per song tempo0/tempo1 and channel
+  pointers; channel bytecode: VLQ delays, notes with `_veloTab`, 0x8n channel select,
+  0x9n commands (note off, stop, instrument via `MidiDriver::_mt32ToGm`, tempo, pitch,
+  volume, loop, key off, pan, loop point, controller). Polled 50 times per second with
+  `tempo0 * tempo1 / 3000` ticks per poll.
+- `text.cpp` (`getText`, `getTextChar`, `makeGameCharacter`) and `hufftext.cpp` - text
+  files `60600 + 8 * language + section`; block size table at +4, per-message skip bytes
+  at `u16LE(+0)`, bit stream at `u16LE(+2)` in 2-bit units; nine version-specific Huffman
+  trees (generated into `sky_huff.lua`). Fonts 60150/60520/60521: 128 width bytes, then
+  12 rows of big-endian data/mask words per glyph. `disk.cpp` (`loadFile`,
+  `determineGameVersion`) for RNC payloads with or without the 22-byte header.
+- Tested with the English v0.0331 floppy (`SKY_TEST_PATH`, `SkyAudioTextTest`): 142
+  effects, 30 songs, 64 text sections in eight languages.
 
 Screens verified pixel-for-pixel against a Python `vgaDecode` reference (320x192);
 Sky backgrounds and sprites verified pixel-for-pixel against the Python RNC

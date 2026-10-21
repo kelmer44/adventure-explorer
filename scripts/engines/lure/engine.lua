@@ -25,6 +25,7 @@
 -- ============================================================================
 
 local engine = {}
+local Extra = require("lure_extra")
 engine.name        = "Lure of the Temptress"
 engine.id          = "lure"
 engine.description = "Lure of the Temptress (Revolution Software, 1992)"
@@ -360,7 +361,175 @@ function engine.get_resources(game_path)
     if #paletteNodes > 0 then
         resources[#resources + 1] = { id = "lure_palettes", name = "Palettes (" .. #paletteNodes .. ")", type = "category", children = paletteNodes }
     end
+    for _, node in ipairs(engine.extra_resources(game_path, ctx)) do resources[#resources + 1] = node end
     return resources
+end
+
+-- ============================================================================
+-- Support file (lure.dat), music and strings
+-- ============================================================================
+
+-- ScummVM's lure.dat (dists/engine-data), copied into the game folder: "lure"
+-- plus version, then (language, u32 offset) records ending in 0xFF; each block
+-- is a volume like the disks, with entry offsets relative to the block.
+local function support(game_path, ctx)
+    if ctx.support ~= nil then return ctx.support or nil end
+    ctx.support = false
+    local path
+    for _, name in ipairs({ "lure.dat", "LURE.DAT", "Lure.dat" }) do
+        if file_exists(game_path .. "/" .. name) then path = game_path .. "/" .. name; break end
+    end
+    local data = path and read_all(path)
+    if not data or data:sub(1, 4) ~= "lure" then return nil end
+    local blocks, p = {}, 7
+    while p + 4 <= #data and data:byte(p) ~= 0xFF do
+        local lang, off = data:byte(p), u32le(data, p + 1)
+        local map = parse_disk(data:sub(off + 1))
+        if map then blocks[#blocks + 1] = { lang = lang, base = off, map = map } end
+        p = p + 5
+    end
+    local function entry(block, id)
+        local e = block.map[id]
+        return e and data:sub(block.base + e.offset + 1, block.base + e.offset + e.size)
+    end
+    -- Pick the block whose string decoder fits this copy's text: every block
+    -- decodes the bit stream, but a wrong code table rarely reaches the string
+    -- terminator, so its strings run long (Spanish averages 14 characters in the
+    -- tested copy, the other tables 33 to 246). Names are left unexpanded here.
+    local tables = { [0] = get_bytes(ctx, 0x10), get_bytes(ctx, 0x11), get_bytes(ctx, 0x12) }
+    local names = get_bytes(ctx, 9)
+    local best, best_ok, best_len = nil, -1, math.huge
+    for _, b in ipairs(blocks) do
+        local codes = Extra.parse_decoder(entry(b, 0x3F19))
+        local ok, len = 0, 0
+        if codes then
+            for id = 1, 64 do
+                local t = Extra.decode(tables, codes, nil, id)
+                if t then ok = ok + 1; len = len + #t end
+            end
+        end
+        local avg = ok > 0 and len / ok or math.huge
+        if ok > best_ok or (ok == best_ok and avg < best_len) then
+            best, best_ok, best_len = { block = b, codes = codes }, ok, avg
+        end
+    end
+    if best and best_ok > 32 then
+        local chosen = best.block
+        ctx.support = { lang = chosen.lang, codes = best.codes, tables = tables, names = names,
+            entry = function(id) return entry(chosen, id) end }
+    end
+    return ctx.support or nil
+end
+
+function engine.extra_resources(game_path, ctx)
+    local out = {}
+    local banks = {}
+    for _, bank in ipairs(Extra.BANKS) do
+        local list = Extra.bank_entries(get_bytes(ctx, bank.id))
+        if list and #list > 0 then
+            local leaves = {}
+            for _, e in ipairs(list) do
+                leaves[#leaves + 1] = { id = string.format("lure_snd_%04x_%d", bank.id, e.index),
+                    name = string.format("Sound %d", e.index), type = "midi" }
+            end
+            banks[#banks + 1] = { id = string.format("lure_bank_%04x", bank.id),
+                name = string.format("%s (%d)", bank.name, #leaves), type = "category", children = leaves }
+        end
+    end
+    if #banks > 0 then out[#out + 1] = { id = "lure_music", name = "Music and sound effects", type = "category", children = banks } end
+
+    local sup = support(game_path, ctx)
+    if sup then
+        -- One entry per animation record used by a hotspot (characters, animals,
+        -- animated objects), named after the first hotspot that uses it.
+        local anims = Extra.parse_anims(sup.entry(0x3F0B))
+        local seen, sprites = {}, {}
+        for _, h in ipairs(Extra.parse_hotspots(sup.entry(0x3F07))) do
+            local a = anims[h.anim]
+            if h.anim ~= 0 and a and not seen[h.anim] and ctx.entries[a.anim_id] and h.width > 0 and h.height > 0
+                    and h.width <= 320 and h.height <= 200 -- e.g. 0x753C is a 384x2 strip, not a sprite
+                    and h.id ~= 0x411 then -- RACK_SERF_ID frames vary in size
+                seen[h.anim] = true
+                local name = h.name_id ~= 0 and Extra.decode(sup.tables, sup.codes, sup.names, h.name_id)
+                name = name and name ~= "" and Extra.to_unicode(name) or string.format("Hotspot %04x", h.id)
+                sprites[#sprites + 1] = { id = string.format("lure_anim_%04x", h.id),
+                    name = string.format("%s (%dx%d)", name, h.width, h.height), type = "animation" }
+            end
+        end
+        if #sprites > 0 then
+            out[#out + 1] = { id = "lure_sprites", name = string.format("Sprites and animations (%d)", #sprites),
+                type = "category", children = sprites }
+        end
+        local parts = {}
+        for t = 0, 2 do
+            local n = Extra.table_size(sup.tables[t])
+            if n > 0 then
+                parts[#parts + 1] = { id = "lure_txt_" .. t, name = string.format("Strings %d-%d", t * 0x7D0, t * 0x7D0 + n - 1), type = "text" }
+            end
+        end
+        if #parts > 0 then
+            out[#out + 1] = { id = "lure_text", name = "Text (" .. (Extra.LANGUAGES[sup.lang] or ("language " .. sup.lang)) .. ")",
+                type = "category", children = parts }
+        end
+    end
+    return out
+end
+
+local function load_extra(game_path, resource_id)
+    local ctx = build(game_path)
+    local bank, index = resource_id:match("^lure_snd_(%x+)_(%d+)$")
+    if bank then
+        for _, e in ipairs(Extra.bank_entries(get_bytes(ctx, tonumber(bank, 16))) or {}) do
+            if e.index == tonumber(index) then
+                local raw = get_bytes(ctx, tonumber(bank, 16)):sub(e.offset + 1, e.offset + e.size)
+                local midi = Extra.unpack_midi(raw)
+                return midi and { type = "midi", midi = midi_create_raw(midi),
+                    description = string.format("Sound bank %s entry %s — MIDI%s", bank, index, raw:sub(1, 1):lower() == "c" and " (packed)" or "") }
+            end
+        end
+        return nil
+    end
+    local hid = resource_id:match("^lure_anim_(%x+)$")
+    if hid then
+        local sup = support(game_path, ctx)
+        if not sup then return nil end
+        hid = tonumber(hid, 16)
+        local anims = Extra.parse_anims(sup.entry(0x3F0B))
+        for _, h in ipairs(Extra.parse_hotspots(sup.entry(0x3F07))) do
+            if h.id == hid and anims[h.anim] then
+                local a = anims[h.anim]
+                local frames, count = Extra.anim_frames(get_bytes(ctx, a.anim_id), h.width, h.height, h.color, a.flags)
+                if not frames then return nil end
+                local palette = palette_from_rgb64(sup.entry(0x3F01)) or {}
+                local images = {}
+                for _, px in ipairs(frames) do
+                    images[#images + 1] = image_create_indexed(h.width, h.height, px, palette, h.color)
+                end
+                local desc = string.format("Hotspot %04x — animation %04x, %d frame(s), %dx%d, colour offset %d (game palette)",
+                    hid, a.anim_id, count, h.width, h.height, h.color)
+                if #images == 1 then return { type = "image", image = images[1], description = desc } end
+                return { type = "animation", animation = animation_create(images, 120), delay_ms = 120, description = desc }
+            end
+        end
+        return nil
+    end
+    local t = tonumber(resource_id:match("^lure_txt_(%d)$") or "")
+    if t then
+        local sup = support(game_path, ctx)
+        if not sup then return nil end
+        local lines, ok = {}, 0
+        for i = 0, Extra.table_size(sup.tables[t]) - 1 do
+            local id = t * 0x7D0 + i
+            local text = Extra.decode(sup.tables, sup.codes, sup.names, id)
+            if text and text ~= "" then
+                ok = ok + 1
+                lines[#lines + 1] = string.format("%4d  %s", id, Extra.to_unicode(text))
+            end
+        end
+        return { type = "text", text = table.concat(lines, "\n"), description = string.format(
+            "%d strings (%s decoder from lure.dat); %%1/%%2 are object and character names",
+            ok, Extra.LANGUAGES[sup.lang] or ("language " .. sup.lang)) }
+    end
 end
 
 -- ============================================================================
@@ -374,6 +543,9 @@ local function load_palette_bytes(ctx, id)
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^lure_snd_") or resource_id:match("^lure_txt_") or resource_id:match("^lure_anim_") then
+        return load_extra(game_path, resource_id)
+    end
     local scrId = parse_id(resource_id, "lure_scr_")
     if scrId then
         local ctx = build(game_path)

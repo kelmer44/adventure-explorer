@@ -907,7 +907,9 @@ end
 -- trans_out (optional): value written for transparent pixels and missing strips,
 -- e.g. 256 to pair with image_create_indexed(..., 256) for an alpha channel.
 -- all_transparent: treat every strip as transparent (V8 objects, as in ScummVM).
-local function decode_smap(data, smap_offset, smap_size, width, height, num_strips, trans_color, trans_out, all_transparent)
+-- table_start: byte offset of the strip offset table from smap_offset; 8 for the
+-- big-header SMAP block, 4 for V4 small-header bitmaps (u32 length first).
+local function decode_smap(data, smap_offset, smap_size, width, height, num_strips, trans_color, trans_out, all_transparent, table_start)
     if not smap_offset or not smap_size or not width or not height then
         return nil
     end
@@ -916,7 +918,7 @@ local function decode_smap(data, smap_offset, smap_size, width, height, num_stri
 
     local offsets = {}
     for s = 0, num_strips - 1 do
-        local off_pos = smap_offset + 8 + s * 4
+        local off_pos = smap_offset + (table_start or 8) + s * 4
         if off_pos + 3 > #data then return nil end
         offsets[s] = u32le(data, off_pos)
     end
@@ -973,6 +975,9 @@ local function decode_smap(data, smap_offset, smap_size, width, height, num_stri
 
     return pixels, width, height
 end
+
+-- V4 VGA bitmaps use the same strip codecs behind a small header.
+V4.decode_smap = decode_smap
 
 -- Decode a room background: the room width counts pixels, strips are 8px wide.
 local function decode_room_background(data, room_info)
@@ -1958,7 +1963,7 @@ end
 -- stores them. The app asks for this when a node has no palette sibling.
 function engine.default_palette(game_path, resource_id)
     if resource_id:match("^v3:") then return "v3:pal" end
-    if resource_id:match("^v4:") then return "v4:pal" end
+    if resource_id:match("^v4:") then return V4.default_palette(game_path, resource_id) end
     local prefix, base, num = resource_id:match("^(%a+):([^:]+):(%d+)")
     if not base then return nil end
     local game = find_game(game_path, base)

@@ -182,6 +182,24 @@ anniversary editions are unsupported.
 Open the game data folder containing both `SKY.DSK` and `SKY.DNR`. The engine reads the
 archive and index directly from that folder.
 
+Besides backgrounds, sprites and palettes, the archive exposes:
+
+- **Sound effects** from each section's sound driver file (unsigned 8-bit PCM at the
+  rates stored in the driver).
+- **Music** from the General MIDI/MT-32 sequencer files, converted to multi-track MIDI
+  with MT-32 instruments mapped to General MIDI. Songs that loop in the game play once.
+- **Text** for every language in the archive, one entry per text section with each
+  message's number. The game's own charset is converted to Unicode.
+- **Fonts**: the main, control-panel and link fonts.
+
+Text is Huffman-coded with tables that differ between releases, and one release can mix
+them: the English v0.0331 floppy used for testing stores English, German, French and
+Italian with the v0.0348 table, Swedish and Portuguese with v0.0365 and Spanish with
+v0.0368. Each
+language therefore uses whichever of ScummVM's nine tables decodes the most common words
+of that language. In that copy, Spanish `ú` still decodes as `8` in two words. CD speech
+is not decoded (the tested copy is the floppy release).
+
 <a id="sword2"></a>
 
 ## Broken Sword II: The Smoking Mirror
@@ -191,6 +209,12 @@ archive and index directly from that folder.
 Open the data folder containing `GENERAL.CLU` and the other CLU files. If those files
 are in a subfolder of the installation, select that subfolder directly.
 
+- **Text:** every text file in `TEXT.CLU`. Each line shows its official text number,
+  which is also the id of its clip in the speech cluster.
+- **Speech and music:** `speech1.cl3`/`speech2.cl3` and `music1.cl3`/`music2.cl3`, the
+  MP3 clusters made by ScummVM's compression tool, grouped by CD in blocks of 100 clips.
+  The original `.CLU` audio and the Vorbis/FLAC `.clv`/`.clf` variants are not decoded.
+
 <a id="sword1"></a>
 
 ## Broken Sword: Shadow of the Templars
@@ -199,7 +223,14 @@ are in a subfolder of the installation, select that subfolder directly.
 
 Open the game folder containing `CLUSTERS/SWORDRES.RIF`, or open the `CLUSTERS` data
 folder directly. Keep `SWORDRES.RIF` with the cluster files, including `PARIS1.CLU` or
-`GENERAL.CLU`.
+`GENERAL.CLU`. Open the game folder itself (not `CLUSTERS`) to also see speech and music.
+
+- **Text:** every language group in `TEXT.CLU`, one entry per section, with the text ids
+  the scripts use (section × 65536 + line).
+- **Speech:** `SPEECH/SPEECH1.CL3` and `SPEECH2.CL3`, grouped by CD and room. These are
+  the MP3 speech clusters made by ScummVM's compression tool; the original uncompressed
+  `.CLU` speech and the Vorbis/FLAC `.CLV`/`.CLF` variants are not decoded.
+- **Music:** the `MP3` and `WAV` tracks in `MUSIC/`.
 
 <a id="tucker"></a>
 
@@ -792,10 +823,22 @@ Open the folder containing `DISK1.VGA` and the other game volumes (`DISK2.VGA` t
 `DISK4.VGA`). The detector also recognizes `DISK1.EGA`; detection validates the first
 volume's `heywow` signature.
 
-Lure of the Temptress character sprites are stored as nibble-packed animation streams
-whose dimensions live in `lure.dat` (the engine support file in the game's own
-executable). That data is not part of the `.VGA` disk images, so sprites are not listed;
-screen backgrounds and their palettes decode fully.
+Screens, palettes and the music/sound-effect banks (Roland and AdLib MIDI files, some
+packed) come straight from the disks.
+
+Character sprites and text also need ScummVM's `lure.dat` (from ScummVM's
+`dists/engine-data`), which holds tables ScummVM extracted from each language's
+executable. Copy it into the game folder to add:
+
+- **Sprites and animations:** one entry per animated hotspot (characters, animals,
+  animated objects), with its frames at the hotspot's size, coloured with the game
+  palette. The rack serf, whose frames vary in size, is not listed.
+- **Text:** the three string tables, in whichever language's decoder from `lure.dat`
+  fits the disks (detected automatically). `%1`/`%2` mark object and character names.
+
+The Spanish copy used for testing is not the Spanish build ScummVM's tables were made
+for, so a few letters decode as name fragments ("Skorlevolution" for "Revolution") and
+some accented letters come out wrong.
 
 <a id="mads"></a>
 
@@ -979,8 +1022,8 @@ Zak uses the same layout but has not had a real-data sweep in this change.
 **Engine ID:** `scumm`
 
 Open the folder containing the game's index and resource volumes. For V3 EGA Loom, use
-`00.LFL` and the numbered `.LFL` files; for V4 EGA Monkey Island, use `000.LFL` and
-`DISK01.LEC` through `DISK08.LEC`. For V5–V8, use the folder containing the matching
+`00.LFL` and the numbered `.LFL` files; for V4 Monkey Island, use `000.LFL`, the
+`DISKnn.LEC` volumes and the `901.LFL`-`904.LFL` charsets. For V5–V8, use the folder containing the matching
 `.000` / `.001`, `.LA0` / `.LA1` / `.LA2`, or `.SM0` / `.SM1` files. Keep any `ROOM`
 directory and accompanying `.SOU`, `.BUN` and `.NUT` files in the original layout.
 
@@ -993,19 +1036,35 @@ list. Object previews use a black backdrop where the image copies pixels from th
 surrounding scene. V3 music/sound, fonts, VGA/small-header releases and other platform
 variants are not decoded.
 
-### SCUMM V4 EGA
+### SCUMM V4 (EGA and VGA)
 
-SCUMM V4 EGA opens the original Monkey Island `000.LFL` + `DISK01.LEC` through
-`DISK08.LEC` folder directly. Verified 81 backgrounds, 606 object sprites, 115 costume
-sheets, 2,020 animation previews and the EGA palette. Room names come from the index.
-Standalone object previews use black where pixels copy the surrounding scene; costume
-previews use the existing uniform timing and key-colour backdrop.
+SCUMM V4 opens the original DOS Monkey Island `000.LFL` + `DISKnn.LEC` folder directly,
+in both the EGA (8 disks) and VGA (4 disks) floppy releases. Room names come from the
+index.
 
-V4 sound/music, fonts, VGA and other platform variants are not decoded.
+- **Rooms:** each room has its background, a **Composite** with every object image at
+  its `OC` position, and the object sprites. VGA rooms add their own 256-colour `PA`
+  palette, used by default for the room's images and for costumes stored in that room.
+  VGA bitmaps use the V5 strip codecs behind a small header; every V4 object strip uses
+  an opaque codec, so objects are drawn as solid rectangles, as in the game.
+- **Music:** AdLib (`AD`) music tracks and Roland (`RO`) streams convert to standard MIDI
+  files. AdLib OPL instrument definitions have no General MIDI equivalent, so AdLib
+  tracks play with default instruments; the Roland versions of the same songs are
+  usually closer to the original. AdLib/PC-speaker sound effects (`AD` without the music
+  marker, `WA`) are register sequences rather than notes and are not listed.
+- **Fonts:** the `901.LFL`-`904.LFL` charsets render as glyph sheets.
 
-Reopen the game folder to load the updated scripts; no conversion is required. Run
-`SCUMM_V4_TEST_PATH=/path/to/MONKEYEGA ./gradlew test --tests '*ScummV4DecoderTest'` for
-archive/detection regressions and a complete LuaJ graphics scan.
+Verified with the Spanish VGA floppy: 81 backgrounds, composites and palettes (rooms 88
+and 94 are script-only), 606 object sprites, 120 costume sheets, 2,068 animation
+previews, 38 music tracks (19 AdLib, 19 Roland) and 4 fonts. The EGA release has 81
+backgrounds, 606 object sprites, 115 costume sheets, 2,020 animation previews, 19 AdLib
+music tracks and 4 fonts. Standalone object previews use black where pixels copy the
+surrounding scene; costume previews use the existing uniform timing and key-colour
+backdrop. Non-DOS variants are not decoded.
+
+Run `SCUMM_V4_TEST_PATH=/path/to/MONKEYEGA` and/or `MONKEY_VGA_TEST_PATH=/path/to/vga`
+with `./gradlew test --tests '*ScummV4*'` for archive/detection regressions, a LuaJ
+graphics scan and the music/font checks.
 
 ### SCUMM V5–V8
 
