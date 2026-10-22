@@ -57,10 +57,14 @@ fun PreviewPane(
     playbackChoice: Boolean = false,
     adlibPlayback: AdlibPlayback = AdlibPlayback.OPL,
     onAdlibPlaybackChange: (AdlibPlayback) -> Unit = {},
+    imuse: adventureexplorer.audio.imuse.ImuseSong? = null,
+    onExportImuseWav: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
-        if (playbackChoice && (midiData != null || soundData != null)) {
+        if (imuse != null) {
+            ImusePreview(imuse, description, playbackChoice, adlibPlayback, onAdlibPlaybackChange, onExportMidi, onExportImuseWav)
+        } else if (playbackChoice && (midiData != null || soundData != null)) {
             Column(Modifier.fillMaxSize()) {
                 PlaybackSelector(adlibPlayback, onAdlibPlaybackChange)
                 Divider(color = Color(0xFF333333))
@@ -125,7 +129,7 @@ fun PreviewPane(
 // ── AdLib playback selector ───────────────────────────────────
 
 @Composable
-private fun PlaybackSelector(current: AdlibPlayback, onSelect: (AdlibPlayback) -> Unit) {
+internal fun PlaybackSelector(current: AdlibPlayback, onSelect: (AdlibPlayback) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

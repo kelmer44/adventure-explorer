@@ -19,5 +19,7 @@ data class ResourceData(
     val modelData: ModelData? = null, // static 3D geometry
     val layers: List<CompositeLayer>? = null, // non-null for composite resources; image is the flattened default
     /** The script can return this sound as OPL2 emulation or General MIDI; see [adventureexplorer.audio.AdlibPlayback]. */
-    val playbackChoice: Boolean = false
+    val playbackChoice: Boolean = false,
+    /** An interactive iMUSE song (SCUMM V5/V6 music); [midiData] holds its plain MIDI file. */
+    val imuse: adventureexplorer.audio.imuse.ImuseSong? = null
 )

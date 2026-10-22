@@ -42,9 +42,10 @@ class SoundPlayer {
             format,
             sound.samples.size.toLong() / format.frameSize
         )
-        val newClip = AudioSystem.getClip()
-        newClip.open(stream)
-        clip = newClip
+        // Without a usable output device the preview stays silent instead of failing.
+        clip = runCatching { AudioLines.clip().apply { open(stream) } }
+            .onFailure { println("Audio output unavailable: ${it.message}") }
+            .getOrNull()
         pausePosition = 0
     }
 

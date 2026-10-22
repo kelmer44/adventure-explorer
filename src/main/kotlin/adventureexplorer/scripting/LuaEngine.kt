@@ -43,6 +43,7 @@ import javax.imageio.ImageIO
  *   sound_create_lastexpress(data) -> sound_handle   (The Last Express .SND ADPCM)
  *   sound_create_harvester(data) -> sound_handle     (Harvester .CMP / FCMP IMA ADPCM)
  *   sound_create_scumm_ad(data, loom) -> sound_handle (SCUMM AD AdLib music/effect via OPL2)
+ *   imuse_create(payload, tag) -> imuse_handle (SCUMM iMUSE MIDI chunk: SMF + iMUSE SysEx; nil if not parseable)
  *   adlib_playback() -> "opl" or "midi" (the user's choice for music that can be played either way;
  *                       return playback_choice = true with such resources so the UI offers the switch)
  *   midi_create_raw(data) -> midi_handle          (data is already a standard MIDI file)
@@ -68,6 +69,9 @@ class LuaEngine {
     private var nextSoundHandle = 1
     private val midis = mutableMapOf<Int, MidiData>() // handle -> standard MIDI file bytes
     private var nextMidiHandle = 1
+
+    private val imuseSongs = mutableMapOf<Int, adventureexplorer.audio.imuse.ImuseSong>()
+    private var nextImuseHandle = 1
 
     private val models = mutableMapOf<Int, ModelData>()
     private var nextModelHandle = 1
@@ -386,6 +390,17 @@ class LuaEngine {
     // ── Sound API ───────────────────────────────────────────────────
 
     private fun registerSoundApi() {
+        globals["imuse_create"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, tag: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val song = adventureexplorer.audio.imuse.ImuseSong.parse(tag.optjstring("MIDI"), bytes) ?: return NIL
+                val handle = nextImuseHandle++
+                imuseSongs[handle] = song
+                return valueOf(handle)
+            }
+        }
+
         globals["adlib_playback"] = object : org.luaj.vm2.lib.ZeroArgFunction() {
             override fun call(): LuaValue = valueOf(adventureexplorer.audio.AdlibPlayback.current.luaName)
         }
@@ -862,6 +877,7 @@ class LuaEngine {
     fun getSound(handle: Int): SoundData? = sounds[handle]
 
     fun getMidi(handle: Int): MidiData? = midis[handle]
+    fun getImuse(handle: Int): adventureexplorer.audio.imuse.ImuseSong? = imuseSongs[handle]
 
     /** Release decoded assets between bulk-export entries without resetting the Lua script. */
     fun releaseDecodedResources() {
@@ -870,6 +886,7 @@ class LuaEngine {
         animations.clear()
         sounds.clear()
         midis.clear()
+        imuseSongs.clear()
     }
 
     fun cleanup() {
@@ -885,6 +902,8 @@ class LuaEngine {
         nextSoundHandle = 1
         midis.clear()
         nextMidiHandle = 1
+        imuseSongs.clear()
+        nextImuseHandle = 1
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

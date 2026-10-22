@@ -153,6 +153,11 @@ class ScriptManager {
                     val sound = lua.getSound(sndHandle)
                     ResourceData(type, null, description, soundData = sound)
                 }
+                "imuse" -> {
+                    val song = lua.getImuse(table.get("imuse").checkint())
+                    val midi = table.get("midi").takeIf { it.isnumber() }?.let { lua.getMidi(it.toint()) }
+                    ResourceData(type, null, description, midiData = midi, imuse = song)
+                }
                 "midi" -> {
                     val midiHandle = table.get("midi").checkint()
                     val midi = lua.getMidi(midiHandle)

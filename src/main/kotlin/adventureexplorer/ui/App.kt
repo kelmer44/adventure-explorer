@@ -195,6 +195,10 @@ fun App(searchFocusRequester: FocusRequester = remember { FocusRequester() }) {
                         },
                         midiData = appState.previewMidiData,
                         playbackChoice = appState.previewPlaybackChoice,
+                        imuse = appState.previewImuse,
+                        onExportImuseWav = {
+                            scope.launch(Dispatchers.IO) { showExportSoundWavDialog(appState) }
+                        },
                         adlibPlayback = appState.adlibPlayback,
                         onAdlibPlaybackChange = { mode ->
                             prefs.put("adlibPlayback", mode.name)

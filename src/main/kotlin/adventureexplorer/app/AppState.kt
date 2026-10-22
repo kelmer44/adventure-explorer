@@ -43,6 +43,7 @@ class AppState {
     var previewModelData by mutableStateOf<ModelData?>(null)
     var previewMidiData  by mutableStateOf<MidiData?>(null)
     var previewPlaybackChoice by mutableStateOf(false)
+    var previewImuse     by mutableStateOf<adventureexplorer.audio.imuse.ImuseSong?>(null)
     var adlibPlayback    by mutableStateOf(adventureexplorer.audio.AdlibPlayback.current)
         private set
     var previewLayers    by mutableStateOf<List<CompositeLayer>?>(null)
@@ -195,6 +196,7 @@ class AppState {
                         previewSoundData = data.soundData
                         previewMidiData = data.midiData
                         previewPlaybackChoice = data.playbackChoice
+                        previewImuse = data.imuse
                         previewModelData = data.modelData
                         previewLayers = bgWithPal?.layers ?: data.layers
                         previewPaletteOptions = allPalsCopy
@@ -220,6 +222,7 @@ class AppState {
                         previewSoundData = null
                         previewMidiData = null
                         previewPlaybackChoice = false
+                        previewImuse = null
                         previewModelData = null
                         previewLayers = null
                         statusMessage = "Failed to load ${node.name}"
@@ -473,7 +476,10 @@ class AppState {
     }
 
     fun exportSoundWav(outputPath: String) {
-        val sound = previewSoundData ?: return
+        // iMUSE AdLib songs render one pass through the OPL emulator on demand.
+        val sound = previewSoundData
+            ?: previewImuse?.takeIf { it.isAdlib }?.let { adventureexplorer.audio.imuse.ImusePlayback.renderOpl(it) }
+            ?: return
         try {
             val file = File(outputPath)
             file.parentFile?.mkdirs()

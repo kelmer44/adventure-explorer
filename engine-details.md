@@ -1124,7 +1124,35 @@ and the colour comes from `RMHD`. Some objects are solid placeholder images (for
 example two in Monkey Island 2's Woodtick) that the game rarely or never draws.
 
 Music includes MIDI tracks from sound resources and digital iMUSE audio, including
-`.BUN` music bundles for The Dig and The Curse of Monkey Island. Sound effects and
+`.BUN` music bundles for The Dig and The Curse of Monkey Island.
+
+**Interactive iMUSE (Monkey Island 2, Fate of Atlantis, Day of the Tentacle, and
+Monkey Island 1 CD's MIDI effects).** Each MIDI-family version of a sound (`ROL `,
+`ADL `, `GMD `, `SPK `) opens an iMUSE player instead of a plain MIDI preview:
+- **Play / Stop.** The song plays with its built-in loops and unconditional jumps,
+  so looping songs keep going, as in the game.
+- **Hooks.** Every armable hook in the song is listed: jumps, transpose, part
+  on/off, part volume, instrument and transpose. Each row shows the hook number,
+  where it occurs and what it does. **Arm** a hook the way the game scripts do; the
+  transition happens at the next point in the song that carries that hook. Numbers
+  below 128 disarm after firing. Part on/off hooks switch the layered instrument
+  parts heard in places like Woodtick.
+- **Events.** A log of markers reached (the signals the scripts wait on), jumps
+  taken and loops repeated.
+- **Output.**
+  - AdLib (`ADL `) versions use the AdLib playback switch: **Nuked OPL3 emulation
+    (OPL2)** plays the song's own AdLib instruments through a port of ScummVM's
+    AdLib driver; **Java MIDI synthesizer** plays program numbers as General MIDI.
+  - Roland versions map MT-32 programs to General MIDI.
+  - Transpose and detune use a 16-semitone pitch-bend range, as the original
+    General MIDI drivers do.
+- **Export** writes the MIDI file, or for AdLib in OPL mode a WAV of one pass
+  through the song, with no hooks armed, stopping when the song first loops back.
+
+Not modelled: the scripts that choose which song plays next and when they arm
+hooks (song-to-song transitions are per song only), Roland MT-32 custom timbres,
+and parameter fades. Verified: every MIDI chunk parses (MI2 405, FOA 456, DOTT 303
+versions; 4,261 / 3,609 / 3,692 hooks). Sound effects and
 speech are also available when present in the game data. See [SCUMM V2](#scummv2) for its separate background, object, mask and data coverage.
 
 <a id="comet"></a>

@@ -1,5 +1,7 @@
 package adventureexplorer.app
 
+import adventureexplorer.audio.AdlibPlayback
+import adventureexplorer.audio.imuse.ImusePlayback
 import adventureexplorer.model.ResourceData
 import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.ExportLayout
@@ -106,6 +108,13 @@ class ResourceExporter(
                         bytes[i * 3 + 2] = rgb.toByte()
                     }
                     availableFile(parent, name, ".bin").writeBytes(bytes)
+                }
+            }
+            data.imuse != null && data.imuse.isAdlib && AdlibPlayback.current == AdlibPlayback.OPL -> {
+                val sound = ImusePlayback.renderOpl(data.imuse) ?: error("iMUSE song did not render")
+                val format = AudioFormat(sound.sampleRate.toFloat(), sound.bitsPerSample, sound.channels, true, false)
+                AudioInputStream(sound.samples.inputStream(), format, sound.samples.size.toLong() / format.frameSize).use {
+                    AudioSystem.write(it, AudioFileFormat.Type.WAVE, availableFile(parent, name, ".wav"))
                 }
             }
             data.soundData != null -> {

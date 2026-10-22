@@ -151,6 +151,13 @@ function S.load_chunk(info, tag, description)
             elseif MIDI_TAGS[tag] then
                 local midi = S.midi_from_payload(chunk.payload)
                 if not midi then return { type = "text", text = "No MIDI data in " .. tag } end
+                -- iMUSE songs play interactively (loops, hooks, markers); AdLib
+                -- tracks can use the OPL emulator or Java's MIDI synthesizer.
+                local song = imuse_create and imuse_create(chunk.payload, tag)
+                if song then
+                    return { type = "imuse", imuse = song, midi = midi, playback_choice = tag == "ADL ",
+                             description = description .. " (" .. S.device_name(tag) .. ", iMUSE)" }
+                end
                 return { type = "midi", midi = midi,
                          description = description .. " (" .. MIDI_TAGS[tag] .. ")" }
             end
