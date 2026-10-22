@@ -41,6 +41,15 @@ object EncodedAudioDecoder {
             rate = r; bits = b; channels = c
             return true
         }
+        // Silence keeps its own duration; it is written at the clip's sample rate,
+        // so a leading silence block cannot fix a rate the data blocks then contradict.
+        var pendingSilence = 0.0
+        fun silence(seconds: Double) {
+            if (rate == 0) { pendingSilence += seconds; return }
+            val frames = (seconds * rate).toInt()
+            pcm.write(ByteArray(frames * channels * bits / 8) { if (bits == 16) 0 else 128.toByte() })
+        }
+        fun flushSilence() { if (pendingSilence > 0) { val s = pendingSilence; pendingSilence = 0.0; silence(s) } }
         while (p < data.size) {
             val type = data.u8(p++)
             if (type == 0) break
@@ -52,6 +61,7 @@ object EncodedAudioDecoder {
                     if (size < 2 || data.u8(p + 1) != 0) return null
                     val r = if (extendedRate > 0) extendedRate else 1_000_000 / (256 - data.u8(p))
                     if (!format(r, 8, extendedChannels)) return null
+                    flushSilence()
                     pcm.write(data, p + 2, size - 2)
                     extendedRate = 0; extendedChannels = 1
                 }
@@ -59,8 +69,7 @@ object EncodedAudioDecoder {
                 3 -> {
                     if (size < 3) return null
                     val r = 1_000_000 / (256 - data.u8(p + 2))
-                    if (!format(r, 8, 1)) return null
-                    pcm.write(ByteArray(data.le16(p) + 1) { 128.toByte() })
+                    silence((data.le16(p) + 1).toDouble() / r)
                 }
                 8 -> {
                     if (size < 4 || data.u8(p + 2) != 0) return null
@@ -72,6 +81,7 @@ object EncodedAudioDecoder {
                     val b = data.u8(p + 4); val codec = data.le16(p + 6)
                     if (!((b == 8 && codec == 0) || (b == 16 && codec == 4))) return null
                     if (!format(data.le32(p), b, data.u8(p + 5))) return null
+                    flushSilence()
                     pcm.write(data, p + 12, size - 12)
                 }
                 4, 5, 6, 7 -> Unit // markers, text, loop boundaries: preview one pass

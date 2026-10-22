@@ -666,7 +666,52 @@ function engine.get_resources(game_path)
     category("masks", "Walk Masks", masks, "msk", "image")
     category("data", "Data Files", others, "raw", "text")
 
+    -- Game text, one category per language
+    local LANGS = { ENG = "English", FRE = "French", GER = "German", ITA = "Italian", SPA = "Spanish" }
+    local by_lang = {}
+    for _, name in ipairs(archive.order) do
+        local lang = LANGS[ext_of(name)]
+        if lang then
+            by_lang[lang] = by_lang[lang] or {}
+            table.insert(by_lang[lang], name)
+        end
+    end
+    local langs = {}
+    for _, lang in pairs(LANGS) do if by_lang[lang] then langs[#langs + 1] = lang end end
+    table.sort(langs)
+    local text_cats = {}
+    for _, lang in ipairs(langs) do
+        table.sort(by_lang[lang])
+        local kids = {}
+        for _, name in ipairs(by_lang[lang]) do kids[#kids + 1] = { id = "txt:" .. name, name = name, type = "text" } end
+        text_cats[#text_cats + 1] = { id = "txtlang:" .. lang, name = string.format("%s (%d)", lang, #kids), type = "category", children = kids }
+    end
+    if #text_cats > 0 then resources[#resources + 1] = { id = "texts", name = "Text", type = "category", children = text_cats } end
+
     return resources
+end
+
+-- Text files: u16 offsets (the first one / 2 is the count); each string has a
+-- 4-byte prefix (0xFF where unused; position and colour bytes otherwise) and
+-- then zero-terminated code page 437 text.
+local cp437 = require("cp437").to_utf8
+
+local function load_strings(game_path, entry)
+    local blob, err = read_entry(game_path, entry)
+    if not blob then return { type = "text", text = err } end
+    local function u16(p) return (blob:byte(p) or 0) + (blob:byte(p + 1) or 0) * 256 end
+    local first = u16(1)
+    if first < 2 or first > #blob then return load_text(game_path, entry) end
+    local lines = {}
+    for i = 0, math.floor(first / 2) - 1 do
+        local o = u16(1 + i * 2) % 0x8000
+        if o + 4 < #blob then
+            local s = blob:match("^[^%z]*", o + 5) or ""
+            s = s:gsub("[%c]", " ")
+            lines[#lines + 1] = string.format("%3d  %s", i, cp437(s))
+        end
+    end
+    return { type = "text", text = table.concat(lines, "\n"), description = string.format("%s - %d strings", entry.name, #lines) }
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
@@ -687,6 +732,8 @@ function engine.load_resource(game_path, resource_id, palette_id)
         return load_bitmap(game_path, entry, "walk mask")
     elseif kind == "raw" then
         return load_text(game_path, entry)
+    elseif kind == "txt" then
+        return load_strings(game_path, entry)
     end
     return { type = "text", text = "Unknown resource " .. resource_id }
 end

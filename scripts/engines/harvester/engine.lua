@@ -42,6 +42,15 @@ local function u16le(data, pos)
     return data:byte(pos) + data:byte(pos + 1) * 256
 end
 
+local function bxor_aa(b)
+    local r, bit, k = 0, 1, 0xAA
+    for _ = 1, 8 do
+        if (b % 2) ~= (k % 2) then r = r + bit end
+        b, k, bit = math.floor(b / 2), math.floor(k / 2), bit * 2
+    end
+    return r
+end
+
 local function u32le(data, pos)
     return data:byte(pos)
          + data:byte(pos + 1) * 256
@@ -452,6 +461,7 @@ function engine.get_resources(game_path)
         })
     end
 
+    for _, node in ipairs(engine.extra_resources(game_path, idx_entries)) do tree[#tree + 1] = node end
     return tree
 end
 
@@ -504,6 +514,7 @@ local function build_pal_entries(game_path)
 end
 
 function engine.load_resource(game_path, resource_id)
+    if resource_id:match("^hx_") then return engine.load_extra(game_path, resource_id) end
     local pal_entries = build_pal_entries(game_path)
 
     -- Archive BM from HARVEST.DAT
@@ -573,6 +584,127 @@ function engine.load_resource(game_path, resource_id)
     end
 
     return { type = "text", text = "Unknown resource: " .. resource_id }
+end
+
+-- ============================================================================
+-- Sound effects, voices, music and text
+-- WAV effects live in HARVEST.DAT (INDEX.001); voices are FCMP clips in
+-- SOUND.DAT listed by INDEX.002; music is SOUND/MUSIC/*.CMP. Dialogue and the
+-- game script are XOR 0xAA text (CR/LF unchanged); DIALOGUE.SPN is the plain
+-- Spanish dialogue when present. Text is Latin-1 (Windows).
+-- ============================================================================
+
+local function latin1(str)
+    return (str:gsub("[\128-\255]", function(c)
+        local b = c:byte()
+        return string.char(0xC0 + math.floor(b / 64), 0x80 + b % 64)
+    end))
+end
+
+local function read_file(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local d = file_read(f, 0, file_size(f))
+    file_close(f)
+    return d
+end
+
+local function unxor(d)
+    local map = {}
+    for b = 0, 255 do map[b] = string.char((b == 13 or b == 10) and b or bxor_aa(b)) end
+    return (d:gsub(".", function(c) return map[c:byte()] end))
+end
+
+local TEXTS = {
+    { file = "DIALOGUE.SPN", name = "Dialogue (DIALOGUE.SPN)", xor = false },
+    { file = "DIALOGUE.IDX", name = "Dialogue (DIALOGUE.IDX)", xor = true },
+    { file = "HARVEST.SCR", name = "Game script (HARVEST.SCR)", xor = true },
+}
+
+local function music_dir(game_path)
+    for _, d in ipairs({ "SOUND/MUSIC", "sound/music", "Sound/Music" }) do
+        local list = list_files(game_path .. "/" .. d)
+        if list and #list > 0 then return game_path .. "/" .. d, list end
+    end
+end
+
+function engine.extra_resources(game_path, idx_entries)
+    local out = {}
+    local wavs = {}
+    for _, e in ipairs(idx_entries or {}) do
+        if e.ext == "WAV" then wavs[#wavs + 1] = { id = "hx_wav_" .. e.path, name = e.path, type = "sound" } end
+    end
+    local voices = {}
+    for _, e in ipairs(parse_xfle_index(game_path, "INDEX.002")) do
+        if e.ext == "CMP" then voices[#voices + 1] = { id = "hx_voice_" .. e.path, name = e.path:match("([^/]+)$") or e.path, type = "sound" }
+        elseif e.ext == "WAV" then wavs[#wavs + 1] = { id = "hx_wav2_" .. e.path, name = e.path .. " (SOUND.DAT)", type = "sound" } end
+    end
+    if #wavs > 0 then out[#out + 1] = { id = "hx_wavs", name = string.format("Sound effects (%d)", #wavs), type = "category", children = wavs } end
+    if #voices > 0 then out[#out + 1] = { id = "hx_voices", name = string.format("Voices (%d)", #voices), type = "category", children = voices } end
+    local dir, files = music_dir(game_path)
+    if dir then
+        table.sort(files)
+        local music = {}
+        for _, f in ipairs(files) do
+            if f:upper():match("%.CMP$") then music[#music + 1] = { id = "hx_music_" .. f, name = f, type = "sound" } end
+        end
+        if #music > 0 then out[#out + 1] = { id = "hx_music", name = string.format("Music (%d)", #music), type = "category", children = music } end
+    end
+    local texts = {}
+    local has_plain = file_exists(game_path .. "/DIALOGUE.SPN")
+    for _, t in ipairs(TEXTS) do
+        if file_exists(game_path .. "/" .. t.file) and not (t.file == "DIALOGUE.IDX" and has_plain) then
+            texts[#texts + 1] = { id = "hx_text_" .. t.file, name = t.name, type = "text" }
+        end
+    end
+    if #texts > 0 then out[#out + 1] = { id = "hx_texts", name = "Text", type = "category", children = texts } end
+    return out
+end
+
+function engine.load_extra(game_path, resource_id)
+    local path = resource_id:match("^hx_wav_(.+)$")
+    local index, dat = "INDEX.001", "HARVEST.DAT"
+    if not path then path = resource_id:match("^hx_wav2_(.+)$"); index, dat = "INDEX.002", "SOUND.DAT" end
+    if path then
+        for _, e in ipairs(parse_xfle_index(game_path, index)) do
+            if e.path == path then
+                local d = read_dat_data(game_path, dat, e.offset, e.size)
+                local snd = d and sound_create_encoded(d)
+                return snd and { type = "sound", sound = snd, description = path .. " — WAV" }
+            end
+        end
+        return nil
+    end
+    path = resource_id:match("^hx_voice_(.+)$")
+    if path then
+        for _, e in ipairs(parse_xfle_index(game_path, "INDEX.002")) do
+            if e.path == path then
+                local d = read_dat_data(game_path, "SOUND.DAT", e.offset, e.size)
+                local snd = d and sound_create_harvester(d)
+                return snd and { type = "sound", sound = snd, description = path .. " — FCMP (IMA ADPCM)" }
+            end
+        end
+        return nil
+    end
+    local name = resource_id:match("^hx_music_(.+)$")
+    if name then
+        local dir = music_dir(game_path)
+        local d = dir and read_file(dir .. "/" .. name)
+        local snd = d and sound_create_harvester(d)
+        return snd and { type = "sound", sound = snd, description = name .. " — FCMP (IMA ADPCM)" }
+    end
+    name = resource_id:match("^hx_text_(.+)$")
+    if name then
+        for _, t in ipairs(TEXTS) do
+            if t.file == name then
+                local d = read_file(game_path .. "/" .. name)
+                if not d then return nil end
+                if t.xor then d = unxor(d) end
+                d = d:gsub("\r\n", "\n")
+                return { type = "text", text = latin1(d), description = t.name }
+            end
+        end
+    end
 end
 
 return engine

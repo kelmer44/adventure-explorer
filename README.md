@@ -27,7 +27,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Una Aventura de Cine - Edición Especial](engine-details.md#alcachofa) | 2003 | `alcachofa` | Backgrounds, Sprites, Animation Previews, Masks, Speech/Sound, Text, Data | ✅ Working* |
 | [Alfred Pelrock](engine-details.md#pelrock) | 1997 | `pelrock` | Backgrounds, Palettes, Text, Sprites | ✅ Working |
 | [Amazon: Guardians of Eden](engine-details.md#amazon) | 1992 | `amazon` | Tiled Backgrounds, Screens, Sprites, Video Previews, Palettes, Sound, MIDI, Data | ✅ Working* |
-| [Alone in the Dark series](engine-details.md#aitd) | 1992-95 | `aitd` | Backgrounds, 3D Models | ✅ Working |
+| [Alone in the Dark series](engine-details.md#aitd) | 1992-95 | `aitd` | Backgrounds, 3D Models, Sound Samples, Text and Documents | ✅ Working |
 | [Another World / Out of This World (DOS)](engine-details.md#anotherworld) | 1991 | `anotherworld` | Bitmaps, Polygon Artwork, VGA/EGA Palettes, Sound Samples, Scripts, Data | ✅ Working* |
 | [Beneath a Steel Sky](engine-details.md#sky) | 1994 | `sky` | Backgrounds, Sprites (animated), Palettes, Sound Effects, Music (→ MIDI), Text (8 languages), Fonts | ✅ Working* |
 | [Broken Sword: Shadow of the Templars](engine-details.md#sword1) | 1996 | `sword1` | Backgrounds, Palettes, Sprites, Text (6 languages), Speech (MP3 clusters), Music (MP3/WAV) | ✅ Working* |
@@ -38,7 +38,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Cobra Mission](engine-details.md#cobramission) | 1992 | `cobramission` | Backgrounds, Dialogue Scripts, Names/Messages/Credits, Sound | ✅ Working* |
 | [Cruise for a Corpse](engine-details.md#cruise) | 1991 | `cruise` | Backgrounds, Sprite Frames, Polygon Actors, Palettes | ✅ Working |
 | [Curse of Enchantia](engine-details.md#curseofenchantia) | 1992 | `curseofenchantia` | Backgrounds, sprites/character frames, screen animations, PCM effects, palettes | ✅ Working |
-| [Dark Seed](engine-details.md#darkseed) | 1992 | `darkseed` | Backgrounds, Palettes, Sprites | ✅ Working |
+| [Dark Seed](engine-details.md#darkseed) | 1992 | `darkseed` | Backgrounds, Palettes, Sprites, Text, Speech, Sound Effects, Music (MIDI) | ✅ Working |
 | [Dark Seed 2](engine-details.md#darkseed2) | 1995 | `darkseed2` | Backgrounds, Sprites, UI, Room Thumbnails, Palettes | ✅ Working* |
 | [Discworld 1 & 2](engine-details.md#tinsel) | 1995/96 | `tinsel` | Backgrounds, Sprites, Animations | ✅ Working |
 | [Discworld Noir](engine-details.md#noir) | 1999 | `noir` | RGB565 Backgrounds/Screens, Sprites/Overlays, Music, Speech/Sound, Text, Scene Data | ✅ Working* |
@@ -53,11 +53,11 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Future Wars / Operation Stealth](engine-details.md#cine) | 1989/90 | `cine` | Backgrounds, Sprite Frames, Palettes | ✅ Working |
 | [Gobliiins / Gobliins 2 / Goblins Quest 3](engine-details.md#gob) | 1991-93 | `gob` | Backgrounds, Sprites, Palettes, Sound, Music | ✅ Working |
 | [Grim Fandango](engine-details.md#grim) | 1998 | `grim` | RGB565 Bitmaps, Depth Masks, Textures, Palettes, Speech, Sound, Music, Dialogue, Scene Data | ✅ Working* |
-| [Harvester](engine-details.md#harvester) | 1996 | `harvester` | Backgrounds, Sprites | ✅ Working |
+| [Harvester](engine-details.md#harvester) | 1996 | `harvester` | Backgrounds, Sprites, Sound Effects, Voices, Music, Dialogue and Script Text | ✅ Working |
 | [Hollywood Monsters](engine-details.md#hollywoodmonsters) | 1997 | `hollywoodmonsters` | Backgrounds, Sprites, Palettes, Speech, Music, Sound | ✅ Working |
 | [I Have No Mouth, and I Must Scream](engine-details.md#saga) | 1995 | `saga` | Backgrounds, Masks, Sprite Frames, Animation Previews, Palettes, Text, Speech, Sound, Music (XMI→MIDI), Data | ✅ Working* |
 | [Igor: Objective Uikokahonia](engine-details.md#igor) | 1994 | `igor` | Backgrounds, Masks, Sprites, Animations, Text, Music, Sound Effects, Speech | ✅ Working |
-| [Interspective (Innocent Until Caught, etc.)](engine-details.md#interspective) | 1993-96 | `interspective` | Backgrounds | ✅ Working |
+| [Interspective (Innocent Until Caught, etc.)](engine-details.md#interspective) | 1993-96 | `interspective` | Backgrounds, Sprites, Sound, Speech, Music, Text | ✅ Working |
 | [Jack Orlando](engine-details.md#orlando) | 1997 | `orlando` | RGB565 Backgrounds, Packed Sprites, FLX Animation Previews, Palettes, Scripts, PCM Sound, Data | ✅ Working* |
 | [L.A. Law: The Computer Game](engine-details.md#capstone) | 1992 | `capstone` | Images, ILBM Fonts/Cursors, Case Text, Music (XMI→MIDI), Speech Metadata | ✅ Working* |
 | [Leather Goddesses of Phobos 2](engine-details.md#lgop2) | 1992 | `lgop2` | Backgrounds, Sound, Music | ✅ Working |
@@ -81,17 +81,17 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Simon the Sorcerer 1 & 2](engine-details.md#agos) | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
 | [Star Trek: 25th Anniversary / Judgment Rites (DOS)](engine-details.md#startrek) | 1992/93 | `startrek` | Backgrounds, Sprites, Animation Previews, Priority Masks, Palettes, Text, VOC Sound, XMIDI Music, Data | ✅ Working* |
 | [The Beverly Hillbillies](engine-details.md#capstone) | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
-| [The Last Express](engine-details.md#lastexpress) | 1997 | `lastexpress` | Backgrounds, Animations | ✅ Working |
-| [The Legend of Kyrandia](engine-details.md#kyra1) | 1992 | `kyra1` | Backgrounds, Palettes, Animations | ✅ Working |
-| [The Legend of Kyrandia: Hand of Fate](engine-details.md#kyra2) | 1993 | `kyra2` | Backgrounds, Palettes, Animations | ✅ Working |
+| [The Last Express](engine-details.md#lastexpress) | 1997 | `lastexpress` | Backgrounds, Animations, Sounds/Speech, Subtitles | ✅ Working |
+| [The Legend of Kyrandia](engine-details.md#kyra1) | 1992 | `kyra1` | Backgrounds, Palettes, Animations, Music (XMIDI), Script Text, Fonts | ✅ Working* |
+| [The Legend of Kyrandia: Hand of Fate](engine-details.md#kyra2) | 1993 | `kyra2` | Backgrounds, Palettes, Animations, Shapes, Music (XMIDI), Sounds/Voices (VOC), Text (all languages), Fonts | ✅ Working* |
 | [The Lost Files of Sherlock Holmes: The Case of the Serrated Scalpel / The Case of the Rose Tattoo](engine-details.md#sherlock) | 1992/96 | `sherlock` | Backgrounds, Palettes, Object Sprites, Animations, Sound Effects, Speech | ✅ Working |
 | [The Neverhood](engine-details.md#neverhood) | 1996 | `neverhood` | Bitmaps, Animations, Palettes, Sounds, Music, Text, Data, Videos | ✅ Working |
 | [Toonstruck](engine-details.md#toonstruck) | 1996 | `toonstruck` | Backgrounds, Masks, Sprites & Animations, Palettes, Dialogue, Speech, Sound, Music, Data | ✅ Working* |
-| [Touché: Adventures of the Fifth Musketeer](engine-details.md#touche) | 1995 | `touche` | Backgrounds, Palettes | ✅ Working |
-| [Trick or Treat](engine-details.md#tot) | 1997 | `tot` | Backgrounds, Palettes, Objects | ✅ Working |
-| [Universe](engine-details.md#universe) | 1994 | `universe` | Backgrounds, Palettes, Masks | ✅ Working |
+| [Touché: Adventures of the Fifth Musketeer](engine-details.md#touche) | 1995 | `touche` | Backgrounds, Palettes, Sprite Sheets, Icons, Sound Effects, Music (MIDI), Text, Speech | ✅ Working |
+| [Trick or Treat](engine-details.md#tot) | 1997 | `tot` | Backgrounds, Palettes, Objects, Animations, Conversation Text, Sound Effects, Music (MIDI) | ✅ Working |
+| [Universe](engine-details.md#universe) | 1994 | `universe` | Backgrounds, Palettes, Masks, Text | ✅ Working |
 | [Visionaire Engine (Daedalic games)](engine-details.md#visionaire) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
-| [Wayne's World / The Dark Half (Capstone, Genus GXL)](engine-details.md#gxl) | 1993 | `gxl` | Images | ✅ Working |
+| [Wayne's World / The Dark Half (Capstone, Genus GXL)](engine-details.md#gxl) | 1993 | `gxl` | Images, Sound, Music, Text, Fonts, Masks | ✅ Working |
 | [Woodruff and the Schnibble of Azimuth](engine-details.md#gob) | 1994/95 | `gob` | Composed Backgrounds, Sprites, Palettes, Sound, Music, VMD Animation Clips and Soundtracks | ✅ Working* |
 
 See [Engine details](engine-details.md) for opening instructions, resource coverage,
@@ -176,7 +176,7 @@ controls, see [3D model previews](engine-details.md#3d-model-previews).
 When adding or changing an engine, update its support-table row above and its
 [Engine details](engine-details.md) entry, including the folder and files needed to open it.
 
-Engine scripts live in `scripts/engines/<engine_id>/engine.lua`. Each script returns a table with:
+Engine scripts live in `scripts/engines/<engine_id>/engine.lua`. Modules shared by several engines go in `scripts/engines/shared/` and are loaded with `require`. Each script returns a table with:
 
 ```lua
 local engine = {}
@@ -292,7 +292,8 @@ device/instruments instead of an opinionated built-in synth.
 |----------|---------|-------------|
 | `midi_create_raw(data)` | handle | Wrap data that is already a standard MIDI file |
 | `midi_create_from_cmf(data)` | handle | Convert Creative Music Format (CTMF) to standard MIDI |
-| `midi_create_from_xmi(data)` | handle | Convert XMIDI (.xmi, IFF-wrapped or bare EVNT) to standard MIDI |
+| `midi_create_from_xmi(data [, index])` | handle | Convert XMIDI (.xmi, IFF-wrapped or bare EVNT) to standard MIDI; `index` picks a sequence of a multi-song file |
+| `xmi_sequence_count(data)` / `xmi_sequence_notes(data)` | number / table | Sequences in an XMIDI file, and the note count of each |
 | `midi_create_auto(data)` | handle | Sniff the magic bytes and pick the right converter above |
 
 #### Data Helpers

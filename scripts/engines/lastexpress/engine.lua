@@ -778,6 +778,7 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = cat
     end
 
+    for _, node in ipairs(engine.audio_resources(game_path, hpf_files)) do resources[#resources + 1] = node end
     return resources
 end
 
@@ -811,7 +812,97 @@ local function read_from_hpf(game_path, hpf_name, entry_name)
     return data
 end
 
+-- ============================================================================
+-- Sounds (.SND) and subtitles (.SBE)
+-- References (ScummVM engines/lastexpress): sound/mixer.cpp (decodeSamples),
+-- sound/slot.cpp (SND header), sound/subtitle.cpp (Subtitle::load).
+-- The installed data folder (Data/HD.HPF) holds the subtitles and more sounds.
+-- ============================================================================
+
+local function data_hpfs(game_path)
+    local out = {}
+    for _, sub in ipairs({ "Data", "DATA", "data" }) do
+        for _, name in ipairs(list_files(game_path .. "/" .. sub) or {}) do
+            if name:lower():match("%.hpf$") then out[#out + 1] = sub .. "/" .. name end
+        end
+        if #out > 0 then break end
+    end
+    return out
+end
+
+function engine.audio_resources(game_path, hpf_files)
+    local all = {}
+    for _, h in ipairs(hpf_files) do all[#all + 1] = h end
+    for _, h in ipairs(data_hpfs(game_path)) do all[#all + 1] = h end
+    local sounds, subs = {}, {}
+    for _, hpf_name in ipairs(all) do
+        local fh = file_open(game_path .. "/" .. hpf_name)
+        if fh then
+            local hdr = file_read(fh, 0, math.min(file_size(fh), 4 + 50000 * 22))
+            file_close(fh)
+            local snd, sbe = {}, {}
+            for _, e in ipairs(parse_hpf(hdr) or {}) do
+                local base = e.name:match("^(.+)%.") or e.name
+                local lower = e.name:lower()
+                if lower:match("%.snd$") then
+                    snd[#snd + 1] = { id = "sndf|" .. hpf_name .. "|" .. e.name, name = base, type = "sound" }
+                elseif lower:match("%.sbe$") then
+                    sbe[#sbe + 1] = { id = "sbef|" .. hpf_name .. "|" .. e.name, name = base, type = "text" }
+                end
+            end
+            table.sort(snd, function(a, b) return a.name < b.name end)
+            table.sort(sbe, function(a, b) return a.name < b.name end)
+            if #snd > 0 then sounds[#sounds + 1] = { id = "sndcat|" .. hpf_name, name = string.format("%s (%d)", hpf_name, #snd), type = "category", children = snd } end
+            if #sbe > 0 then subs[#subs + 1] = { id = "sbecat|" .. hpf_name, name = string.format("%s (%d)", hpf_name, #sbe), type = "category", children = sbe } end
+        end
+    end
+    local out = {}
+    if #sounds > 0 then out[#out + 1] = { id = "sounds", name = "Sounds and speech", type = "category", children = sounds } end
+    if #subs > 0 then out[#out + 1] = { id = "subtitles", name = "Subtitles", type = "category", children = subs } end
+    return out
+end
+
+local function latin1_to_utf8(code)
+    if code < 0x80 then return string.char(code) end
+    if code < 0x800 then return string.char(0xC0 + math.floor(code / 64), 0x80 + code % 64) end
+    return "?"
+end
+
+-- SBE: u16 words: subtitle count, then per subtitle start and end time (sound
+-- ticks), top and bottom line lengths, then one character code per word.
+local function parse_sbe(data)
+    local function w(i) return u16le(data, 1 + i * 2) end
+    local count = w(0)
+    local p, lines = 1, {}
+    for _ = 1, count do
+        if (p + 4) * 2 > #data then break end
+        local t0, t1, top, bottom = w(p), w(p + 1), w(p + 2), w(p + 3)
+        local function text(from, n)
+            local out = {}
+            for k = 0, n - 1 do out[#out + 1] = latin1_to_utf8(w(from + k)) end
+            return table.concat(out)
+        end
+        local line = text(p + 4, top)
+        if bottom > 0 then line = line .. " / " .. text(p + 4 + top, bottom) end
+        lines[#lines + 1] = string.format("%5d-%5d  %s", t0, t1, line)
+        p = p + 4 + top + bottom
+    end
+    return lines, count
+end
+
 function engine.load_resource(game_path, resource_id, palette_id)
+    local kind, hpf_name, entry_name = resource_id:match("^(%a+)|(.+)|([^|]+)$")
+    if kind == "sndf" then
+        local data = read_from_hpf(game_path, hpf_name, entry_name)
+        local snd = data and sound_create_lastexpress(data)
+        return snd and { type = "sound", sound = snd, description = entry_name .. " — ADPCM, 22050 Hz" }
+    elseif kind == "sbef" then
+        local data = read_from_hpf(game_path, hpf_name, entry_name)
+        if not data then return nil end
+        local lines, count = parse_sbe(data)
+        return { type = "text", text = table.concat(lines, "\n"),
+            description = string.format("%s — %d subtitle(s); times in sound ticks", entry_name, count) }
+    end
     -- bgf|<hpf>|<entry>  — background from HPF
     -- seqf|<hpf>|<entry> — SEQ animation metadata
     -- lbg|<filename>     — loose BG file

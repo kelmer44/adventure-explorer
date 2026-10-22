@@ -438,6 +438,7 @@ function engine.get_resources(game_path)
         end
     end
 
+    for _, node in ipairs(engine.audio_text_resources(game_path)) do resources[#resources + 1] = node end
     return resources
 end
 
@@ -569,6 +570,7 @@ end
 
 -- Resource loader
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^ds_") then return engine.load_audio_text(game_path, resource_id) end
     local is_cd = has_picture_dir(game_path)
 
     -- Resolve a palette resource id (pal_<NAME>) to a .pal file path.
@@ -682,6 +684,133 @@ function engine.default_palette(game_path, resource_id)
     local path = scene_palette(game_path, resource_id or "", has_picture_dir(game_path))
     local name = path and path:match("([^/]+)%.[Pp][Aa][Ll]$")
     return name and ("pal_" .. name) or nil
+end
+
+-- ============================================================================
+-- Text, speech, sound effects and music
+-- References (ScummVM engines/darkseed): tostext.cpp (TosText::load/loadString),
+-- sound.cpp (speech "<n>.voc" in SPEECH/, SOUND/*.SFX and *.MID).
+-- ============================================================================
+
+local function u16le(d, p) local a, b = d:byte(p, p + 1); return (a or 0) + (b or 0) * 256 end
+
+local function ds_read(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local d = file_read(f, 0, file_size(f))
+    file_close(f)
+    return d
+end
+
+local function ds_find(game_path, names)
+    for _, n in ipairs(names) do
+        if file_exists(game_path .. "/" .. n) then return game_path .. "/" .. n end
+    end
+end
+
+local function ds_dir(game_path, name)
+    for _, n in ipairs({ name, name:lower() }) do
+        local list = list_files(game_path .. "/" .. n)
+        if list and #list > 0 then return game_path .. "/" .. n, list end
+    end
+end
+
+-- Code page 437 letters for the upper half of the DOS text.
+local CP437 = { 0xC7, 0xFC, 0xE9, 0xE2, 0xE4, 0xE0, 0xE5, 0xE7, 0xEA, 0xEB, 0xE8, 0xEF, 0xEE, 0xEC, 0xC4, 0xC5,
+    0xC9, 0xE6, 0xC6, 0xF4, 0xF6, 0xF2, 0xFB, 0xF9, 0xFF, 0xD6, 0xDC, 0xA2, 0xA3, 0xA5, 0x20A7, 0x192,
+    0xE1, 0xED, 0xF3, 0xFA, 0xF1, 0xD1, 0xAA, 0xBA, 0xBF, 0x2310, 0xAC, 0xBD, 0xBC, 0xA1, 0xAB, 0xBB }
+local function to_utf8(str)
+    return (str:gsub("[\128-\255]", function(c)
+        local cp = CP437[c:byte() - 0x7F] or 0xFFFD
+        if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64) end
+        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+    end))
+end
+
+-- TOSTEXT.BIN: u16 offsets (the first one / 2 is the entry count); each string
+-- runs to the next offset (the last one to the end of the file).
+local function tos_entries(game_path)
+    local d = ds_read(ds_find(game_path, { "TOSTEXT.BIN", "tostext.bin" }) or "")
+    if not d or #d < 4 then return nil end
+    local count = math.floor(u16le(d, 1) / 2)
+    local out = {}
+    for i = 0, count - 1 do
+        local s = u16le(d, 1 + i * 2)
+        local e = i == count - 1 and #d or u16le(d, 3 + i * 2)
+        out[i] = (s < e and s < #d) and to_utf8((d:sub(s + 1, e):gsub("[%s%z]+$", ""))) or ""
+    end
+    return out, count
+end
+
+function engine.audio_text_resources(game_path)
+    local out = {}
+    local tos, count = tos_entries(game_path)
+    if tos then
+        out[#out + 1] = { id = "ds_text", name = string.format("Text (TOSTEXT.BIN, %d entries)", count), type = "text" }
+    end
+    local dir, files = ds_dir(game_path, "SPEECH")
+    if dir then
+        local ids = {}
+        for _, f in ipairs(files) do
+            local n = tonumber(f:match("^(%d+)%.[Vv][Oo][Cc]$") or "")
+            if n then ids[#ids + 1] = n end
+        end
+        table.sort(ids)
+        local leaves = {}
+        for _, n in ipairs(ids) do
+            local line = tos and tos[n] or ""
+            if #line > 50 then line = line:sub(1, 50):gsub("[\128-\191]*$", "") .. "…" end
+            leaves[#leaves + 1] = { id = "ds_speech_" .. n, name = line ~= "" and string.format("%d — %s", n, line) or tostring(n), type = "sound" }
+        end
+        if #leaves > 0 then out[#out + 1] = { id = "ds_speech", name = string.format("Speech (%d)", #leaves), type = "category", children = leaves } end
+    end
+    dir, files = ds_dir(game_path, "SOUND")
+    if dir then
+        table.sort(files)
+        local sfx, music = {}, {}
+        for _, f in ipairs(files) do
+            local ext = (f:match("%.(%w+)$") or ""):upper()
+            if ext == "SFX" then sfx[#sfx + 1] = { id = "ds_sfx_" .. f, name = f, type = "sound" }
+            elseif ext == "MID" then
+                -- INVIS1/INVIS2.MID use another sequencer format, not standard MIDI
+                local fh = file_open(dir .. "/" .. f)
+                local head = fh and file_read(fh, 0, 4)
+                if fh then file_close(fh) end
+                if head == "MThd" then music[#music + 1] = { id = "ds_mid_" .. f, name = f, type = "midi" } end
+            end
+        end
+        if #sfx > 0 then out[#out + 1] = { id = "ds_sfxcat", name = string.format("Sound effects (%d)", #sfx), type = "category", children = sfx } end
+        if #music > 0 then out[#out + 1] = { id = "ds_music", name = string.format("Music (%d)", #music), type = "category", children = music } end
+    end
+    return out
+end
+
+function engine.load_audio_text(game_path, id)
+    if id == "ds_text" then
+        local tos, count = tos_entries(game_path)
+        if not tos then return nil end
+        local lines = {}
+        for i = 0, count - 1 do if tos[i] ~= "" then lines[#lines + 1] = string.format("%4d  %s", i, tos[i]) end end
+        return { type = "text", text = table.concat(lines, "\n"), description = string.format("TOSTEXT.BIN — %d entries; speech clip <n>.VOC speaks entry n", count) }
+    end
+    local n = id:match("^ds_speech_(%d+)$")
+    if n then
+        local dir = ds_dir(game_path, "SPEECH")
+        local d = dir and (ds_read(dir .. "/" .. n .. ".VOC") or ds_read(dir .. "/" .. n .. ".voc"))
+        local snd = d and sound_create_encoded(d)
+        return snd and { type = "sound", sound = snd, description = "Speech for text entry " .. n }
+    end
+    local name = id:match("^ds_sfx_(.+)$") or id:match("^ds_mid_(.+)$")
+    if name then
+        local dir = ds_dir(game_path, "SOUND")
+        local d = dir and ds_read(dir .. "/" .. name)
+        if not d then return nil end
+        if id:match("^ds_mid_") then
+            return { type = "midi", midi = midi_create_raw(d), description = name .. " — MIDI" }
+        end
+        local snd = sound_create_encoded(d)
+        return snd and { type = "sound", sound = snd, description = name .. " — Creative VOC" }
+    end
 end
 
 return engine

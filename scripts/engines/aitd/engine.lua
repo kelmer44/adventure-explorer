@@ -688,6 +688,7 @@ function engine.get_resources(game_path)
         end
     end
     if #banks>0 then tree[#tree+1]={id='bodies',name='3D Models',type='category',children=banks} end
+    for _, node in ipairs(engine.extra_resources(game_path)) do table.insert(tree, node) end
     return tree
 end
 
@@ -717,6 +718,7 @@ local function body_palette(path)
 end
 
 function engine.load_resource(game_path, resource_id)
+    if resource_id:match("^ax_") then return engine.load_extra(game_path, resource_id) end
     local variant      = detect_variant(game_path)
     local variant_name = VARIANT_NAMES[variant] or variant
 
@@ -770,6 +772,70 @@ function engine.load_resource(game_path, resource_id)
     end
 
     return { type = "text", text = "Unknown resource id: " .. resource_id }
+end
+
+-- ============================================================================
+-- Sound samples (LISTSAMP.PAK) and text (language PAK)
+-- ============================================================================
+
+local LANG_PAKS = { "ENGLISH", "FRANCAIS", "DEUTSCH", "ESPAGNOL", "ITALIANO", "USA" }
+
+local function pak_size(game_path, base)
+    local fh = file_open(game_path .. "/" .. base .. ".PAK")
+    if not fh then return 0 end
+    local n = pak_count(fh)
+    file_close(fh)
+    return n
+end
+
+function engine.extra_resources(game_path)
+    local out = {}
+    local n = pak_size(game_path, "LISTSAMP")
+    if n > 0 then
+        local kids = {}
+        for i = 0, n - 1 do kids[#kids + 1] = { id = "ax_samp_" .. i, name = "Sample " .. i, type = "sound" } end
+        out[#out + 1] = { id = "ax_samples", name = string.format("Sound samples (%d)", n), type = "category", children = kids }
+    end
+    local texts = {}
+    for _, lang in ipairs(LANG_PAKS) do
+        local m = pak_size(game_path, lang)
+        for i = 0, m - 1 do texts[#texts + 1] = { id = "ax_text_" .. lang .. "_" .. i, name = string.format("%s.PAK entry %d", lang, i), type = "text" } end
+    end
+    if #texts > 0 then out[#out + 1] = { id = "ax_texts", name = "Text", type = "category", children = texts } end
+    return out
+end
+
+local CP437 = { 0xC7, 0xFC, 0xE9, 0xE2, 0xE4, 0xE0, 0xE5, 0xE7, 0xEA, 0xEB, 0xE8, 0xEF, 0xEE, 0xEC, 0xC4, 0xC5,
+    0xC9, 0xE6, 0xC6, 0xF4, 0xF6, 0xF2, 0xFB, 0xF9, 0xFF, 0xD6, 0xDC, 0xA2, 0xA3, 0xA5, 0x20A7, 0x192,
+    0xE1, 0xED, 0xF3, 0xFA, 0xF1, 0xD1, 0xAA, 0xBA, 0xBF, 0x2310, 0xAC, 0xBD, 0xBC, 0xA1, 0xAB, 0xBB }
+local function cp437(str)
+    return (str:gsub("[\128-\255]", function(c)
+        local cp = CP437[c:byte() - 0x7F] or 0xFFFD
+        if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64) end
+        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+    end))
+end
+
+-- LISTSAMP.PAK entries are Creative VOC files. Language PAKs hold the game text
+-- as "@<number>:<string>" lines (code page 437); the item names and messages
+-- the game shows are looked up by number.
+function engine.load_extra(game_path, resource_id)
+    local i = tonumber(resource_id:match("^ax_samp_(%d+)$") or "")
+    if i then
+        local d = pak_entry(game_path, "LISTSAMP", i)
+        local snd = d and sound_create_encoded(d)
+        return snd and { type = "sound", sound = snd, description = string.format("LISTSAMP.PAK entry %d — VOC", i) }
+    end
+    local lang, n = resource_id:match("^ax_text_(%u+)_(%d+)$")
+    if lang then
+        local d = pak_entry(game_path, lang, tonumber(n))
+        if not d then return nil end
+        local text = cp437((d:gsub("%z.*$", ""):gsub("\r\n", "\n")))
+        local count = select(2, text:gsub("\n@%d+:", "")) + (text:match("^@%d+:") and 1 or 0)
+        local what = count > 0 and string.format("%d numbered strings", count)
+            or "book/document text (# codes such as #C are layout commands)"
+        return { type = "text", text = text, description = string.format("%s.PAK entry %s — %s", lang, n, what) }
+    end
 end
 
 return engine

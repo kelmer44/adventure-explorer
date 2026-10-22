@@ -40,9 +40,13 @@ import javax.imageio.ImageIO
  *   image_create_rgb(w, h, rgb_table) -> image_handle
  *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
  *   sound_create_gob_adl(data) -> sound_handle
+ *   sound_create_lastexpress(data) -> sound_handle   (The Last Express .SND ADPCM)
+ *   sound_create_harvester(data) -> sound_handle     (Harvester .CMP / FCMP IMA ADPCM)
  *   midi_create_raw(data) -> midi_handle          (data is already a standard MIDI file)
  *   midi_create_from_cmf(data) -> midi_handle     (Creative Music Format)
- *   midi_create_from_xmi(data) -> midi_handle     (XMIDI, IFF-wrapped or bare EVNT)
+ *   midi_create_from_xmi(data [, index]) -> midi_handle  (XMIDI, IFF-wrapped or bare EVNT)
+ *   xmi_sequence_count(data) -> number of sequences in a multi-song XMIDI file
+ *   xmi_sequence_notes(data) -> table of note counts, one per sequence
  *   midi_create_auto(data) -> midi_handle          (sniffs the magic bytes to pick a decoder)
  *   imuse_bundle_sound(path, offset, size [, channels]) -> pcm, rate, bits, channels  (SCUMM .BUN sound)
  *   imuse_stream_sound(data) -> pcm, rate, bits, channels   (resident SCUMM `iMUS` stream)
@@ -379,6 +383,30 @@ class LuaEngine {
     // ── Sound API ───────────────────────────────────────────────────
 
     private fun registerSoundApi() {
+        // sound_create_harvester(data) -> handle for a Harvester .CMP (FCMP) file
+        globals["sound_create_harvester"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val sound = adventureexplorer.audio.HarvesterCmp.decode(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
+
+        // sound_create_lastexpress(data) -> handle for a The Last Express .SND file
+        globals["sound_create_lastexpress"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val sound = adventureexplorer.audio.LastExpressAdpcm.decode(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
+
         // Decode one VOC, WAV or MP3 clip from an archive into playable PCM.
         globals["sound_create_encoded"] = object : OneArgFunction() {
             override fun call(data: LuaValue): LuaValue {
@@ -486,12 +514,29 @@ class LuaEngine {
             }
         }
 
-        // midi_create_from_xmi(data) -> midi_handle
-        // Converts an XMIDI (.xmi) resource to a standard MIDI file.
-        globals["midi_create_from_xmi"] = object : OneArgFunction() {
-            override fun call(data: LuaValue): LuaValue {
+        // midi_create_from_xmi(data [, index]) -> midi_handle
+        // Converts an XMIDI (.xmi) resource to a standard MIDI file; index (0-based)
+        // picks one sequence of a multi-song XDIR/CAT file.
+        globals["midi_create_from_xmi"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, index: LuaValue): LuaValue {
                 val bytes = toBytes(data) ?: return NIL
-                return store(XmiToMidiConverter.convert(bytes))
+                return store(XmiToMidiConverter.convert(bytes, index.optint(0)))
+            }
+        }
+
+        // xmi_sequence_notes(data) -> 1-based table of note counts, one per sequence
+        globals["xmi_sequence_notes"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return LuaTable()
+                return LuaTable().also { t -> XmiToMidiConverter.noteCounts(bytes).forEachIndexed { i, n -> t.set(i + 1, valueOf(n)) } }
+            }
+        }
+
+        // xmi_sequence_count(data) -> number of EVNT sequences in an XMIDI file
+        globals["xmi_sequence_count"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val bytes = toBytes(data) ?: return valueOf(0)
+                return valueOf(XmiToMidiConverter.sequenceCount(bytes))
             }
         }
 
@@ -771,12 +816,18 @@ class LuaEngine {
 
     fun loadScript(scriptPath: String): LuaValue {
         // Let engine scripts split themselves into sibling modules (require "name").
+        // Modules shared between engines live in scripts/engines/shared (a folder
+        // without engine.lua, so it is never loaded as an engine itself).
         val dir = File(scriptPath).absoluteFile.parentFile
         if (dir != null) {
             val pkg = globals.get("package")
-            val cur = pkg.get("path").optjstring("")
-            val entry = dir.path.replace('\\', '/') + "/?.lua"
-            if (!cur.contains(entry)) pkg.set("path", LuaValue.valueOf("$entry;$cur"))
+            var cur = pkg.get("path").optjstring("")
+            val shared = File(dir.parentFile, "shared")
+            for (folder in listOfNotNull(shared.takeIf { it.isDirectory }, dir)) {
+                val entry = folder.path.replace('\\', '/') + "/?.lua"
+                if (!cur.contains(entry)) cur = "$entry;$cur"
+            }
+            pkg.set("path", LuaValue.valueOf(cur))
         }
         val chunk = globals.loadfile(scriptPath)
         return chunk.call()

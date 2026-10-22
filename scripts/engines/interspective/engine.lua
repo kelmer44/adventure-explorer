@@ -953,6 +953,207 @@ end
 -- Resource tree
 -- ============================================================================
 
+-- ============================================================================
+-- Sound, music and text
+-- ============================================================================
+-- Sound files (`*_Snn.DAT`, GENE's `VIC_S99/S999` and `VIC_VBn/VSn` speech)
+-- are back-to-back RIFF WAVE files (GENE), Creative VOC files (GUILTY, ORION)
+-- or bare VOC block chains with a zero terminator after each clip (IUC).
+-- `*_Ann.DAT` files are XMIDI (FORM XDIR + CAT XMID); IUC's hold AdLib
+-- instruments instead and are not listed.
+-- `*_PROG.*` and `*_MAIN.*` are XOR 0x6F; dialogue strings sit inside the
+-- script bytecode as zero-terminated CP437 text, 0x0F separating lines.
+
+local cp437 = require("cp437").to_utf8
+local VOC_HEADER = "Creative Voice File\26\26\0\10\1\41\17"
+
+local function read_all(path)
+    local fh = file_open(path)
+    if not fh then return nil end
+    local data = file_read(fh, 0, file_size(fh)) or ""
+    file_close(fh)
+    return data
+end
+
+local function read_at(path, offset, len)
+    local fh = file_open(path)
+    if not fh then return nil end
+    local data = file_read(fh, offset, len)
+    file_close(fh)
+    return data
+end
+
+-- Returns { kind, offset, size } clips; kind is "wav", "voc" or "raw".
+local function sound_clips(path)
+    local fh = file_open(path)
+    if not fh then return {} end
+    local size = file_size(fh)
+    local head = file_read(fh, 0, 20) or ""
+    local clips = {}
+    if head:sub(1, 4) == "RIFF" then
+        local pos = 0
+        while pos + 8 <= size do
+            local h = file_read(fh, pos, 8)
+            if not h or h:sub(1, 4) ~= "RIFF" then break end
+            local len = u32le(h, 5) + 8
+            clips[#clips + 1] = { kind = "wav", offset = pos, size = math.min(len, size - pos) }
+            pos = pos + len
+        end
+    elseif head:sub(1, 19) == "Creative Voice File" then
+        local data = file_read(fh, 0, size)
+        local starts, pos = {}, 1
+        while true do
+            local i = data:find("Creative Voice File", pos, true)
+            if not i then break end
+            starts[#starts + 1] = i - 1
+            pos = i + 19
+        end
+        for i, start in ipairs(starts) do
+            clips[#clips + 1] = { kind = "voc", offset = start, size = (starts[i + 1] or size) - start }
+        end
+    elseif head:byte(1) == 1 then
+        local pos, start = 0, 0
+        while pos < size do
+            local h = file_read(fh, pos, 4)
+            if not h then break end
+            local t = h:byte(1)
+            if t == 0 then
+                clips[#clips + 1] = { kind = "raw", offset = start, size = pos + 1 - start }
+                pos = pos + 1
+                start = pos
+            elseif t <= 9 and #h == 4 then
+                pos = pos + 4 + h:byte(2) + h:byte(3) * 256 + h:byte(4) * 65536
+            else
+                break
+            end
+        end
+    end
+    file_close(fh)
+    return clips
+end
+
+local function is_sound_file(name)
+    local u = name:upper()
+    return u:match("^%u%u%u_S%d+%.DAT$") or u:match("^%u%u%u_V[BS]%d+%.DAT$")
+end
+
+local function is_text_file(name)
+    local u = name:upper()
+    return u:match("^%u%u%u_PROG%.%u+$") or u:match("^%u%u%u_MAIN%.%u+$")
+end
+
+local function dialogue_strings(data)
+    local key = {}
+    for i = 0, 255 do key[i] = string.char(bit32.bxor(i, 0x6F)) end
+    data = data:gsub(".", function(c) return key[c:byte()] end)
+    local out = {}
+    for s in data:gmatch("([\32-\126\128-\168\15][\32-\126\128-\168\15][\32-\126\128-\168\15]+)%z") do
+        local letters = select(2, s:gsub("[A-Za-z\128-\168]", ""))
+        if letters * 10 >= #s * 6 and s:find("[a-z\128-\168][a-z\128-\168]")
+            and not s:find("[%[%]\\%^_{|}~]") and not s:lower():find("%.dat$") then
+            out[#out + 1] = cp437((s:gsub("\15", " / ")))
+        end
+    end
+    return out
+end
+
+local function sorted_files(game_path, pred)
+    local out = {}
+    for _, f in ipairs(list_files(game_path) or {}) do
+        if pred(f) then out[#out + 1] = f end
+    end
+    table.sort(out, function(a, b)
+        local pa, na = a:upper():match("^(.-)(%d+)%.")
+        local pb, nb = b:upper():match("^(.-)(%d+)%.")
+        if pa and pb and pa == pb then return tonumber(na) < tonumber(nb) end
+        return a:upper() < b:upper()
+    end)
+    return out
+end
+
+local function extra_resources(game_path)
+    local cats = {}
+
+    local sound_groups, total = {}, 0
+    for _, f in ipairs(sorted_files(game_path, is_sound_file)) do
+        local clips = sound_clips(game_path .. "/" .. f)
+        local kids = {}
+        for i, c in ipairs(clips) do
+            kids[#kids + 1] = {
+                id = string.format("ix_%s|%s|%d|%d", c.kind, f, c.offset, c.size),
+                name = string.format("%s #%d", f, i), type = "sound",
+            }
+        end
+        if #kids == 1 then
+            kids[1].name = f
+            sound_groups[#sound_groups + 1] = kids[1]
+        elseif #kids > 1 then
+            sound_groups[#sound_groups + 1] = { id = "ixs_" .. f, name = string.format("%s (%d)", f, #kids), type = "category", children = kids }
+        end
+        total = total + #kids
+    end
+    if total > 0 then
+        cats[#cats + 1] = { id = "ix_sounds", name = string.format("Sound (%d)", total), type = "category", children = sound_groups }
+    end
+
+    local music = {}
+    for _, f in ipairs(sorted_files(game_path, function(n) return n:upper():match("^%u%u%u_A%d+%.DAT$") end)) do
+        local data = read_all(game_path .. "/" .. f)
+        if data and data:sub(1, 4) == "FORM" then
+            local notes = xmi_sequence_notes(data)
+            local songs = {}
+            for i = 1, #notes do
+                if notes[i] > 0 then
+                    songs[#songs + 1] = { id = string.format("ix_xmi|%s|%d", f, i - 1), name = string.format("%s sequence %d (%d notes)", f, i - 1, notes[i]), type = "midi" }
+                end
+            end
+            if #songs == 1 then songs[1].name = f end
+            for _, s in ipairs(songs) do music[#music + 1] = s end
+        end
+    end
+    if #music > 0 then
+        cats[#cats + 1] = { id = "ix_music", name = string.format("Music (%d)", #music), type = "category", children = music }
+    end
+
+    local texts = {}
+    for _, f in ipairs(sorted_files(game_path, is_text_file)) do
+        -- Most MAIN files hold only file names; list the ones with dialogue.
+        local n = #dialogue_strings(read_all(game_path .. "/" .. f) or "")
+        if n >= 3 then
+            texts[#texts + 1] = { id = "ix_text|" .. f, name = string.format("%s (%d strings)", f, n), type = "text" }
+        end
+    end
+    if #texts > 0 then
+        cats[#cats + 1] = { id = "ix_texts", name = string.format("Text (%d)", #texts), type = "category", children = texts }
+    end
+    return cats
+end
+
+local function load_extra(game_path, resource_id)
+    local kind, rest = resource_id:match("^ix_(%a+)|(.+)$")
+    if kind == "text" then
+        local data = read_all(game_path .. "/" .. rest)
+        if not data then return nil end
+        local lines = dialogue_strings(data)
+        for i, s in ipairs(lines) do lines[i] = string.format("%4d  %s", i - 1, s) end
+        return { type = "text", text = table.concat(lines, "\n"), description = string.format("%s — %d strings", rest, #lines) }
+    elseif kind == "xmi" then
+        local f, idx = rest:match("^(.+)|(%d+)$")
+        local data = read_all(game_path .. "/" .. f)
+        local midi = data and midi_create_from_xmi(data, tonumber(idx))
+        return midi and { type = "midi", midi = midi, description = string.format("%s sequence %s — XMIDI", f, idx) }
+    elseif kind == "wav" or kind == "voc" or kind == "raw" then
+        local f, off, len = rest:match("^(.+)|(%d+)|(%d+)$")
+        local data = read_at(game_path .. "/" .. f, tonumber(off), tonumber(len))
+        if not data then return nil end
+        if kind == "raw" then data = VOC_HEADER .. data end
+        local snd = sound_create_encoded(data)
+        local label = kind == "wav" and "WAV" or "Creative VOC"
+        return snd and { type = "sound", sound = snd, description = string.format("%s @%s — %s", f, off, label) }
+    end
+    return nil
+end
+
 function engine.get_resources(game_path)
     local prefix = detect_prefix(game_path)
     if not prefix then return {} end
@@ -1123,6 +1324,10 @@ function engine.get_resources(game_path)
         end
     end
 
+    for _, cat in ipairs(extra_resources(game_path)) do
+        resources[#resources + 1] = cat
+    end
+
     return resources
 end
 
@@ -1131,6 +1336,8 @@ end
 -- ============================================================================
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^ix_") then return load_extra(game_path, resource_id) end
+
     local prefix = detect_prefix(game_path)
     if not prefix then return nil end
 

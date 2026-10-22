@@ -121,6 +121,11 @@ Open the game data folder containing `CAMERA00.PAK` and a game marker such as
 `LISTBOD2.PAK`, `PERE.PAK`, `MER.PAK`, `AN1.PAK` or `PURSUIT.PAK`. Keep the other PAK
 files alongside them.
 
+It also lists the sound samples in `LISTSAMP.PAK` (VOC) and the text in the language
+PAK (`ENGLISH`, `FRANCAIS`, `DEUTSCH`, `ESPAGNOL`, `ITALIANO` or `USA`): entry 0 is the
+numbered string table (`@<number>:<text>`), the other entries are the books and
+documents read in the game. `LISTMUS.PAK` music is AdLib driver data and is not decoded.
+
 <a id="amazon"></a>
 
 ## Amazon: Guardians of Eden
@@ -371,6 +376,11 @@ individual frames; gameplay animation scripts and `.RS1`-`.RS5` music are not de
 Open the game folder containing `TOS.EXE`, `DS.BAT` or `START.EXE`. Keep the `PICTURE`
 subfolder for the CD version, or the `ROOM0.ROM` / numbered `ROOM*.PIC` resources in the
 root for floppy releases.
+
+It also lists the game text from `TOSTEXT.BIN` (numbered entries), the CD speech clips in
+`SPEECH/` (each named after the text entry it speaks), the `SOUND/*.SFX` effects and the
+`SOUND/*.MID` music. `INVIS1.MID` and `INVIS2.MID` use another sequencer format and are
+not listed.
 
 <a id="darkseed2"></a>
 
@@ -632,6 +642,12 @@ Open the game folder containing `HARVEST.DAT` or `HARVEST.EXE`. Keep `INDEX.001`
 `HARVEST.DAT` to browse archive members, and preserve any loose resources under
 `GRAPHIC`.
 
+It also lists the WAV sound effects (in `HARVEST.DAT` and `SOUND.DAT`), the voice clips
+in `SOUND.DAT` (`INDEX.002`), the music in `SOUND/MUSIC/*.CMP`, the dialogue
+(`DIALOGUE.SPN`, or the encrypted `DIALOGUE.IDX`) and the game script `HARVEST.SCR`.
+`.CMP` audio is IMA ADPCM; its first 50 samples are silenced, as in the game, because
+the decoder needs a moment to settle.
+
 <a id="hollywoodmonsters"></a>
 
 ## Hollywood Monsters
@@ -719,6 +735,20 @@ Validate without exporting with `lua scripts/tests/igor.lua /path/to/game`.
 Open the folder containing the game's prefixed `GRAF.DAT` or `MAIN.DAT` files, such as
 `IUC_GRAF.DAT` or `VIC_MAIN.DAT`. Recognized prefixes are `VIC_`, `IUC_`, `GBG_`,
 `CER_`, `JTL_` and `YSA_`; keep the matching resource files together.
+
+- **Sound** lists every clip in the `*_Snn.DAT` files and, for Genesis, the `VIC_S99`,
+  `VIC_S999`, `VIC_VBn` and `VIC_VSn` speech banks. Genesis stores back-to-back RIFF
+  WAVE files, Guilty and Orion Creative VOC files, and IUC bare VOC block chains with a
+  zero byte after each clip.
+- **Music** lists the XMIDI sequences in the `*_Ann.DAT` files (Genesis, Guilty, Orion).
+  IUC's `A` files hold AdLib instruments and its `R`/`SR` files Roland data; neither is
+  listed.
+- **Text** shows the dialogue strings found in the `*_PROG` and `*_MAIN` scripts (and
+  their `.ESP`, `.FRN`, `.GER`, `.ITL` translations). The files are XOR `0x6F`; strings
+  are zero-terminated CP437 inside the script bytecode, so they are listed in file order
+  without speaker or scene context, and a few fragments may be split across lines. ` / `
+  marks a line break. Orion keeps its scripts in the compressed `ORION.RNC` archive, so
+  it has no Text category.
 
 <a id="orlando"></a>
 
@@ -1202,6 +1232,11 @@ decode every resource (`catalog` lists counts only).
 Open the game or disc data folder containing `TRAIN.EXE` and its HPF archives. A folder
 containing valid `.HPF` archives can also be opened without the executable.
 
+Sounds and speech (`.SND`, the game's ADPCM at 22050 Hz) are listed per archive, and
+subtitles (`.SBE`) with their start and end times. Both are also read from the installed
+`Data` subfolder (`HD.HPF`), which holds the subtitles. The credit images (`.TGA`) are
+not decoded.
+
 <a id="kyra1"></a>
 
 ## The Legend of Kyrandia
@@ -1210,6 +1245,14 @@ containing valid `.HPF` archives can also be opened without the executable.
 
 Open the game data folder containing `GEMCUT.EMC`, with its PAK archives and other
 resources alongside it.
+
+Besides backgrounds, palettes and animations it lists the music in the `.XMI` files (one
+entry per sequence that has notes; sound effects are short sequences in the same
+files), the text in each room script's `TEXT` chunk, and the `.FNT` fonts. Character
+frames are drawn from the CPS sheets already listed (for example `BRANDON.CPS`); the
+cut-out shapes need the coordinates in ScummVM's `kyra.dat`, so they are not listed
+separately. AdLib (`.ADL`) and PC-speaker (`.SND`) music are driver programs rather than
+notes or samples and are not decoded.
 
 <a id="kyra2"></a>
 
@@ -1220,6 +1263,18 @@ resources alongside it.
 Open the game data folder containing `FATE.PAK` or `YOURPAST.TLK`. A folder containing
 `YOURPAST.CPS` is also detected if it does not contain Kyrandia 1's `GEMCUT.EMC`. Keep
 the remaining PAK and audio resources together.
+
+It also lists, from loose files and PAK archives:
+
+- **Shapes:** every `.SHP` file as a sheet of its shapes (character costumes, items,
+  scene objects), coloured with whichever palette file gives the shapes' colours the most
+  distinct values (character colours come from the scene palettes).
+- **Music:** `.XMI` sequences that have notes; `.ADL`/`.C55` driver music is not decoded.
+- **Sounds and voices:** the `.VOC` files.
+- **Text:** the `.ENG`/`.FRE`/`.GER` string tables and script `TEXT` chunks.
+- **Fonts:** the `.FNT` files.
+
+CD speech (`.TLK`) is not decoded (the tested copy is the floppy release).
 
 <a id="sherlock"></a>
 
@@ -1274,6 +1329,11 @@ mask, palette, dialogue table, and CAF animation, plus samples from each audio p
 Open the game data folder containing `TOUCHE.DAT`. The engine reads its resources
 directly from that archive.
 
+Besides room backgrounds and palettes it lists the sprite sheets (with their frame size),
+icons and inventory objects, the VOC sound effects, the MIDI music, the strings of every
+room program, and the speech clips from the `V<n>` files next to `TOUCHE.DAT`. Sprites
+and icons use the selected room palette for their character colours (193-255).
+
 <a id="tot"></a>
 
 ## Trick or Treat
@@ -1282,6 +1342,12 @@ directly from that archive.
 
 Open the game folder containing `BITMAPS.DAT`, `PANTALLA.DAT` and `PALETAS.DAT`,
 together with `TOT.EXE`, `ANIMA.EXE` or `OBJETOS.DAT`.
+
+It also lists the character and scene animations (`PERSONAJ.SPT`, the `.DAT`/`.SEC`
+animation files), the conversation text from `CONVERSA.TXT` (decrypted), the sound
+effects (loose `.VOC` files and the clips in `EFECTOS.DAT`) and the `.MUS`/`.MID` music.
+Animations use `DEFAULT.PAL` unless a room palette is selected; scene animations look
+right with their own room's palette.
 
 <a id="tsage"></a>
 
@@ -1352,6 +1418,15 @@ structures), `audio` (all sound clips), or `visual` (first frame of every AN0 ba
 Open the game data folder containing `UNIVERSE.EPF`. Select the folder itself; the
 archive is read in place.
 
+The **Text** category lists the `TEXT*.ENG`, `.FRE`, `.GER`, `.ITA` and `.SPA` files
+(53 per language) one string per line. Each file starts with a table of 16-bit offsets;
+every string carries a 4-byte prefix (screen position and colour, or `0xFF` when unused)
+followed by zero-terminated code page 437 text.
+
+Not decoded yet: the `.MCV`/`.MCB` sprite banks (the header is a count followed by
+width, height and offset records, but the pixel encoding is unknown) and the
+`BACK*.COM` files. The archive holds no digital audio.
+
 <a id="visionaire"></a>
 
 ## Visionaire
@@ -1376,6 +1451,17 @@ setup.
 Open the game data folder containing its `.GXL` files. Detection requires at least two
 valid Genus GXL archives in that folder, such as the `R*.GXL` files for Wayne's World or
 `K*.GXL` files for The Dark Half.
+
+The loose files next to the archives are listed too:
+
+- **Sound**: `*.SND` effects and speech. They are headerless 8-bit PCM; the games do not
+  store a rate, so 11,025 Hz is assumed and pitch may be slightly off.
+- **Music**: XMIDI sequences from the `*.XMI` files.
+- **Text**: `*.TXT` messages. The tested copies are Spanish translations that put the
+  accented letters in spare font slots, mapped per game to their Unicode letters. Each
+  line keeps the game's `+` terminator, padding and trailing code.
+- **Fonts**: `*.GFT` bitmap fonts as a glyph grid.
+- **Masks**: Wayne's World `*.MSK` 320x150 walk masks.
 
 ## 3D model previews
 

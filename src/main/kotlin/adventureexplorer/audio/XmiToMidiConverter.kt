@@ -14,41 +14,51 @@ object XmiToMidiConverter {
     private const val DIVISION = 60
     private const val MAX_EVENTS = 200_000
 
-    fun convert(data: ByteArray): ByteArray? {
-        val evnt = findEvntChunk(data) ?: return null
+    /** Converts the [index]th sequence (0-based) of a file that may hold several (XDIR/CAT). */
+    fun convert(data: ByteArray, index: Int = 0): ByteArray? {
+        val evnt = findEvntChunk(data, index) ?: return null
         val events = parseEvnt(data, evnt.first, evnt.second) ?: return null
         if (events.isEmpty()) return null
         return StandardMidiWriter.build(DIVISION, events)
     }
 
+    /** Note-on count of every EVNT sequence in [data], in order (0 for unreadable ones). */
+    fun noteCounts(data: ByteArray): List<Int> =
+        mutableListOf<Pair<Int, Int>>().also { scanChunks(data, 0, data.size, it) }.map { (start, size) ->
+            parseEvnt(data, start, size)?.count { e ->
+                e.bytes.size == 3 && (e.bytes[0].toInt() and 0xF0) == 0x90 && e.bytes[2].toInt() != 0
+            } ?: 0
+        }
+
+    /** Number of EVNT sequences in [data]. */
+    fun sequenceCount(data: ByteArray): Int =
+        mutableListOf<Pair<Int, Int>>().also { scanChunks(data, 0, data.size, it) }.size
+
     // ── IFF chunk scanning ──────────────────────────────────────────────
 
-    /** Returns (start, size) of the first EVNT chunk's payload found anywhere in [data]. */
-    private fun findEvntChunk(data: ByteArray): Pair<Int, Int>? {
-        val direct = scanChunks(data, 0, data.size)
-        if (direct != null) return direct
+    /** Returns (start, size) of the [index]th EVNT chunk's payload found anywhere in [data]. */
+    private fun findEvntChunk(data: ByteArray, index: Int): Pair<Int, Int>? {
+        val found = mutableListOf<Pair<Int, Int>>()
+        scanChunks(data, 0, data.size, found)
+        if (found.isNotEmpty()) return found.getOrNull(index)
         // Fall back to treating the whole buffer as an already-unwrapped EVNT stream.
-        return if (data.size > 8) 0 to data.size else null
+        return if (index == 0 && data.size > 8) 0 to data.size else null
     }
 
-    private fun scanChunks(data: ByteArray, start: Int, end: Int): Pair<Int, Int>? {
+    private fun scanChunks(data: ByteArray, start: Int, end: Int, found: MutableList<Pair<Int, Int>>) {
         var pos = start
         while (pos + 8 <= end) {
             val id = idAt(data, pos)
             val size = u32be(data, pos + 4)
             val payloadStart = pos + 8
-            if (size < 0 || payloadStart + size > end) return null
+            if (size < 0 || payloadStart + size > end) return
             when (id) {
-                "EVNT" -> return payloadStart to size
-                "FORM", "CAT " -> {
-                    // Payload starts with a 4-char type tag, then nested chunks.
-                    val nested = scanChunks(data, payloadStart + 4, payloadStart + size)
-                    if (nested != null) return nested
-                }
+                "EVNT" -> found += payloadStart to size
+                // Payload starts with a 4-char type tag, then nested chunks.
+                "FORM", "CAT " -> scanChunks(data, payloadStart + 4, payloadStart + size, found)
             }
             pos = payloadStart + size + (size and 1) // chunks are word-aligned
         }
-        return null
     }
 
     private fun idAt(data: ByteArray, pos: Int): String =

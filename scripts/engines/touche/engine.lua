@@ -113,10 +113,12 @@ function engine.get_resources(game_path)
     resources[#resources + 1] = rooms_cat
 
     file_close(f)
+    for _, node in ipairs(engine.extra_resources(game_path)) do resources[#resources + 1] = node end
     return resources
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^tx_") then return engine.load_extra(game_path, resource_id, palette_id) end
     local prefix, num_str = resource_id:match("^(%a+)_(%d+)$")
     local num = tonumber(num_str)
     if not prefix or not num then return nil end
@@ -228,6 +230,227 @@ function load_palette_swatch(game_path, room_num)
         type = "image", image = img,
         description = string.format("Room %d palette - 256 colors", room_num)
     }
+end
+
+-- ============================================================================
+-- Sprites, icons, sounds, music, text and speech
+-- References (ScummVM engines/touche): resource.cpp (resource table offsets,
+-- res_loadSprite, res_loadImage, res_loadImageHelper, res_loadSound,
+-- res_loadSpeechSegment, res_decodeProgramData), touche.cpp (getString,
+-- startMusic).
+-- ============================================================================
+
+local TABLES = {
+    sprite = { base = 0x2A0, count = 50 }, icon = { base = 0x390, count = 100 },
+    program = { base = 0x908, count = 150 }, music = { base = 0xB60, count = 50 },
+    sound = { base = 0xC28, count = 120 },
+}
+
+local function dat_path(game_path)
+    for _, n in ipairs({ "TOUCHE.DAT", "touche.dat" }) do
+        if file_exists(game_path .. "/" .. n) then return game_path .. "/" .. n end
+    end
+end
+
+-- Offsets of every resource of a type: entry n's data runs to entry n + 1.
+-- Entries past the end of the file (the music table starts with one) are empty.
+local function entries(f, kind)
+    local t = TABLES[kind]
+    local raw = file_read(f, t.base, (t.count + 1) * 4)
+    local size = file_size(f)
+    local out = {}
+    for n = 0, t.count - 1 do
+        local a, b = u32le(raw, 1 + n * 4), u32le(raw, 5 + n * 4)
+        if a > 0 and a < size and b > a and b <= size then out[#out + 1] = { num = n, offset = a, size = b - a } end
+    end
+    return out
+end
+
+local function read_entry(game_path, kind, num)
+    local f = file_open(dat_path(game_path) or "")
+    if not f then return nil end
+    local data
+    for _, e in ipairs(entries(f, kind)) do
+        if e.num == num then data = file_read(f, e.offset, e.size); break end
+    end
+    file_close(f)
+    return data
+end
+
+local CP437 = { 0xC7, 0xFC, 0xE9, 0xE2, 0xE4, 0xE0, 0xE5, 0xE7, 0xEA, 0xEB, 0xE8, 0xEF, 0xEE, 0xEC, 0xC4, 0xC5,
+    0xC9, 0xE6, 0xC6, 0xF4, 0xF6, 0xF2, 0xFB, 0xF9, 0xFF, 0xD6, 0xDC, 0xA2, 0xA3, 0xA5, 0x20A7, 0x192,
+    0xE1, 0xED, 0xF3, 0xFA, 0xF1, 0xD1, 0xAA, 0xBA, 0xBF, 0x2310, 0xAC, 0xBD, 0xBC, 0xA1, 0xAB, 0xBB }
+local function to_utf8(str)
+    return (str:gsub("[\128-\255]", function(c)
+        local cp = CP437[c:byte() - 0x7F] or 0xFFFD
+        if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64) end
+        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+    end))
+end
+
+-- Program text: u32 at +4 points at a table of u32 string offsets (relative to
+-- the table); the table ends where the first string starts.
+local function program_strings(prog)
+    if not prog or #prog < 8 then return nil end
+    local tp = u32le(prog, 5)
+    if tp + 4 > #prog then return nil end
+    local first = #prog - tp
+    local i = 0
+    while i * 4 < first do
+        local o = u32le(prog, tp + 1 + i * 4)
+        if o > 0 and o < first then first = o end
+        i = i + 1
+    end
+    local out = {}
+    for n = 0, math.floor(first / 4) - 1 do
+        local o = u32le(prog, tp + 1 + n * 4)
+        out[n] = (o > 0 and tp + o < #prog) and to_utf8(prog:match("^[^%z]*", tp + o + 1)) or ""
+    end
+    return out, math.floor(first / 4)
+end
+
+-- Speech files V<n>: (offset, size) pairs up to the first clip, each clip a VOC.
+local function speech_clips(path)
+    local f = file_open(path)
+    if not f then return nil end
+    local head = file_read(f, 0, 8)
+    local first = head and u32le(head, 1) or 0
+    local clips = {}
+    if first >= 8 and first <= 0x10000 then
+        local t = file_read(f, 0, first)
+        for i = 0, first / 8 - 1 do
+            local o, n = u32le(t, 1 + i * 8), u32le(t, 5 + i * 8)
+            if n > 0 then clips[#clips + 1] = { index = i, offset = o, size = n } end
+        end
+    end
+    file_close(f)
+    return clips
+end
+
+local function speech_files(game_path)
+    local out = {}
+    for _, name in ipairs(list_files(game_path) or {}) do
+        local n = tonumber(name:match("^[Vv](%d+)$") or "")
+        if n then out[#out + 1] = { num = n, name = name } end
+    end
+    table.sort(out, function(a, b) return a.num < b.num end)
+    return out
+end
+
+function engine.extra_resources(game_path)
+    local out = {}
+    local f = file_open(dat_path(game_path) or "")
+    if f then
+        local function cat(kind, title, leaf_type, label)
+            local leaves = {}
+            for _, e in ipairs(entries(f, kind)) do
+                leaves[#leaves + 1] = { id = string.format("tx_%s_%d", kind, e.num), name = string.format("%s %d", label, e.num), type = leaf_type }
+            end
+            if #leaves > 0 then out[#out + 1] = { id = "tx_cat_" .. kind, name = string.format("%s (%d)", title, #leaves), type = "category", children = leaves } end
+        end
+        cat("sprite", "Sprite sheets", "image", "Sprite")
+        cat("icon", "Icons and objects", "image", "Icon")
+        cat("sound", "Sound effects", "sound", "Sound")
+        cat("music", "Music (MIDI)", "midi", "Track")
+        cat("program", "Text (room programs)", "text", "Program")
+        file_close(f)
+    end
+    local voices = {}
+    for _, sf in ipairs(speech_files(game_path)) do
+        local clips = speech_clips(game_path .. "/" .. sf.name) or {}
+        local leaves = {}
+        for _, c in ipairs(clips) do
+            leaves[#leaves + 1] = { id = string.format("tx_speech_%s_%d", sf.name, c.index), name = string.format("Line %d", c.index), type = "sound" }
+        end
+        if #leaves > 0 then voices[#voices + 1] = { id = "tx_speechfile_" .. sf.name, name = string.format("%s (%d)", sf.name, #leaves), type = "category", children = leaves } end
+    end
+    if #voices > 0 then out[#out + 1] = { id = "tx_cat_speech", name = "Speech", type = "category", children = voices } end
+    return out
+end
+
+local function room_palette(game_path, palette_id)
+    local room = tonumber((palette_id or ""):match("^pal_(%d+)$") or "")
+    local f = file_open(dat_path(game_path) or "")
+    if not f then return nil end
+    local pal
+    for r = room or 0, room or (NUM_ROOMS - 1) do
+        local ptr = file_read(f, OFF_ROOM_INFO + r * 4, 4)
+        local off = ptr and u32le(ptr, 1) or 0
+        if off > 0 then
+            local raw = file_read(f, off + 6, 768)
+            if raw and #raw == 768 then
+                pal = {}
+                for i = 1, 768 do pal[i] = raw:byte(i) end
+                break
+            end
+        end
+    end
+    file_close(f)
+    return pal
+end
+
+-- Sprites and icons: u16 width, u16 height, RLE rows. res_loadImageHelper
+-- takes the frame size from the first 64/255 marker in the top row and left
+-- column, and moves colours 1-63 to 193-255 (the character part of the room
+-- palette); everything else, including the markers, is transparent. The whole
+-- sheet is returned with the frame size.
+local function decode_image(data)
+    if not data or #data < 4 then return nil end
+    local w, h = u16le(data, 1), u16le(data, 3)
+    if w == 0 or h == 0 or w > 2000 or h > 1000 then return nil end
+    local px, pos = {}, 5
+    for _ = 1, h do
+        local row
+        row, pos = decompress_rle_scanline(data, pos, w)
+        for x = 1, w do px[#px + 1] = row[x] or 0 end
+    end
+    local fh, fw = h, w
+    for y = 0, h - 1 do local c = px[y * w + 1]; if c == 64 or c == 255 then fh = y; break end end
+    for x = 0, w - 1 do local c = px[x + 1]; if c == 64 or c == 255 then fw = x; break end end
+    for i = 1, w * h do
+        local c = px[i]
+        px[i] = (c ~= 0 and c < 64) and c + 192 or 256
+    end
+    return px, w, h, fw, fh
+end
+
+function engine.load_extra(game_path, resource_id, palette_id)
+    local file, clip = resource_id:match("^tx_speech_(.+)_(%d+)$")
+    if file then
+        for _, c in ipairs(speech_clips(game_path .. "/" .. file) or {}) do
+            if c.index == tonumber(clip) then
+                local f = file_open(game_path .. "/" .. file)
+                local d = f and file_read(f, c.offset, c.size)
+                if f then file_close(f) end
+                local snd = d and sound_create_encoded(d)
+                return snd and { type = "sound", sound = snd, description = string.format("%s line %s — VOC speech", file, clip) }
+            end
+        end
+        return nil
+    end
+    local kind, num = resource_id:match("^tx_(%a+)_(%d+)$")
+    num = tonumber(num)
+    local data = kind and read_entry(game_path, kind, num)
+    if not data then return nil end
+    if kind == "sound" then
+        local snd = sound_create_encoded(data)
+        return snd and { type = "sound", sound = snd, description = string.format("Sound %d — VOC", num) }
+    elseif kind == "music" then
+        return { type = "midi", midi = midi_create_raw(data), description = string.format("Track %d — MIDI", num) }
+    elseif kind == "program" then
+        local strings, count = program_strings(data)
+        if not strings then return nil end
+        local lines = {}
+        for n = 0, count - 1 do if strings[n] ~= "" then lines[#lines + 1] = string.format("%4d  %s", n, strings[n]) end end
+        return { type = "text", text = table.concat(lines, "\n"), description = string.format("Program %d — %d strings", num, #lines) }
+    elseif kind == "sprite" or kind == "icon" then
+        local px, w, h, fw, fh = decode_image(data)
+        if not px then return nil end
+        local pal = room_palette(game_path, palette_id) or {}
+        return { type = "image", image = image_create_indexed(w, h, px, pal, 256),
+            description = string.format("%s %d — %dx%d, %dx%d frames (colours from the selected room palette)",
+                kind == "sprite" and "Sprite sheet" or "Icon", num, w, h, fw, fh) }
+    end
 end
 
 return engine

@@ -7,6 +7,7 @@
 -- ============================================================================
 
 local engine = {}
+local W = require("westwood")
 engine.name        = "The Legend of Kyrandia: Hand of Fate"
 engine.id          = "kyra2"
 engine.description = "The Legend of Kyrandia: Hand of Fate (1993, Westwood Studios)"
@@ -623,6 +624,7 @@ function engine.get_resources(game_path)
         resources[#resources + 1] = cat
     end
 
+    for _, node in ipairs(engine.ww_resources(game_path)) do resources[#resources + 1] = node end
     return resources
 end
 
@@ -717,6 +719,7 @@ local function find_scene_palette(game_path, base_name, archives)
 end
 
 function engine.load_resource(game_path, resource_id, palette_id)
+    if resource_id:match("^ww_") then return engine.ww_load(game_path, resource_id) end
     local prefix, rest = resource_id:match("^(%a+)_(.+)$")
     if not prefix then return nil end
 
@@ -888,6 +891,92 @@ function engine.load_resource(game_path, resource_id, palette_id)
         type = "image", image = img,
         description = string.format("%s - %dx%d, 256 colors", base_name or resource_id, w, h)
     }
+end
+
+-- ============================================================================
+-- Shapes, music, sounds, text and fonts (shared Westwood helpers)
+-- ============================================================================
+
+local function ww_files(game_path)
+    local out = {}
+    for _, fname in ipairs(list_files(game_path) or {}) do
+        local lower = fname:lower()
+        if lower:match("%.pak$") or lower:match("%.vrm$") or lower:match("%.apk$") then
+            local f = file_open(game_path .. "/" .. fname)
+            if f then
+                local raw = file_read(f, 0, file_size(f))
+                file_close(f)
+                for _, e in ipairs(raw and parse_pak(raw) or {}) do out[#out + 1] = { name = e.name, archive = fname } end
+            end
+        else
+            out[#out + 1] = { name = fname }
+        end
+    end
+    return out
+end
+
+-- Reads loose files or PAK members, keeping each opened archive for the reader's lifetime.
+local function ww_reader(game_path)
+    local archives = {}
+    return function(archive, name)
+        if not archive then
+            local f = file_open(game_path .. "/" .. name)
+            if not f then return nil end
+            local d = file_read(f, 0, file_size(f))
+            file_close(f)
+            return d
+        end
+        local a = archives[archive]
+        if not a then
+            local f = file_open(game_path .. "/" .. archive)
+            local raw = f and file_read(f, 0, file_size(f))
+            if f then file_close(f) end
+            a = { raw = raw, entries = {} }
+            for _, e in ipairs(raw and parse_pak(raw) or {}) do a.entries[e.name:lower()] = e end
+            archives[archive] = a
+        end
+        local e = a.entries[name:lower()]
+        return e and a.raw:sub(e.offset + 1, e.offset + e.size)
+    end
+end
+
+-- Character colours come from scene palettes, so pick the palette file that
+-- gives the colours a shape sheet uses the most distinct values.
+local function ww_palette(game_path, read)
+    return function(used)
+        local best, best_score = nil, -1
+        local candidates = {}
+        local main = find_palette(game_path)
+        if main then candidates[#candidates + 1] = main end
+        for _, f in ipairs(ww_files(game_path)) do
+            if f.name:upper():match("%.COL$") then
+                local pal = load_col_palette(read(f.archive, f.name))
+                if pal then candidates[#candidates + 1] = pal end
+            end
+        end
+        for _, pal in ipairs(candidates) do
+            local seen, score = {}, 0
+            for c in pairs(used) do
+                local key = (pal[c * 3 + 1] or 0) * 65536 + (pal[c * 3 + 2] or 0) * 256 + (pal[c * 3 + 3] or 0)
+                if not seen[key] then seen[key] = true; score = score + 1 end
+            end
+            if score > best_score then best, best_score = pal, score end
+        end
+        if not best then
+            best = {}
+            for i = 0, 255 do best[i * 3 + 1], best[i * 3 + 2], best[i * 3 + 3] = i, i, i end
+        end
+        return best
+    end
+end
+
+function engine.ww_resources(game_path)
+    return W.extra_resources(ww_files(game_path), ww_reader(game_path))
+end
+
+function engine.ww_load(game_path, resource_id)
+    local read = ww_reader(game_path)
+    return W.load_extra(resource_id, read, decompress_type4, ww_palette(game_path, read))
 end
 
 return engine

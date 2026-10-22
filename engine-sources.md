@@ -200,6 +200,15 @@ have metadata/hex only; animation scripts and blend effects are not replayed.
 ### TRICK OR TREAT
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 
+
+Animations, text and audio: `engine.cpp` (`loadAnimation`, `loadAnimationForDirection`:
+u16 frame size, u8 frame count, u8 directions, frames), `resources.cpp`
+(`loadCharAnimation`: `PERSONAJ.SPT` with only a u16 frame size; `readTextRegister`:
+263-byte `CONVERSA.TXT` records, Pascal strings XORed with `_decryptionKey` from
+`tot.cpp`), `graphics.cpp` (`putImg`: u16 width-1, u16 height-1, pixels, 0
+transparent), `sound.cpp` (`loadVoc`: loose VOC files and VOC clips in `EFECTOS.DAT`;
+`playMidi`: `.MUS` is standard MIDI). Tested with the Spanish release (`TOT_TEST_PATH`,
+`TotExtraTest`).
 ### TOONSTRUCK
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 Tool in ags/tools/Pak reader.exe
@@ -211,6 +220,16 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 
 game located in ags/Touche
 
+
+Sprites, icons, audio and text: `resource.cpp` - resource tables (sprites 0x2A0, icons
+0x390, programs 0x908, music 0xB60, sounds 0xC28; entry n runs to entry n + 1, unused
+slots share an offset), `res_loadSprite`/`res_loadImage` (u16 size + RLE rows) and
+`res_loadImageHelper` (frame size from the 64/255 markers, colours 1-63 -> 193-255),
+`res_loadSound` (VOC), `res_loadSpeechSegment` (`V<n>`: (offset, size) pairs, VOC
+clips), `res_decodeProgramData` + `touche.cpp` `getString` (u32 at +4 -> u32 string
+offsets), `startMusic` (standard MIDI). Tested with the Spanish CD (`TOUCHE_TEST_PATH`,
+`ToucheExtraTest`): 49 sprite sheets, 85 icons, 119 sounds, 25 tracks, 58 programs,
+7,989 speech clips.
 ### Shadow of the comet
 Branch on a scummvm fork https://github.com/sev-/scummvm/tree/comet
 
@@ -244,6 +263,11 @@ Free in the dark engine in https://github.com/yaz0r/FITD
 
 games in ags/INDARK
 
+
+Samples and text: `LISTSAMP.PAK` entries are Creative VOC files; language PAKs (entry 0)
+hold `@<number>:<string>` lines in code page 437, later entries are document pages with
+`#` layout codes. Tested with the Spanish AITD 1-3 (`AITD_TEST_PATH` = folder holding
+INDARK1-3, `AitdExtraTest`): 104/175/243 samples, 21/48/47 text entries.
 ### CINE
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 
@@ -332,6 +356,12 @@ Rooms 20/22 use room 19's palette; the 61A walk-map variant uses room 61's.
 Regression/full-data validation: `lua scripts/tests/darkseed.lua
 [/path/to/DSEED35] [/path/to/DARKSEED]`.
 
+Text and audio: `tostext.cpp` (`TosText::load`, `loadString`) - u16 offset table whose
+first entry / 2 is the count, strings run to the next offset; `sound.cpp` - speech
+`SPEECH/<n>.VOC` for text entry n, `SOUND/*.SFX` (Creative VOC), `SOUND/*.MID`
+(standard MIDI). Tested with the Spanish CD (`DARKSEED_TEST_PATH`,
+`DarkSeedAudioTextTest`): 979 text entries, 667 speech clips, 49 effects, 20 songs.
+
 ### Dark Seed 2
 No ScummVM engine exists for this game, so the format was reverse engineered from
 the data itself plus the Dark Seed II resource tooling:
@@ -365,6 +395,15 @@ directory of 26-byte entries (`flag u8`, `name char[12]`, NUL, `u32 offset`,
 `u32 size`, `u32 unknown`). Number of entries = `(firstDataOffset - 0x80) / 26`.
 Each entry payload is a standard version-5 PCX (8bpp, single plane, RLE) with a
 256-colour palette in the trailing 768 bytes.
+
+Loose files (from the data; the `.SND`, `.XMI` and `.GFT` names are referenced in
+`WW.EXE`/`DH.EXE`, which use the DigPak/MidPak drivers shipped beside them):
+- `*.SND` headerless unsigned 8-bit PCM; sample rate not stored (11,025 Hz assumed).
+- `*.TXT` bytes with bit 7 set are ASCII; lower bytes are spare font glyphs for Spanish
+  letters (mapping derived from word context, different per game); `0x7F` ends the file.
+- `*.GFT` Genus font: first/last character u16 at +0x24/+0x26, x-offset table and bitmap
+  u32 offsets at +0x48/+0x4C, bytes per row and height u16 at +0x50/+0x52, one 1bpp strip.
+- `*.MSK` 320x150 1bpp masks (6,000 bytes).
 
 ### CAPSTONE / Manley & Associates / Synergistic
 
@@ -404,6 +443,17 @@ Key references used:
 ### HARVESTER
 Harvester branch in this scummvm fork https://github.com/alexbevi/scummvm/tree/harvester
 
+Audio and text (`HarvesterCmp.kt`, `scripts/engines/harvester/engine.lua`): `.CMP` is
+"FCMP", u32 payload size, u32 sample rate, u16 bits, then one mono IMA ADPCM stream from
+predictor 0 / step 0, low nibble first (high-first decodes drift and clip). Sources:
+MultimediaWiki "FutureVision audio formats" and
+https://alexbevi.com/blog/2026/03/29/reverse-engineering-harvester-with-ghidra-and-codex-part-5-debugging-audio-issues/
+(the game zeroes the first 50 music samples). `INDEX.002` indexes `SOUND.DAT` (voices
+and more WAVs) with the same 148-byte XFLE records as `INDEX.001`. `DIALOGUE.IDX` and
+`HARVEST.SCR` are Latin-1 text XORed with 0xAA except CR/LF (the `0XAA.EXE` tool in the
+game folder); `DIALOGUE.SPN` is the same dialogue unencrypted. Tested with the Spanish
+release (`HARVESTER_TEST_PATH`, `HarvesterCmpTest`).
+
 game in ags/harverster
 
 ### EXPRESS
@@ -411,6 +461,16 @@ Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com
 extra tooling source code in AGS/TOOLS/EXPRESS
 
 game in ags/lastexpress
+
+Sounds and subtitles: `sound/mixer.cpp` (`decodeSamples`, `mix`) and `sound/slot.cpp` -
+`.SND` is a 6-byte header (block count at +4) then 739-byte blocks: i16 predictor, i16
+step index (x64), 735 bytes of codes, high nibble first, 22050 Hz; a block with a step
+above 88 ends the sound. ScummVM's 1424-entry delta/step tables equal IMA ADPCM with
+`delta = (2 * (code & 7) + 1) * step / 8` (clamped to 16 bits) and the standard index
+adjustment, so `LastExpressAdpcm.kt` computes them. `sound/subtitle.cpp`
+(`Subtitle::load`) - `.SBE` u16 words: count, then start, end, top length, bottom length
+and one Latin-1 character per word. Tested with the Spanish CDs
+(`LASTEXPRESS_TEST_PATH`, `LastExpressAdpcmTest`): 1,721 sounds, 227 subtitle files.
 
 ### KYRA
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -423,6 +483,22 @@ then copies into palette0[228..247] (`scene_lok.cpp`). The room `.EMC` scripts
 do not set this band (only a few call `o1_setCustomPaletteRange`).
 
 games in ags/KYRA/
+
+Shared Westwood helpers (`scripts/engines/shared/westwood.lua`, reachable from every
+engine through `require`):
+- `graphics/screen.cpp` (`DOSFont::load`, `drawChar`) - 0x0500 font signature, descriptor
+  (count - 1, height, width), bitmap/width/height tables, 4-bit rows low nibble first.
+- `graphics/screen_v2.cpp` (`getPtrToShape`) and `screen.cpp` (`drawShape`) - u16 count,
+  u32 offsets + 2; shape header (flags, height, width, unpacked size, colour count when
+  flags & 4, colour table when flags & 1 = plot type 4), LCW data unless flags & 2, row
+  runs with 0 + n transparent skips.
+- `engine/util.cpp` (`decodeString1`, `decodeString2`), `engine/kyra_hof.cpp`
+  (`getTableString`) - string tables; `script/script.cpp`, `script.h`
+  (`stackPosString`) - EMC2 `TEXT` chunk with big-endian offsets.
+- XMIDI files with several sequences use `midi_create_from_xmi(data, index)`;
+  `xmi_sequence_notes` hides empty slots.
+- Tested with Spanish Kyrandia 1 and Hand of Fate (`KYRA1_TEST_PATH`,
+  `KYRA2_TEST_PATH`, `WestwoodExtraTest`).
 
 ### HOLLYWOOD MONSTERS
 Ghidra project through the MCP server
@@ -473,6 +549,10 @@ games are:
 - The Gene Machine
 
 games in ags/interspective/
+
+Sound, music and text layouts were worked out from the game files directly: RIFF/VOC
+signatures and VOC block chains in the `S`/`VB`/`VS` files, `FORM XDIR` headers in the `A`
+files, and XOR `0x6F` on the `PROG`/`MAIN` scripts (the copyright string decodes cleanly).
 
 ### Queen
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
@@ -528,6 +608,8 @@ DOS loader in UNIVERSE.EXE and by decoding UNIVERSE.EPF directly:
 - `UNIVERSE.EXE` 0xb74a  compression method 1, the canonical-code Huffman/LZ
                     decompressor reimplemented in the engine script
 - `UNIVERSE.EXE` 0xba09  code-width and mask setup (9 bits, widening to 14)
+- `TEXT*.<lang>` text files: layout (u16 offset table, 4-byte prefix, zero-terminated
+  CP437 strings) worked out by inspecting the decompressed entries
 
 game in ags/universe/
 
