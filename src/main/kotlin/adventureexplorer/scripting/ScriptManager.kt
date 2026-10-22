@@ -163,7 +163,8 @@ class ScriptManager {
             val paletteHandle = table.get("palette_image")
             return resource.copy(
                 paletteImage = if (paletteHandle.isnil()) null else lua.getImage(paletteHandle.checkint()),
-                paletteColors = table.get("palette_colors").optint(256).coerceIn(1, 256)
+                paletteColors = table.get("palette_colors").optint(256).coerceIn(1, 256),
+                playbackChoice = table.get("playback_choice").optboolean(false)
             )
         } catch (e: Exception) {
             println("Error loading resource '$resourceId': ${e.message}")

@@ -131,6 +131,7 @@ class ScummV4DecoderTest {
                 val result = manager.loadResource(root, node.id) ?: error("Failed ${node.id}")
                 if (result.type == "text") assertTrue(node.id, result.textContent!!.contains("no visible cels"))
                 else if (node.type == "midi") assertTrue(node.id, result.midiData!!.bytes.copyOfRange(0, 4).contentEquals("MThd".toByteArray()))
+                else if (node.type == "sound") assertNotNull(node.id, result.soundData)
                 else assertTrue(node.id, result.image != null || !result.frames.isNullOrEmpty())
                 if (node.id in exportIds && result.image != null) {
                     ImageIO.write(result.image, "png", File(previews, node.id.replace(':', '_') + ".png"))

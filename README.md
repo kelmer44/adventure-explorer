@@ -73,8 +73,8 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Runaway: A Road Adventure](engine-details.md#runaway) | 2001 | `runaway` | RGB565 Backgrounds, Sprites & Animation Previews, Overlays, Masks, Music, Speech, Sound Effects, Data | ✅ Working* |
 | [Sanitarium](engine-details.md#asylum) | 1998 | `asylum` | Backgrounds, Sprites/UI, Fonts, Aligned Animation Previews, Masks, Palettes, WAV Audio, Text, Data | ✅ Working* |
 | [SCUMM V2 (Maniac Mansion, Zak McKracken)](engine-details.md#scummv2) | 1988-89 | `scummv2` | Backgrounds, object sprites, occlusion masks, object data, EGA palette | ✅ Working |
-| [SCUMM V3 EGA (tested: Loom)](engine-details.md#scumm) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations | ✅ Working* |
-| [SCUMM V4 EGA/VGA (tested: Monkey Island)](engine-details.md#scumm) | 1990-91 | `scumm` | Backgrounds, Room Composites, EGA/VGA Palettes, Object & Actor Sprites, Costume Animations, Music (AdLib/Roland → MIDI), Fonts | ✅ Working* |
+| [SCUMM V3 EGA (tested: Loom)](engine-details.md#scumm) | 1989-90 | `scumm` | Backgrounds, EGA Palette, Object & Actor Sprites, Costume Animations, AdLib Music & Sound Effects | ✅ Working* |
+| [SCUMM V4 EGA/VGA (tested: Monkey Island)](engine-details.md#scumm) | 1990-91 | `scumm` | Backgrounds, Room Composites, EGA/VGA Palettes, Object & Actor Sprites, Costume Animations, Music (AdLib via OPL2 emulation, Roland → MIDI), AdLib Sound Effects, Fonts | ✅ Working* |
 | [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Room Composites, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (MIDI + digital iMUSE), Sound Effects, Speech | ✅ Working |
 | [Shadow of the Comet](engine-details.md#comet) | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
 | [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
@@ -164,6 +164,11 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 3. The app auto-detects the game engine and populates the resource tree
 4. Click on a resource to preview it
 5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
+   - AdLib music that can be played two ways (currently SCUMM V3/V4 `AD` music in Loom and
+     Monkey Island 1) shows an **AdLib playback** switch above the player: **Nuked OPL3
+     emulation (OPL2)** plays the game's own instruments on an emulated AdLib chip;
+     **Java MIDI synthesizer (General MIDI)** plays a MIDI conversion with default
+     instruments. The choice is remembered and also applies to exports.
 6. Click **Export PNG** in the image preview to save the current image, or use the animation export buttons to save individual frames or the full sequence
 7. Open the toolbar's **Export** menu and choose **Export all**, **Export selected folder**, or a category with its resource count. In the output folder dialog, choose **Resource tree path** to preserve the hierarchy or **Same folder** to place resources together (for example, all backgrounds in one folder). Choose **1× (original size)**, **2×**, or **3×** for PNG images and animation frames; scaling uses nearest-neighbor pixels and preserves transparency. Animations keep their own frame folders in either layout. Category exports omit unrelated branches. Background and sprite roles are inferred from engine folder labels and resource names/IDs; animations, images, sounds, MIDI, palettes, text, and data use explicit resource types. Categories can overlap: a sprite animation appears under both Sprites and Animations; Images (all) includes backgrounds and sprite stills.
 8. Choose an output folder. Images use PNG, animations get numbered PNG frames with timing information, sounds use WAV, music uses MIDI, and text/metadata use TXT. Palettes include PNG swatches and RGB BIN files. Existing files are preserved by adding numbered suffixes; failed resources are listed in `export-errors.txt`. Click **Stop export** to stop after the current decode or file write; files already exported are kept.
@@ -278,8 +283,10 @@ return {
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `sound_create_pcm(rate, bits, channels, signed, data)` | handle | Create playable raw PCM audio |
-| `sound_create_gob_adl(data)` | handle | Render Coktel Vision ADL/OPL music to PCM |
-| `sound_create_gob_mdy(song, timbres)` | handle | Render MDY/TBR AdLib music to PCM |
+| `sound_create_gob_adl(data)` | handle | Render Coktel Vision ADL music to PCM through OPL2 emulation |
+| `sound_create_gob_mdy(song, timbres)` | handle | Render MDY/TBR AdLib music to PCM through OPL2 emulation |
+| `sound_create_scumm_ad(data, loom)` | handle | Render a SCUMM `AD` AdLib music or effect resource through OPL2 emulation |
+| `adlib_playback()` | `"opl"` / `"midi"` | The user's AdLib playback choice. Scripts that can return a resource either way pick by it and set `playback_choice = true` in the result so the preview shows the switch |
 | `sound_create_coktel_video(data)` | handle | Decode a Woodruff VMD soundtrack to PCM |
 
 #### MIDI

@@ -235,11 +235,12 @@ end
 -- definitions, then a MIDI event stream. Mirrors ScummVM convertADResource with
 -- its fixed 480 PPQN, tempo 500000 * 256 / ticks and initial ppqn/3 delay.
 -- The OPL instruments have no General MIDI equivalent and are dropped.
-function V.ad_to_midi(ad)
+function V.ad_to_midi(ad, loom)
     if #ad < 2 + 0x11 + 128 + 1 or ad:byte(3) ~= 0x80 then return nil end
     local ticks = ad:byte(4)
     if ticks == 0 then return nil end
-    local tempo = math.min(0xFFFFFF, math.floor(500000 * 256 / ticks))
+    -- ScummVM convertADResource: Loom (V3) reads the ticks value differently.
+    local tempo = math.min(0xFFFFFF, math.floor(loom and 500000 * 480 / 4 / ticks or 500000 * 256 / ticks))
     local track = ad:sub(2 + 0x11 + 128 + 1)
     -- Cut after the track's own end-of-track; trailing bytes are not MIDI events.
     -- The stream starts with an event (ScummVM writes the first delay itself).
@@ -269,6 +270,19 @@ function V.ad_to_midi(ad)
     return smf(480, "\0\255\81\3" .. be32(tempo):sub(2) .. vlq(160) .. track)
 end
 
+-- AdLib music in the user's chosen form: the game's instruments on the
+-- emulated OPL2 chip, or the General MIDI conversion for Java's synthesizer.
+function V.load_ad(ad, loom, label)
+    if adlib_playback() == "midi" then
+        local data = V.ad_to_midi(ad, loom)
+        return data and { type = "midi", midi = midi_create_raw(data), playback_choice = true,
+            description = label .. " (General MIDI conversion; AdLib instruments not converted)" }
+    end
+    local snd = sound_create_scumm_ad(ad, loom)
+    return snd and { type = "sound", sound = snd, playback_choice = true,
+        description = label .. " (Nuked OPL3 emulation)" }
+end
+
 -- Roland 'RO' stream (ScummVM MidiParser_RO): Fx delays (F1 adds 256), Ax
 -- markers, 00 or FF end, and 8x/9x/Bx/Cx channel events. 120 PPQN, 120 BPM.
 function V.ro_to_midi(ro)
@@ -292,6 +306,9 @@ end
 local function sound_kind(parts)
     if parts.ro then return "ro", "Roland MT-32 music" end
     if parts.AD and parts.AD:byte(3) == 0x80 then return "ad", "AdLib music" end
+    -- AdLib effects start with an instrument or note definition after the
+    -- priority and channel bytes.
+    if parts.AD and (parts.AD:byte(3) == 1 or parts.AD:byte(3) == 2) then return "adsfx", "AdLib effect" end
     return nil
 end
 
@@ -418,13 +435,18 @@ function V.get_resources(path)
     if #costumes > 0 then out[#out + 1] = { id = "v4:costumes", name = "Costumes / actor sprites",
         type = "category", children = costumes } end
 
-    local music, skipped = {}, 0
+    local music, effects, skipped = {}, {}, 0
     for id = 0, 255 do
         local parts = s.idx.sounds[id] and sound_parts(s, id)
         if parts then
             local kind, label = sound_kind(parts)
-            if kind then
-                music[#music + 1] = { id = "v4:snd:" .. id, name = string.format("Sound %d — %s", id, label), type = "midi" }
+            if kind == "adsfx" then
+                effects[#effects + 1] = { id = "v4:sfx:" .. id, name = string.format("Sound %d — %s", id, label), type = "sound" }
+            elseif kind then
+                -- AdLib music plays as OPL2 emulation or General MIDI (the user's
+                -- choice); Roland converts to MIDI.
+                music[#music + 1] = { id = "v4:snd:" .. id, name = string.format("Sound %d — %s", id, label),
+                    type = kind == "ad" and "sound" or "midi" }
             else
                 skipped = skipped + 1
             end
@@ -432,8 +454,11 @@ function V.get_resources(path)
     end
     if #music > 0 then
         local name = string.format("Music (%d)", #music)
-        if skipped > 0 then name = name .. string.format(" — %d AdLib/PC-speaker effects not shown", skipped) end
+        if skipped > 0 then name = name .. string.format(" — %d PC-speaker-only sounds not shown", skipped) end
         out[#out + 1] = { id = "v4:music", name = name, type = "category", children = music }
+    end
+    if #effects > 0 then
+        out[#out + 1] = { id = "v4:effects", name = string.format("AdLib sound effects (%d)", #effects), type = "category", children = effects }
     end
 
     local fonts = {}
@@ -488,15 +513,21 @@ function V.load_resource(path, id, palette_id)
             end
         end
         return nil
-    elseif kind == "snd" then
+    elseif kind == "snd" or kind == "sfx" then
         local parts = sound_parts(s, number)
         if not parts then return nil end
         local which, label = sound_kind(parts)
-        local data = which == "ro" and V.ro_to_midi(parts.ro) or which == "ad" and V.ad_to_midi(parts.AD)
+        if which == "ad" then
+            return V.load_ad(parts.AD, false, string.format("SCUMM V4 sound %d — AdLib music", number))
+        elseif which == "adsfx" then
+            local snd = sound_create_scumm_ad(parts.AD, false)
+            return snd and { type = "sound", sound = snd, description = string.format(
+                "SCUMM V4 sound %d — AdLib effect (Nuked OPL3 emulation)", number) }
+        end
+        local data = which == "ro" and V.ro_to_midi(parts.ro)
         if not data then return nil end
         return { type = "midi", midi = midi_create_raw(data), description = string.format(
-            "SCUMM V4 sound %d — %s%s", number, label,
-            which == "ad" and " (AdLib instruments not converted; plays with General MIDI defaults)" or "") }
+            "SCUMM V4 sound %d — %s", number, label) }
     end
 
     -- A room palette selected in the dropdown recolours VGA images.

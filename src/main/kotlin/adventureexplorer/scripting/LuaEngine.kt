@@ -42,6 +42,9 @@ import javax.imageio.ImageIO
  *   sound_create_gob_adl(data) -> sound_handle
  *   sound_create_lastexpress(data) -> sound_handle   (The Last Express .SND ADPCM)
  *   sound_create_harvester(data) -> sound_handle     (Harvester .CMP / FCMP IMA ADPCM)
+ *   sound_create_scumm_ad(data, loom) -> sound_handle (SCUMM AD AdLib music/effect via OPL2)
+ *   adlib_playback() -> "opl" or "midi" (the user's choice for music that can be played either way;
+ *                       return playback_choice = true with such resources so the UI offers the switch)
  *   midi_create_raw(data) -> midi_handle          (data is already a standard MIDI file)
  *   midi_create_from_cmf(data) -> midi_handle     (Creative Music Format)
  *   midi_create_from_xmi(data [, index]) -> midi_handle  (XMIDI, IFF-wrapped or bare EVNT)
@@ -383,6 +386,23 @@ class LuaEngine {
     // ── Sound API ───────────────────────────────────────────────────
 
     private fun registerSoundApi() {
+        globals["adlib_playback"] = object : org.luaj.vm2.lib.ZeroArgFunction() {
+            override fun call(): LuaValue = valueOf(adventureexplorer.audio.AdlibPlayback.current.luaName)
+        }
+
+        // sound_create_scumm_ad(data, loom) -> handle for a SCUMM `AD` resource
+        // payload rendered through the OPL2 emulator (Loom uses its own tempo).
+        globals["sound_create_scumm_ad"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, loom: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val sound = adventureexplorer.audio.ScummAdPlayer.render(bytes, loom.toboolean()) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
+
         // sound_create_harvester(data) -> handle for a Harvester .CMP (FCMP) file
         globals["sound_create_harvester"] = object : OneArgFunction() {
             override fun call(data: LuaValue): LuaValue {

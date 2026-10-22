@@ -1,5 +1,6 @@
 package adventureexplorer.scripting
 
+import adventureexplorer.audio.AdlibPlayback
 import adventureexplorer.model.ResourceNode
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -72,7 +73,7 @@ class ScummV4AudioFontTest {
             // 83 rooms; 88 and 94 are script-only (height 0, empty bitmap)
             assertEquals(81, all.count { it.id.startsWith("v4:bg:") })
             assertEquals(81, all.count { it.id.startsWith("v4:pal:") })
-            assertEquals(38, all.count { it.type == "midi" })
+            assertEquals(19, all.count { it.type == "midi" }) // Roland; AdLib songs are "sound" leaves
             assertEquals(mgr.defaultPaletteFor(path, "v4:bg:28"), "v4:pal:28")
 
             val bar = mgr.loadResource(path, "v4:comp:28")!!
@@ -83,11 +84,24 @@ class ScummV4AudioFontTest {
                 l.x % 8 == 0 && l.y % 8 == 0 && l.x + l.image.width <= 640 && l.y + l.image.height <= 144 &&
                 (0 until l.image.height).all { y -> (0 until l.image.width).all { x -> l.image.getRGB(x, y) ushr 24 == 0xFF } } })
 
-            // AdLib (100) and Roland (150) carry the same 754-note score
-            val adlib = notes(mgr.loadResource(path, "v4:snd:100")!!.midiData!!.bytes)
+            // AdLib (100, General MIDI conversion) and Roland (150) carry the same 754-note score
+            AdlibPlayback.current = AdlibPlayback.MIDI
+            val adlibMidi = try { mgr.loadResource(path, "v4:snd:100")!! } finally { AdlibPlayback.current = AdlibPlayback.OPL }
+            assertTrue(adlibMidi.playbackChoice)
+            val adlib = notes(adlibMidi.midiData!!.bytes)
             val roland = notes(mgr.loadResource(path, "v4:snd:150")!!.midiData!!.bytes)
             assertEquals(754, adlib.size)
             assertEquals(754, roland.size)
+            // The AdLib originals render through the OPL2 emulator: 19 songs, 70 effects.
+            assertEquals(19, all.count { it.id.startsWith("v4:snd:") && it.type == "sound" })
+            assertEquals(70, all.count { it.id.startsWith("v4:sfx:") })
+            val themeResource = mgr.loadResource(path, "v4:snd:100")!!
+            assertTrue(themeResource.playbackChoice)
+            val theme = themeResource.soundData!!
+            assertEquals(30_904.0, theme.durationMs.toDouble(), 50.0)
+            for (node in all.filter { it.id.startsWith("v4:sfx:") }.filterIndexed { i, _ -> i % 10 == 0 }) {
+                assertNotNull(node.id, mgr.loadResource(path, node.id)?.soundData)
+            }
             for (node in all.filter { it.type == "midi" }) {
                 MidiSystem.getSequence(ByteArrayInputStream(mgr.loadResource(path, node.id)!!.midiData!!.bytes))
             }

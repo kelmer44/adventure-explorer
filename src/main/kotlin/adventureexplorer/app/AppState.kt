@@ -42,6 +42,9 @@ class AppState {
     var previewSoundData by mutableStateOf<SoundData?>(null)
     var previewModelData by mutableStateOf<ModelData?>(null)
     var previewMidiData  by mutableStateOf<MidiData?>(null)
+    var previewPlaybackChoice by mutableStateOf(false)
+    var adlibPlayback    by mutableStateOf(adventureexplorer.audio.AdlibPlayback.current)
+        private set
     var previewLayers    by mutableStateOf<List<CompositeLayer>?>(null)
     var statusMessage    by mutableStateOf("Ready \u2014 Open a game folder to begin")
     var isLoading        by mutableStateOf(false)
@@ -191,6 +194,7 @@ class AppState {
                         previewFrameDelayMs = bgWithPal?.frameDelayMs?.takeIf { it > 0 } ?: data.frameDelayMs
                         previewSoundData = data.soundData
                         previewMidiData = data.midiData
+                        previewPlaybackChoice = data.playbackChoice
                         previewModelData = data.modelData
                         previewLayers = bgWithPal?.layers ?: data.layers
                         previewPaletteOptions = allPalsCopy
@@ -215,6 +219,7 @@ class AppState {
                         previewFrameDelayMs = 100
                         previewSoundData = null
                         previewMidiData = null
+                        previewPlaybackChoice = false
                         previewModelData = null
                         previewLayers = null
                         statusMessage = "Failed to load ${node.name}"
@@ -231,6 +236,14 @@ class AppState {
                 withContext(Dispatchers.Main) { isLoading = false }
             }
         }
+    }
+
+    /** Switch how AdLib music is played and reload the current preview with it. */
+    fun changeAdlibPlayback(mode: adventureexplorer.audio.AdlibPlayback) {
+        if (mode == adlibPlayback) return
+        adventureexplorer.audio.AdlibPlayback.current = mode
+        adlibPlayback = mode
+        previewNode?.let { loadPreview(it) }
     }
 
     /**

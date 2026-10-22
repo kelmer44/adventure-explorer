@@ -17,5 +17,7 @@ data class ResourceData(
     val soundData: SoundData? = null, // non-null for sound resources
     val midiData: MidiData? = null,  // non-null for midi resources
     val modelData: ModelData? = null, // static 3D geometry
-    val layers: List<CompositeLayer>? = null // non-null for composite resources; image is the flattened default
+    val layers: List<CompositeLayer>? = null, // non-null for composite resources; image is the flattened default
+    /** The script can return this sound as OPL2 emulation or General MIDI; see [adventureexplorer.audio.AdlibPlayback]. */
+    val playbackChoice: Boolean = false
 )

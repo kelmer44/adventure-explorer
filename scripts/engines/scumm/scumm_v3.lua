@@ -157,6 +157,32 @@ local function costume(path, entry)
     return Cost.parse(d:sub(entry.offset + 1, entry.offset + size), 3)
 end
 
+-- Old-bundle sounds: a u16-sized PC-speaker (WA) block, then a u16-sized
+-- AdLib block whose payload starts 4 bytes in (ScummVM
+-- readSoundResourceSmallHeader). Payload byte 2 is 0x80 for music; effects
+-- start with an instrument (1) or note (2) definition.
+local function adlib_sound(path, entry)
+    local d = room_file(path, entry.room)
+    if not d or entry.offset + 2 > #d then return nil end
+    local wa = W(d, entry.offset + 1)
+    local ad_at = entry.offset + wa
+    if wa < 2 or ad_at + 4 > #d then return nil end
+    local ad = W(d, ad_at + 1)
+    if ad < 8 or ad_at + ad > #d then return nil end
+    local payload = d:sub(ad_at + 5, ad_at + ad)
+    local kind = payload:byte(3)
+    if kind == 0x80 then return payload, "music" end
+    if kind == 1 or kind == 2 then return payload, "effect" end
+    return nil
+end
+
+local function is_loom(path)
+    for _, f in ipairs(list_files(path) or {}) do
+        if f:upper() == "LOOM.EXE" then return true end
+    end
+    return false
+end
+
 function V.get_resources(path)
     local idx = index(path)
     if not idx then return {} end
@@ -196,6 +222,21 @@ function V.get_resources(path)
         { id = "v3:pal", name = "EGA palette", type = "palette" } }
     if #costumes > 0 then out[#out + 1] = { id = "v3:costumes", name = "Costumes / actor sprites",
         type = "category", children = costumes } end
+    local music, effects = {}, {}
+    for id = 0, 254 do
+        local entry = idx.sounds[id]
+        local payload, kind = nil, nil
+        if entry then payload, kind = adlib_sound(path, entry) end
+        if kind == "music" then
+            music[#music + 1] = { id = "v3:snd:" .. id, name = string.format("Sound %d — AdLib music", id), type = "sound" }
+        elseif kind == "effect" then
+            effects[#effects + 1] = { id = "v3:snd:" .. id, name = string.format("Sound %d — AdLib effect", id), type = "sound" }
+        end
+    end
+    if #music > 0 then out[#out + 1] = { id = "v3:music", name = string.format("AdLib music (%d)", #music),
+        type = "category", children = music } end
+    if #effects > 0 then out[#out + 1] = { id = "v3:effects", name = string.format("AdLib sound effects (%d)", #effects),
+        type = "category", children = effects } end
     return out
 end
 
@@ -211,6 +252,20 @@ function V.load_resource(path, id, palette_id)
     if not number then return nil end
     if palette_id and palette_id ~= "v3:pal" then
         log_warn("V3 EGA resources use the fixed EGA palette")
+    end
+    if kind == "snd" then
+        local idx = index(path)
+        local entry = idx and idx.sounds[number]
+        local payload, what = nil, nil
+        if entry then payload, what = adlib_sound(path, entry) end
+        if not payload then return nil end
+        if what == "music" then
+            -- Loaded at call time: scumm_v4 requires this module.
+            return require("scumm_v4").load_ad(payload, is_loom(path), string.format("SCUMM V3 sound %d — AdLib music", number))
+        end
+        local snd = sound_create_scumm_ad(payload, is_loom(path))
+        return snd and { type = "sound", sound = snd, description = string.format(
+            "SCUMM V3 sound %d — AdLib effect (Nuked OPL3 emulation)", number) }
     end
     if kind == "bg" or kind == "obj" then
         local idx = index(path)

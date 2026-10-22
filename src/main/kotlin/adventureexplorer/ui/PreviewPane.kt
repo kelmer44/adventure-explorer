@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import adventureexplorer.audio.SoundPlayer
 import adventureexplorer.audio.MidiPlayer
+import adventureexplorer.audio.AdlibPlayback
 import adventureexplorer.model.ResourceNode
 import adventureexplorer.model.SoundData
 import adventureexplorer.model.MidiData
@@ -53,10 +54,22 @@ fun PreviewPane(
     modelData: adventureexplorer.model.ModelData? = null,
     onModelTextureSelected: (String?) -> Unit = {},
     layers: List<adventureexplorer.model.CompositeLayer>? = null,
+    playbackChoice: Boolean = false,
+    adlibPlayback: AdlibPlayback = AdlibPlayback.OPL,
+    onAdlibPlaybackChange: (AdlibPlayback) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color(0xFF1A1A1A))) {
-        when {
+        if (playbackChoice && (midiData != null || soundData != null)) {
+            Column(Modifier.fillMaxSize()) {
+                PlaybackSelector(adlibPlayback, onAdlibPlaybackChange)
+                Divider(color = Color(0xFF333333))
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (midiData != null) MidiPreview(midiData, description, onExportMidi)
+                    else if (soundData != null) SoundPreview(soundData, description, onExportSoundWav)
+                }
+            }
+        } else when {
             modelData != null -> ModelPreview(modelData, description, onExportFrame, paletteOptions, selectedPaletteIndex, onPaletteSelected, onModelTextureSelected)
             frames != null && frames.isNotEmpty() -> AnimationPreview(
                 frames = frames,
@@ -105,6 +118,30 @@ fun PreviewPane(
             )
             textContent != null -> TextPreview(textContent, description)
             else -> EmptyPreview()
+        }
+    }
+}
+
+// ── AdLib playback selector ───────────────────────────────────
+
+@Composable
+private fun PlaybackSelector(current: AdlibPlayback, onSelect: (AdlibPlayback) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("AdLib playback:", fontSize = 12.sp, color = Color(0xFFAAAAAA))
+        for (mode in AdlibPlayback.entries) {
+            val selected = mode == current
+            Box(
+                modifier = Modifier
+                    .background(if (selected) Color(0xFF3A5A8C) else Color(0xFF333333), RoundedCornerShape(4.dp))
+                    .clickable(enabled = !selected) { onSelect(mode) }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(mode.label, fontSize = 12.sp, color = if (selected) Color.White else Color(0xFFCCCCCC))
+            }
         }
     }
 }

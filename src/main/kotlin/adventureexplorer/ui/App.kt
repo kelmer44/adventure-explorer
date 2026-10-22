@@ -55,7 +55,10 @@ private val DarkColors = darkColors(
 
 @Composable
 fun App(searchFocusRequester: FocusRequester = remember { FocusRequester() }) {
-    val appState = remember { AppState() }
+    val appState = remember {
+        adventureexplorer.audio.AdlibPlayback.current = adventureexplorer.audio.AdlibPlayback.parse(prefs.get("adlibPlayback", null))
+        AppState()
+    }
     val scope = rememberCoroutineScope()
     var exportMenuExpanded by remember { mutableStateOf(false) }
     val categoryCounts = remember(appState.resourceTree) { ResourceCategories.counts(appState.resourceTree) }
@@ -191,6 +194,12 @@ fun App(searchFocusRequester: FocusRequester = remember { FocusRequester() }) {
                             scope.launch(Dispatchers.IO) { showExportSoundWavDialog(appState) }
                         },
                         midiData = appState.previewMidiData,
+                        playbackChoice = appState.previewPlaybackChoice,
+                        adlibPlayback = appState.adlibPlayback,
+                        onAdlibPlaybackChange = { mode ->
+                            prefs.put("adlibPlayback", mode.name)
+                            appState.changeAdlibPlayback(mode)
+                        },
                         modelData = appState.previewModelData,
                         onModelTextureSelected = appState::applyModelTexture,
                         onExportMidi = {

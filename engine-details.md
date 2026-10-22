@@ -584,12 +584,17 @@ for `.TOT` script members. Keep all accompanying game archives and audio/video f
 place. This also applies to Gobliiins, Gobliins 2 and Goblins Quest 3.
 
 Fascination and Woodruff now expose TOT and EXT sprites and selectable scene palettes.
-Fascination includes `DISK0.STK`, MDY/TBR music (FM approximation), and the early
+Fascination includes `DISK0.STK`, MDY/TBR music, and the early
 TIRA/TIRB movie format. Woodruff composes room strips at their script positions and
 reads animation, speech and music members directly from `WOODRUFF.ITK`. Video
 soundtracks are separate sound resources; long movies are split into consecutive clips
 to bound preview memory. These are static asset previews; dynamic game scripts are not
 executed. Other Coktel releases and external-codec VMDs are unverified.
+
+AdLib music (Gobliiins `.ADL`, Fascination `.MDY` with its `.TBR` instruments) is
+rendered through an emulated OPL2 chip (a port of the Nuked OPL3 emulator) driven the
+way ScummVM's Gob AdLib driver drives it, so instruments, percussion and pitch bends
+sound like the original hardware. Output is 44.1 kHz mono.
 
 Restart with `./gradlew run` to load the native video/audio decoder changes.
 
@@ -1063,8 +1068,12 @@ SCUMM V3 EGA opens the original Loom `00.LFL` + numbered `.LFL` files directly. 
 76 backgrounds, 594 object sprites, 159 costume sheets and 2,521 animation previews.
 Invisible interaction rectangles sharing an image pointer are omitted from the sprite
 list. Object previews use a black backdrop where the image copies pixels from the
-surrounding scene. V3 music/sound, fonts, VGA/small-header releases and other platform
-variants are not decoded.
+surrounding scene. Fonts, VGA/small-header releases and other platform variants are not
+decoded.
+
+AdLib music (19 tracks, with the same OPL2 / General MIDI switch as Monkey Island's
+below) and sound effects (12, OPL2 only) are listed; Loom's own tempo rules are applied
+when `LOOM.EXE` is in the folder. PC-speaker versions and the Roland release are not listed.
 
 ### SCUMM V4 (EGA and VGA)
 
@@ -1077,11 +1086,16 @@ index.
   palette, used by default for the room's images and for costumes stored in that room.
   VGA bitmaps use the V5 strip codecs behind a small header; every V4 object strip uses
   an opaque codec, so objects are drawn as solid rectangles, as in the game.
-- **Music:** AdLib (`AD`) music tracks and Roland (`RO`) streams convert to standard MIDI
-  files. AdLib OPL instrument definitions have no General MIDI equivalent, so AdLib
-  tracks play with default instruments; the Roland versions of the same songs are
-  usually closer to the original. AdLib/PC-speaker sound effects (`AD` without the music
-  marker, `WA`) are register sequences rather than notes and are not listed.
+- **Music:** AdLib (`AD`) tracks play either way, chosen with the **AdLib playback**
+  switch above the player. **Nuked OPL3 emulation (OPL2)** (the default) runs the song
+  on an emulated AdLib chip through a port of ScummVM's `Player_AD`, a reimplementation
+  of the game's own AdLib player, so it uses the song's own instruments and percussion;
+  looping songs are rendered for one pass. **Java MIDI synthesizer (General MIDI)**
+  converts the song to MIDI with default instruments. Roland (`RO`) streams convert to
+  standard MIDI.
+- **AdLib sound effects:** `AD` effects (envelope programs for up to three channels)
+  render the same way. Effects that loop forever stop after 8 seconds. PC-speaker-only
+  sounds (`WA`) are not listed.
 - **Fonts:** the `901.LFL`-`904.LFL` charsets render as glyph sheets.
 
 Verified with the Spanish VGA floppy: 81 backgrounds, composites and palettes (rooms 88

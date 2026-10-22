@@ -45,6 +45,7 @@ Key references used:
 - `engines/scumm/resource_v4.cpp` (`readResTypeList`, `readIndexFile`) - plaintext V4 `000.LFL`, LE sizes + two-byte tags, interleaved room/u32-offset directories. `resource.cpp` (`readRoomsOffsets`, `getEncByte`, `loadResource`) - XOR-0x69 `DISKnn.LEC`, offset-12 FO room table, eight-byte LF wrapper before indexed resources. Implemented in `scumm_v4.lua`; tested with `ags/scumm/MONKEYEGA` (81 backgrounds, 606 objects, 115 costume sheets, 2,020 animation previews).
 - `engines/scumm/gfx.cpp` (`Gdi::getStripPtr`, `GF_SMALL_HEADER` branch) - V4 VGA `BM`/`OI` bitmaps: u32 length, then u32 strip offsets from the bitmap start, decoded with the V5 strip codecs; `room.cpp` - `PA` palette (u16 768 + RGB) and the 255 transparent-colour default. `object.cpp` (`resetRoomObject`, V4 branch) - `OC` x/8 at +9, y/8 at +10 (low 7 bits). Tested with the Spanish MI1 VGA floppy (`MONKEY_VGA_TEST_PATH`, `ScummV4AudioFontTest`).
 - `engines/scumm/sound.cpp` (`readSoundResourceSmallHeader`, `convertADResource`) - nested `SO` containers with `AD`/`WA` children or bare `RO`; AdLib music marker 0x80, 0x11-byte header plus eight 16-byte instruments before the MIDI stream, 480 PPQN, tempo `500000 * 256 / ticks`, initial ppqn/3 delay. `midiparser_ro.cpp` - Roland `RO` stream (F0/F1 delays, Ax markers, 00/FF end, 120 PPQN). `charset.cpp` (`CharsetRendererCommon::setCurID`, `CharsetRendererClassic::prepareDraw`, `drawBitsN`) - V4 font data 17 bytes into the charset resource; per-glyph width, height, offsets and a continuous bpp bit stream.
+- `engines/scumm/players/player_ad.cpp` (`Player_AD`) - AdLib `AD` playback ported to `ScummAdPlayer.kt`: 472 Hz timer; music events from offset 0x93 with instrument offsets `i * 16 + 19`, rhythm instruments at instrument byte 13, timer limit 256 (Loom 473, ticks x2, VLQ >> 2 instead of >> 1), Loom tempo meta event 81 (`0x73000 / timing`); effects as up-to-three-channel instrument/note programs with software envelopes on a quarter-rate timer. V3 old-bundle sounds (`readSoundResourceSmallHeader`): u16-sized WA block, then the u16-sized AD block with its payload 4 bytes in.
 - `engines/scumm/object.cpp` (`ScummEngine_v4::resetRoomObject`, `getObjectImage`) - V4 OC dimensions and OI image payload at +8. `costume.cpp` (`ClassicCostumeLoader::loadCostume`) - V4 CO base at zero, explicit palette, u16 limb command offsets. V3/V4 EGA share the EGA strip decoder and hardware palette. Non-DOS variants remain unsupported.
 - `engines/scumm/room.cpp`, `object.cpp` (`resetRoomObjects`, `resetRoomObject`) - V3 room dimensions, image offsets and separate object image/code tables. Invisible interaction rectangles can share the next object's image pointer; validate both strip-table width and encoded height before listing sprites.
 - `engines/scumm/gfx.cpp` (`Gdi::drawStrip`, `drawStripEGA`) - u16 strip offsets, solid/alternating/previous-column EGA runs. `costume.cpp` (`ClassicCostumeLoader`) - V3 single-byte limb command offsets and old-bundle palette/offset adjustments.
@@ -252,6 +253,14 @@ VMDs in WOODRUFF.ITK. Unused VMD part descriptors contain arbitrary size bytes;
 ignore them before reading or validating the size. Fascination's TIRA/TIRB use
 PreIMD (128x80 with the calling TOT's palette); TIRB's frame count is one larger
 than the number of physical records, so index the records before making clips.
+
+AdLib music: `sound/adlib.cpp` (register writes, piano/drum presets, the 25-step
+pitch-bend frequency tables, percussion voices), `sound/adlplayer.cpp` (ADL events at a
+1 kHz timer, instrument modification) and `sound/musplayer.cpp` (MUS/SND timer of
+`ticksPerBeat * tempo / 60` Hz). The chip is a Kotlin port of Nuked OPL3 1.8
+(`audio/softsynth/opl/nuked.cpp`, upstream LGPL 2.1+); `Opl3Test` checks it sample for
+sample against the C original. Event spacing follows the formats' delay values exactly;
+ScummVM's timer loop adds one tick per delay, which is not reproduced.
 
 Validation (2026-10-19): 1,964/1,964 Fascination and 5,110/5,110 Woodruff
 resource leaves decode, including every video clip and nonempty VMD soundtrack.

@@ -17,15 +17,23 @@ class GobMdyDecoderTest {
         val bank = ByteBuffer.allocate(15 + 56).order(ByteOrder.LITTLE_ENDIAN)
         bank.put(1); bank.put(0); bank.putShort(1); bank.putShort(15)
         bank.position(15)
-        repeat(28) { bank.putShort(if (it == 1 || it == 15) 1 else 0) }
+        // ScummVM's Gob piano preset: modulator, carrier, then the two wave selects.
+        val piano = intArrayOf(1, 1, 3, 15, 5, 0, 1, 3, 15, 0, 0, 0, 1, 0, 1, 1, 15, 7, 0, 2, 4, 0, 0, 0, 1, 0, 0, 0)
+        piano.forEach { bank.putShort(it.toShort()) }
         return song.array() to bank.array()
     }
     @Test fun `MDY running status and tick timing render with TBR instruments`() {
         val (song, bank) = fixture()
         val sound = GobAdlDecoder.decodeMdy(song, bank)!!
-        assertEquals(1249L, sound.durationMs)
-        assertTrue(sound.samples.take(22050).any { it != 0.toByte() })
-        assertTrue(sound.samples.drop(22050).all { it == 0.toByte() })
+        assertEquals(44_100, sound.sampleRate)
+        assertEquals(1250L, sound.durationMs)
+        // The note sounds until the note-off at 500 ms, then the OPL envelope releases.
+        fun energy(fromMs: Int, toMs: Int): Double {
+            val samples = java.nio.ByteBuffer.wrap(sound.samples).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+            return (fromMs * 441 / 10 until toMs * 441 / 10).sumOf { val v = samples.get(it).toDouble(); v * v }
+        }
+        assertTrue(energy(100, 400) > 0)
+        assertTrue(energy(1050, 1250) < energy(100, 400) / 100)
     }
     @Test fun `malformed timbre banks and truncated events fail safely`() {
         val (song, bank) = fixture()

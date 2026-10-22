@@ -127,9 +127,7 @@ fun ResourceTreeView(
                 fontSize = 12.sp
             )
         }
-        return@Column
-    }
-    Box(modifier = Modifier.fillMaxSize()) {
+    } else Box(modifier = Modifier.fillMaxSize()) {
     Box(
         modifier = Modifier
             .fillMaxSize()

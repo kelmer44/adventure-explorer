@@ -1132,7 +1132,7 @@ function engine.load_resource(game_path, resource_id, palette_id)
             local tbr = read_game_file(game_path, node.file:gsub("%.MDY$", ".TBR"))
             local sound = tbr and sound_create_gob_mdy(data, tbr)
             if not sound then return nil end
-            return { type = "sound", sound = sound, description = node.file .. " - MDY/TBR AdLib music (FM preview)" }
+            return { type = "sound", sound = sound, description = node.file .. " - MDY/TBR AdLib music (OPL2 emulation)" }
         end
         if node.adl then return make_adl_resource(data, node.file) end
         return make_sound_resource(data, node.file)
