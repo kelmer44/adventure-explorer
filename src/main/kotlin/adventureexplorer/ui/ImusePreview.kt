@@ -37,7 +37,7 @@ internal fun ImusePreview(
     onExportMidi: () -> Unit,
     onExportWav: () -> Unit,
 ) {
-    val useOpl = song.isAdlib && adlibPlayback == AdlibPlayback.OPL
+    val useOpl = adlibPlayback == AdlibPlayback.OPL
     val playback = remember(song, useOpl) { ImusePlayback(song, useOpl) }
     DisposableEffect(playback) { onDispose { playback.stop() } }
 
@@ -81,8 +81,9 @@ internal fun ImusePreview(
             if (useOpl) ControlButton("💾 WAV") { onExportWav() }
         }
         Text(
-            (if (useOpl) "AdLib instruments on Nuked OPL3 emulation (OPL2)" else "Java MIDI synthesizer" +
-                if (song.isMt32) " · MT-32 programs mapped to General MIDI" else "") +
+            (if (useOpl) "Nuked OPL3 emulation (OPL2) · ${if (song.isAdlib) "embedded AdLib instruments" else "General MIDI FM instruments"}"
+                else "Java MIDI synthesizer") +
+                (if (song.isMt32) " · MT-32 programs mapped to General MIDI" else "") +
                 " · ${song.tracks.size} track(s) · arm a hook, then play: it fires at its next occurrence",
             fontSize = 11.sp, color = Color(0xFF666666),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)

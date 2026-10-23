@@ -523,10 +523,10 @@ class LuaEngine {
             ByteArray(luaStr.length()).also { luaStr.copyInto(0, it, 0, it.size) }
         } catch (_: Exception) { null }
 
-        fun store(bytes: ByteArray?): LuaValue {
+        fun store(bytes: ByteArray?, cmfSource: ByteArray? = null): LuaValue {
             if (bytes == null) return LuaValue.NIL
             val handle = nextMidiHandle++
-            midis[handle] = MidiData(bytes)
+            midis[handle] = MidiData(bytes, cmfSource)
             return LuaValue.valueOf(handle)
         }
 
@@ -545,7 +545,7 @@ class LuaEngine {
         globals["midi_create_from_cmf"] = object : OneArgFunction() {
             override fun call(data: LuaValue): LuaValue {
                 val bytes = toBytes(data) ?: return NIL
-                return store(CmfToMidiConverter.convert(bytes))
+                return store(CmfToMidiConverter.convert(bytes), cmfSource = bytes)
             }
         }
 
@@ -588,7 +588,7 @@ class LuaEngine {
                     "FORM" -> XmiToMidiConverter.convert(bytes)
                     else -> XmiToMidiConverter.convert(bytes)
                 }
-                return store(converted)
+                return store(converted, cmfSource = bytes.takeIf { magic == "CTMF" })
             }
         }
     }

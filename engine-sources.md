@@ -1,5 +1,29 @@
 ## Sources for engines
 
+### Shared MIDI output
+
+`MidiOplRenderer` merges SMF tracks and applies PPQ tempo changes or SMPTE timing
+before generating 44.1 kHz PCM with `Opl3`. Every engine returning a MIDI handle
+gets the OPL/Java MIDI selector in `ScriptManager`; the converted MIDI remains
+available for export. SMF, XMIDI and GMF share `AdlibOplDevice`, including ScummVM
+`audio/adlib.cpp`'s GM program bank, percussion instruments and percussion map
+(GPLv2+). The channel adapter handles volume/expression, sustain, pitch bend,
+RPN bend range and controller resets. iMUSE GM and MT-32 songs use the same FM
+bank with their existing interactive sequencer and MT-32 program mapping.
+
+CMF retains the original source alongside its MIDI conversion. `CmfOplDevice`
+uses the embedded 16-byte instrument definitions, original channel numbers and
+hardware rhythm bits. Register/instrument layout reference:
+`engines/igor/midi.cpp` (GPLv3+). The CMF header's ticks-per-second controls timing;
+General MIDI export retains the approximate rhythm-note mapping. Generic OPL
+rendering is capped at ten minutes; custom MT-32/Miles patch banks and arbitrary
+SysEx timbres remain outside the GM bank's scope.
+
+`MidiOplRendererTest` checks tempo maps, SMPTE timing, GM percussion, expression,
+CMF patches/rhythm and iMUSE GM output. `MidiOutputTest` checks all host MIDI
+creation paths, switching output and WAV/MIDI bulk exports. `MidiGamesTest`
+optionally checks installed game music with `MIDI_GAMES_TEST_PATH`.
+
 ### DreamWeb
 
 Implemented in `scripts/engines/dreamweb/engine.lua`. Local ScummVM references:

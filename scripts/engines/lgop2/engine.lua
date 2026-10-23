@@ -707,7 +707,7 @@ local function load_midi(game_path, res_offset, res_size)
     end
 
     -- midi_create_auto() sniffs MThd/CTMF/FORM(XDIR) magic and converts as needed,
-    -- letting the system's own MIDI synth/instruments handle playback.
+    -- letting the host offer OPL emulation or Java MIDI playback.
     local midi = midi_create_auto(raw)
     if not midi then
         return { type = "text", text = string.format("Could not decode music resource (%d bytes)", res_size) }

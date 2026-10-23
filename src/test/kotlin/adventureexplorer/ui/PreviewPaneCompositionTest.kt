@@ -30,7 +30,7 @@ class PreviewPaneCompositionTest {
         0, 0xFF.toByte(), 0x2F, 0))!!
 
     private data class Shown(val text: String? = null, val sound: SoundData? = null, val midi: MidiData? = null, val choice: Boolean = false,
-                             val imuse: adventureexplorer.audio.imuse.ImuseSong? = null)
+                             val imuse: adventureexplorer.audio.imuse.ImuseSong? = null, val output: AdlibPlayback? = null)
 
     @Test fun `switching between AdLib choice and plain resources recomposes cleanly`() {
         var shown by mutableStateOf(Shown(sound = sound, choice = true))
@@ -43,7 +43,7 @@ class PreviewPaneCompositionTest {
                 soundData = shown.sound, onExportSoundWav = {}, midiData = shown.midi, onExportMidi = {},
                 playbackChoice = shown.choice,
                 imuse = shown.imuse,
-                adlibPlayback = if (shown.midi != null) AdlibPlayback.MIDI else AdlibPlayback.OPL,
+                adlibPlayback = shown.output ?: if (shown.midi != null) AdlibPlayback.MIDI else AdlibPlayback.OPL,
             )
         }
         try {
@@ -51,6 +51,8 @@ class PreviewPaneCompositionTest {
             val states = listOf(
                 Shown(sound = sound, choice = true), Shown(text = "plain"), Shown(midi = midi, choice = true),
                 Shown(sound = sound, choice = true), Shown(sound = sound), Shown(midi = midi),
+                Shown(sound = sound, midi = midi, choice = true, output = AdlibPlayback.OPL),
+                Shown(midi = midi, choice = true, output = AdlibPlayback.MIDI),
                 Shown(midi = midi, imuse = imuse, choice = true), Shown(text = "plain"), Shown(midi = midi, imuse = imuse), Shown(text = "end"),
             )
             for (state in states) {

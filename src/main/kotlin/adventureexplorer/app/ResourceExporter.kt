@@ -110,7 +110,7 @@ class ResourceExporter(
                     availableFile(parent, name, ".bin").writeBytes(bytes)
                 }
             }
-            data.imuse != null && data.imuse.isAdlib && AdlibPlayback.current == AdlibPlayback.OPL -> {
+            data.imuse != null && AdlibPlayback.current == AdlibPlayback.OPL -> {
                 val sound = ImusePlayback.renderOpl(data.imuse) ?: error("iMUSE song did not render")
                 val format = AudioFormat(sound.sampleRate.toFloat(), sound.bitsPerSample, sound.channels, true, false)
                 AudioInputStream(sound.samples.inputStream(), format, sound.samples.size.toLong() / format.frameSize).use {

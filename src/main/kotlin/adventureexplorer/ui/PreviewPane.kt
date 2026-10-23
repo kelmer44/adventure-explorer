@@ -69,8 +69,9 @@ fun PreviewPane(
                 PlaybackSelector(adlibPlayback, onAdlibPlaybackChange)
                 Divider(color = Color(0xFF333333))
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (midiData != null) MidiPreview(midiData, description, onExportMidi)
-                    else if (soundData != null) SoundPreview(soundData, description, onExportSoundWav)
+                    if (soundData != null && (midiData == null || adlibPlayback == AdlibPlayback.OPL))
+                        SoundPreview(soundData, description, onExportSoundWav, if (midiData != null) onExportMidi else null)
+                    else if (midiData != null) MidiPreview(midiData, description, onExportMidi)
                 }
             }
         } else when {
@@ -135,7 +136,7 @@ internal fun PlaybackSelector(current: AdlibPlayback, onSelect: (AdlibPlayback) 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text("AdLib playback:", fontSize = 12.sp, color = Color(0xFFAAAAAA))
+        Text("Music output:", fontSize = 12.sp, color = Color(0xFFAAAAAA))
         for (mode in AdlibPlayback.entries) {
             val selected = mode == current
             Box(
@@ -594,7 +595,8 @@ internal fun ControlButton(label: String, onClick: () -> Unit) {
 private fun SoundPreview(
     soundData: SoundData,
     description: String?,
-    onExportWav: () -> Unit
+    onExportWav: () -> Unit,
+    onExportMidi: (() -> Unit)? = null
 ) {
     val player = remember { SoundPlayer() }
 
@@ -740,6 +742,7 @@ private fun SoundPreview(
             Spacer(Modifier.weight(1f))
 
             // Export WAV
+            if (onExportMidi != null) ControlButton("\uD83D\uDCBE MIDI") { onExportMidi() }
             ControlButton("\uD83D\uDCBE WAV") { onExportWav() }
         }
 

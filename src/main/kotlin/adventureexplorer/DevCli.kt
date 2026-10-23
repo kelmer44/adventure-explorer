@@ -21,7 +21,7 @@ import javax.sound.sampled.AudioSystem
 fun main(args: Array<String>) {
     if (args.size < 2) {
         println("usage: tree <game> [prefix] [depth] | scan <game> <prefix> [max] | load <game> <id> <out> [paletteId]")
-        println("       ADLIB_PLAYBACK=midi selects General MIDI for AdLib music that offers the choice")
+        println("       ADLIB_PLAYBACK=midi selects Java MIDI output for MIDI and selectable AdLib music")
         return
     }
     adventureexplorer.audio.AdlibPlayback.current = adventureexplorer.audio.AdlibPlayback.parse(System.getenv("ADLIB_PLAYBACK")?.uppercase())

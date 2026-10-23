@@ -164,11 +164,13 @@ The `scripts/` folder must be in the **working directory** (the folder you run t
 3. The app auto-detects the game engine and populates the resource tree
 4. Click on a resource to preview it
 5. For animations: use the playback controls (play/pause, step forward/back, first/last frame)
-   - AdLib music that can be played two ways (currently SCUMM V3/V4 `AD` music in Loom and
-     Monkey Island 1) shows an **AdLib playback** switch above the player: **Nuked OPL3
-     emulation (OPL2)** plays the game's own instruments on an emulated AdLib chip;
-     **Java MIDI synthesizer (General MIDI)** plays a MIDI conversion with default
-     instruments. The choice is remembered and also applies to exports.
+   - MIDI and selectable AdLib music show a **Music output** switch above the player:
+     **Nuked OPL3 emulation (OPL2)** plays through the emulated AdLib chip;
+     **Java MIDI synthesizer (General MIDI)** plays through Java's synthesizer.
+     CMF and native AdLib tracks use their embedded instruments; other MIDI tracks
+     use General MIDI FM instruments in OPL mode. The choice is remembered and
+     applies to exports: WAV in OPL mode, MIDI in Java MIDI mode. MIDI resources
+     also retain a **MIDI** export button in OPL mode.
    - SCUMM V5/V6 music (Monkey Island 2, Fate of Atlantis, Day of the Tentacle) opens an
      **iMUSE player**: press Play, then **Arm** any listed hook (jump, part on/off,
      transpose…) to hear the transition the game would make at that point.
@@ -290,14 +292,19 @@ return {
 | `sound_create_gob_mdy(song, timbres)` | handle | Render MDY/TBR AdLib music to PCM through OPL2 emulation |
 | `sound_create_scumm_ad(data, loom)` | handle | Render a SCUMM `AD` AdLib music or effect resource through OPL2 emulation |
 | `imuse_create(payload, tag)` | handle | Parse a SCUMM iMUSE MIDI chunk (`MDhd` + SMF with iMUSE SysEx); return it as `{ type = "imuse", imuse = handle, midi = midi_handle }` for the interactive player |
-| `adlib_playback()` | `"opl"` / `"midi"` | The user's AdLib playback choice. Scripts that can return a resource either way pick by it and set `playback_choice = true` in the result so the preview shows the switch |
+| `adlib_playback()` | `"opl"` / `"midi"` | The user's music output choice. Native AdLib scripts pick a decoder with it and set `playback_choice = true`; MIDI and iMUSE resources offer the switch automatically |
 | `sound_create_coktel_video(data)` | handle | Decode a Woodruff VMD soundtrack to PCM |
 
 #### MIDI
 
-MIDI-family resources (CMF, XMIDI, standard MIDI) are converted to a standard MIDI
-file rather than synthesized ourselves, so playback uses the system's own MIDI
-device/instruments instead of an opinionated built-in synth.
+All MIDI-family resources (standard MIDI, XMIDI, GMF and CMF) offer the shared
+OPL/Java MIDI output choice without changes to engine scripts. OPL renders at
+44.1 kHz, 16-bit mono using the existing Nuked emulator in OPL2 mode. Standard
+MIDI, XMIDI and GMF use ScummVM's General MIDI FM bank, including percussion;
+CMF retains its instrument bank, rhythm channels and header timing. OPL renders
+are bounded to ten minutes, including release time. Java MIDI playback and MIDI
+exports use the converted standard MIDI file. External MT-32/Miles patch banks
+and custom SysEx timbres are not emulated by the generic GM FM bank.
 
 | Function | Returns | Description |
 |----------|---------|-------------|

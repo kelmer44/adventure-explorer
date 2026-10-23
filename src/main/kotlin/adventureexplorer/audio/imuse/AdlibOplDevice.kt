@@ -11,7 +11,7 @@ import adventureexplorer.audio.Opl3
  *
  * Call [onTimer] at [ImuseSequencer.TIMER_HZ] alongside the sequencer.
  */
-class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
+class AdlibOplDevice(private val chip: Opl3, enablePercussion: Boolean = false) : ImuseDevice {
     private class Struct10 {
         var active = 0
         var curVal = 0
@@ -58,6 +58,7 @@ class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
     private val regCache = IntArray(256)
     private val voices = Array(9) { Voice(it) }
     private val parts = Array(32) { Part() }
+    private val percussion = if (enablePercussion) Part(isPercussion = true) else null
     private val channelTable2 = IntArray(9)
     private val curNotTable = IntArray(9)
     private var voiceIndex = -1
@@ -71,8 +72,8 @@ class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
     }
 
     override fun allocateChannel(): ImuseChannel? = parts.firstOrNull { !it.allocated }?.also { it.allocated = true }
-    override fun percussionChannel(): ImuseChannel? = null
-    override fun allNotesOff() { for (p in parts) p.allNotesOff() }
+    override fun percussionChannel(): ImuseChannel? = percussion
+    override fun allNotesOff() { for (p in parts) p.allNotesOff(); percussion?.allNotesOff() }
 
     override fun onTimer() {
         timerCounter += TIMER_INCREASE
@@ -95,7 +96,7 @@ class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
 
     // ── Part (AdLibPart) ─────────────────────────────────────
 
-    private inner class Part : ImuseChannel {
+    private inner class Part(private val isPercussion: Boolean = false) : ImuseChannel {
         var allocated = false
         var voice: Voice? = null
         var pitchBendValue = 0
@@ -116,9 +117,17 @@ class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
         private fun retune() { for (v in voices()) adlibNoteOn(v.channel, (v.note + transposeEff) and 0xFF, bend()) }
 
         override fun noteOff(note: Int) = partKeyOff(this, note)
-        override fun noteOn(note: Int, velocity: Int) = partKeyOn(this, instr, note, velocity)
+        override fun noteOn(note: Int, velocity: Int) {
+            if (velocity == 0) { noteOff(note); return }
+            val instrument = if (isPercussion) {
+                val index = GM_PERCUSSION_MAP.getOrElse(note) { 255 }
+                if (index == 255) return
+                ByteArray(30) { GM_PERCUSSION[index * 30 + it].toByte() }
+            } else instr
+            partKeyOn(this, instrument, note, velocity)
+        }
         override fun programChange(program: Int) {
-            if (program > 127) return
+            if (program !in 0..127 || isPercussion) return
             for (i in 0 until 30) instr[i] = GM_INSTRUMENTS[program * 30 + i].toByte()
         }
         override fun pitchBend(bend: Int) { pitchBendValue = bend; retune() }
@@ -520,6 +529,58 @@ class AdlibOplDevice(private val chip: Opl3) : ImuseDevice {
                 if (a < 0) -lookup(-a, b) else lookup(a, b)
             }
         }
+
+        /** ScummVM audio/adlib.cpp g_gmPercussionInstruments (GPLv2+). */
+        private val GM_PERCUSSION = intArrayOf(
+            26, 63, 21, 5, 124, 2, 33, 43, 228, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6,
+            17, 18, 4, 7, 124, 2, 35, 11, 229, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+            10, 63, 11, 1, 124, 31, 28, 70, 208, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            0, 63, 15, 0, 124, 16, 18, 7, 0, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            15, 63, 11, 0, 124, 31, 15, 25, 208, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            0, 63, 31, 0, 126, 31, 22, 7, 0, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            18, 63, 5, 6, 124, 3, 31, 74, 217, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 127, 8, 255, 126, 0, 199, 45, 247, 115, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            18, 63, 5, 6, 124, 67, 33, 12, 233, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 127, 8, 207, 126, 0, 69, 42, 248, 75, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12,
+            18, 63, 6, 23, 124, 3, 39, 11, 233, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 127, 8, 205, 126, 0, 64, 26, 105, 99, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12,
+            19, 63, 5, 6, 124, 3, 23, 10, 217, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            21, 63, 5, 6, 124, 3, 33, 12, 233, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 63, 43, 251, 126, 192, 30, 26, 202, 127, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
+            23, 63, 4, 9, 124, 3, 34, 13, 233, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 63, 15, 94, 124, 198, 19, 0, 202, 127, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            207, 63, 126, 157, 124, 200, 192, 10, 186, 116, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6,
+            207, 63, 77, 159, 124, 198, 0, 8, 218, 91, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+            207, 63, 93, 170, 122, 192, 164, 103, 153, 124, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            207, 63, 74, 253, 124, 207, 0, 89, 234, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            15, 24, 10, 250, 87, 6, 7, 6, 57, 124, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            207, 63, 43, 252, 124, 204, 198, 11, 234, 127, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
+            5, 26, 4, 0, 124, 18, 16, 12, 234, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+            4, 25, 4, 0, 124, 18, 16, 44, 234, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+            4, 10, 4, 0, 108, 1, 7, 13, 250, 116, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+            21, 20, 5, 0, 125, 1, 7, 92, 233, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+            16, 16, 5, 8, 124, 1, 8, 13, 234, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+            17, 0, 6, 135, 127, 2, 64, 9, 89, 104, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8,
+            19, 38, 4, 106, 127, 1, 0, 8, 90, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8,
+            207, 78, 12, 170, 80, 196, 0, 24, 249, 84, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            207, 78, 12, 170, 80, 195, 0, 24, 248, 84, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            203, 63, 143, 0, 126, 197, 0, 152, 214, 95, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13,
+            12, 24, 135, 179, 127, 25, 16, 85, 117, 124, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            5, 17, 21, 0, 100, 2, 8, 8, 0, 92, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            4, 8, 21, 0, 72, 1, 8, 8, 0, 96, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            218, 0, 83, 48, 104, 7, 30, 73, 196, 126, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            28, 0, 7, 188, 108, 12, 20, 11, 106, 126, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+            10, 14, 127, 0, 125, 19, 32, 40, 3, 124, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        )
+
+        /** ScummVM audio/adlib.cpp g_gmPercussionInstrumentMap (GPLv2+). */
+        private val GM_PERCUSSION_MAP = intArrayOf(
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 255, 255,
+            23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 255, 255, 255, 255, 255, 33, 34, 35, 255, 255, 36, 37, 255, 255, 255, 38, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255,
+        )
 
         /** ScummVM g_gmInstruments: AdLib instruments for General MIDI programs, 30 bytes each. */
         private val GM_INSTRUMENTS = intArrayOf(

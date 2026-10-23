@@ -1086,13 +1086,13 @@ index.
   palette, used by default for the room's images and for costumes stored in that room.
   VGA bitmaps use the V5 strip codecs behind a small header; every V4 object strip uses
   an opaque codec, so objects are drawn as solid rectangles, as in the game.
-- **Music:** AdLib (`AD`) tracks play either way, chosen with the **AdLib playback**
+- **Music:** AdLib (`AD`) tracks play either way, chosen with the **Music output**
   switch above the player. **Nuked OPL3 emulation (OPL2)** (the default) runs the song
   on an emulated AdLib chip through a port of ScummVM's `Player_AD`, a reimplementation
   of the game's own AdLib player, so it uses the song's own instruments and percussion;
   looping songs are rendered for one pass. **Java MIDI synthesizer (General MIDI)**
   converts the song to MIDI with default instruments. Roland (`RO`) streams convert to
-  standard MIDI.
+  standard MIDI and offer the same OPL/Java MIDI output choice using GM instruments.
 - **AdLib sound effects:** `AD` effects (envelope programs for up to three channels)
   render the same way. Effects that loop forever stop after 8 seconds. PC-speaker-only
   sounds (`WA`) are not listed.
@@ -1140,13 +1140,14 @@ Monkey Island 1 CD's MIDI effects).** Each MIDI-family version of a sound (`ROL 
 - **Events.** A log of markers reached (the signals the scripts wait on), jumps
   taken and loops repeated.
 - **Output.**
-  - AdLib (`ADL `) versions use the AdLib playback switch: **Nuked OPL3 emulation
+  - All versions offer the **Music output** switch. For AdLib (`ADL `), **Nuked OPL3 emulation
     (OPL2)** plays the song's own AdLib instruments through a port of ScummVM's
     AdLib driver; **Java MIDI synthesizer** plays program numbers as General MIDI.
-  - Roland versions map MT-32 programs to General MIDI.
+  - Roland and General MIDI versions use GM FM instruments and percussion in OPL
+    mode, or Java's MIDI synthesizer. Roland versions map MT-32 programs to General MIDI.
   - Transpose and detune use a 16-semitone pitch-bend range, as the original
     General MIDI drivers do.
-- **Export** writes the MIDI file, or for AdLib in OPL mode a WAV of one pass
+- **Export** writes the MIDI file, or in OPL mode a WAV of one pass
   through the song, with no hooks armed, stopping when the song first loops back.
 
 Not modelled: the scripts that choose which song plays next and when they arm

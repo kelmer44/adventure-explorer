@@ -3,9 +3,8 @@ package adventureexplorer.audio
 /**
  * Converts a Creative Music Format ("CTMF"/CMF) resource into a standard MIDI
  * file. CMF instrument data describes OPL2 register values with no relation to
- * General MIDI patches, so rather than emulating the original AdLib sound we
- * simply forward CMF program changes/notes as standard MIDI events and let the
- * playback system (its own synth/soundbank) decide how to render them.
+ * General MIDI patches. [convert] provides an approximate General MIDI export;
+ * [oplData] keeps the original channels, controllers and instrument bank.
  */
 object CmfToMidiConverter {
     private const val INSTRUMENT_SIZE = 16
@@ -22,7 +21,18 @@ object CmfToMidiConverter {
         15 to 42, // Closed Hi-Hat
     )
 
-    fun convert(data: ByteArray): ByteArray? {
+    data class OplData(val midi: ByteArray, val instruments: List<ByteArray>)
+
+    fun convert(data: ByteArray): ByteArray? = convert(data, preserveOpl = false)
+
+    fun oplData(data: ByteArray): OplData? {
+        val midi = convert(data, preserveOpl = true) ?: return null
+        val offset = u16le(data, 6)
+        val count = if (u16le(data, 4) >= 0x0101) u16le(data, 36) else u8(data, 36)
+        return OplData(midi, List(count) { data.copyOfRange(offset + it * 16, offset + (it + 1) * 16) })
+    }
+
+    private fun convert(data: ByteArray, preserveOpl: Boolean): ByteArray? {
         if (data.size < 40 || data[0] != 'C'.code.toByte() || data[1] != 'T'.code.toByte() ||
             data[2] != 'M'.code.toByte() || data[3] != 'F'.code.toByte()
         ) return null
@@ -37,12 +47,17 @@ object CmfToMidiConverter {
         if (instrumentCount !in 1..256) return null
         if (instOffset + instrumentCount * INSTRUMENT_SIZE > data.size) return null
 
-        val events = parseEvents(data, musicOffset) ?: return null
+        val events = parseEvents(data, musicOffset, preserveOpl) ?: return null
         if (events.isEmpty()) return null
-        return StandardMidiWriter.build(ticksPerQuarter, events)
+        val ticksPerSecond = u16le(data, 12)
+        val tempo = if (ticksPerSecond == 0) 500_000 else
+            (ticksPerQuarter.toLong() * 1_000_000 / ticksPerSecond).coerceIn(1, 0xFFFFFF).toInt()
+        val tempoEvent = StandardMidiWriter.TimedEvent(0, -1, byteArrayOf(0xFF.toByte(), 0x51, 3,
+            (tempo shr 16).toByte(), (tempo shr 8).toByte(), tempo.toByte()))
+        return StandardMidiWriter.build(ticksPerQuarter, listOf(tempoEvent) + events)
     }
 
-    private fun parseEvents(data: ByteArray, musicOffset: Int): List<StandardMidiWriter.TimedEvent>? {
+    private fun parseEvents(data: ByteArray, musicOffset: Int, preserveOpl: Boolean): List<StandardMidiWriter.TimedEvent>? {
         var pos = musicOffset
         val size = data.size
         val events = mutableListOf<StandardMidiWriter.TimedEvent>()
@@ -66,6 +81,16 @@ object CmfToMidiConverter {
                 if (status == 0) break
             }
             val channel = status and 0x0F
+
+            if (preserveOpl && status in 0x80..0xEF) {
+                val length = if (status and 0xF0 == 0xC0 || status and 0xF0 == 0xD0) 1 else 2
+                if (pos + length > size) return null
+                val body = byteArrayOf(status.toByte()) + data.copyOfRange(pos, pos + length)
+                if (body.drop(1).any { it.toInt() < 0 }) return null
+                events += StandardMidiWriter.TimedEvent(ticks, 0, body)
+                pos += length
+                continue
+            }
 
             when (status and 0xF0) {
                 0x80 -> {
@@ -108,7 +133,10 @@ object CmfToMidiConverter {
                         val metaType = u8(data, pos); pos++
                         val len = readVlq(data, pos) ?: break
                         pos = len.second
-                        if (metaType == 0x2F) ended = true
+                        if (metaType == 0x2F) {
+                            ended = true
+                            events += StandardMidiWriter.TimedEvent(ticks, 2, byteArrayOf(0xFF.toByte(), 0x2F, 0))
+                        }
                         pos = (pos + len.first.toInt()).coerceAtMost(size)
                     } else {
                         val len = readVlq(data, pos) ?: break

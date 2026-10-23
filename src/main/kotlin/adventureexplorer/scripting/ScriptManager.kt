@@ -166,10 +166,14 @@ class ScriptManager {
                 else -> ResourceData(type, null, description)
             }
             val paletteHandle = table.get("palette_image")
+            val midiSound = if (resource.midiData != null && resource.imuse == null &&
+                adventureexplorer.audio.AdlibPlayback.current == adventureexplorer.audio.AdlibPlayback.OPL)
+                adventureexplorer.audio.MidiOplRenderer.render(resource.midiData) else resource.soundData
             return resource.copy(
+                soundData = midiSound,
                 paletteImage = if (paletteHandle.isnil()) null else lua.getImage(paletteHandle.checkint()),
                 paletteColors = table.get("palette_colors").optint(256).coerceIn(1, 256),
-                playbackChoice = table.get("playback_choice").optboolean(false)
+                playbackChoice = resource.midiData != null || resource.imuse != null || table.get("playback_choice").optboolean(false)
             )
         } catch (e: Exception) {
             println("Error loading resource '$resourceId': ${e.message}")

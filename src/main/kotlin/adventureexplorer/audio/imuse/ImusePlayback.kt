@@ -97,7 +97,7 @@ class ImusePlayback(private val song: ImuseSong, private val useOpl: Boolean) {
 
     private fun runOpl() {
         val chip = Opl3(SAMPLE_RATE)
-        val device = AdlibOplDevice(chip)
+        val device = AdlibOplDevice(chip, enablePercussion = song.supportsPercussion)
         val seq = newSequencer(device)
         val format = AudioFormat(SAMPLE_RATE.toFloat(), 16, 1, true, false)
         val line: SourceDataLine = adventureexplorer.audio.AudioLines.sourceLine(format)
@@ -164,13 +164,13 @@ class ImusePlayback(private val song: ImuseSong, private val useOpl: Boolean) {
         private const val MAX_RENDER_MS = 10 * 60 * 1000
 
         /**
-         * Render an AdLib song straight through on the OPL emulator, for export:
+         * Render a song straight through on the OPL emulator, for export:
          * no hooks armed, stopping at the end of the song or the first
          * unconditional jump back (the song's own loop), plus one second of tail.
          */
         fun renderOpl(song: ImuseSong): SoundData? {
             val chip = Opl3(SAMPLE_RATE)
-            val device = AdlibOplDevice(chip)
+            val device = AdlibOplDevice(chip, enablePercussion = song.supportsPercussion)
             var looped = false
             val seq = ImuseSequencer(song, device) { e ->
                 // The song's own loop is an unconditional jump back (a forward one skips an intro).

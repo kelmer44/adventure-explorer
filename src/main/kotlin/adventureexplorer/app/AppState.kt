@@ -241,7 +241,7 @@ class AppState {
         }
     }
 
-    /** Switch how AdLib music is played and reload the current preview with it. */
+    /** Switch music output and reload the current preview with it. */
     fun changeAdlibPlayback(mode: adventureexplorer.audio.AdlibPlayback) {
         if (mode == adlibPlayback) return
         adventureexplorer.audio.AdlibPlayback.current = mode
@@ -476,9 +476,9 @@ class AppState {
     }
 
     fun exportSoundWav(outputPath: String) {
-        // iMUSE AdLib songs render one pass through the OPL emulator on demand.
+        // iMUSE songs render one pass through the OPL emulator on demand.
         val sound = previewSoundData
-            ?: previewImuse?.takeIf { it.isAdlib }?.let { adventureexplorer.audio.imuse.ImusePlayback.renderOpl(it) }
+            ?: previewImuse?.let { adventureexplorer.audio.imuse.ImusePlayback.renderOpl(it) }
             ?: return
         try {
             val file = File(outputPath)
