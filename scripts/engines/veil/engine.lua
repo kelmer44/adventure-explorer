@@ -18,7 +18,7 @@
 --                  method 0 raw, 1 PackBits, 3 LZSS (4096 window, fill 0xFE,
 --                  start 0xFEE, 12-bit position + 4-bit length + 3).
 --   type 4 sound : u8 pad, u32 size, Creative Voice File.
---   types 2, 3, 5: tables/scripts, shown as hex.
+--   type 3 music : see music_to_midi below. Types 2 and 5: tables, shown as hex.
 -- VGA palette = COLORS set A (144 colours) at indices 0..143 + COLORS set B
 -- (first 112 colours) at 144..255; scenes default to A = 0, B = 1.
 local engine = {id = "veil", name = "Veil of Darkness", version = "1.0",
@@ -385,6 +385,141 @@ end
 -- tree
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- music (type 3): header + instrument records + a MIDI-like event stream
+-- ---------------------------------------------------------------------------
+-- Layout (offsets from the 'EH' signature): header of 24 bytes at 5
+--   +0 u8 ticks per quarter note, +6 u32 event bytes, +0x10 u16 tempo (BPM),
+--   +0x17 u8 instrument count; then count x 58-byte instrument records whose
+--   first word is the General MIDI program, then the events.
+-- Events: u8 initial delta, then [status][data][delta] where status 8x/9x take
+-- two data bytes, Ax one (channel volume), Bx two, Cx one (instrument record
+-- number), Dx one, Ex two (pitch bend). A delta byte F8 adds 240 ticks and
+-- continues. F0 7F 00 x y F7 scales the tempo by x + y/128, other F0 ... F7
+-- is skipped, FC ends the song. Data bytes below 0x80 reuse the last status.
+
+local function vlq(n)
+    local bytes = {string.char(n % 128)}
+    n = floor(n / 128)
+    while n > 0 do
+        table.insert(bytes, 1, string.char(128 + n % 128))
+        n = floor(n / 128)
+    end
+    return table.concat(bytes)
+end
+
+local function be32(n)
+    return string.char(floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
+end
+
+-- Convert one type-3 resource to a format-0 standard MIDI file, or nil.
+local function music_to_midi(e)
+    if not e or #e < 40 or e:sub(1, 2) ~= "EH" or e:byte(3) ~= 3 then return nil end
+    local ppq = e:byte(6)
+    local bpm = u16(e, 22)
+    local count = e:byte(29)
+    local evlen = u32(e, 12)
+    local first = 30 + count * 58
+    if ppq < 1 or bpm < 1 or count < 1 or first + evlen - 1 > #e or evlen < 2 then return nil end
+    local program = {}
+    for k = 0, count - 1 do
+        program[k] = e:byte(30 + k * 58) % 128
+    end
+    local last = first + evlen - 1
+    local p = first
+    local tick = 0
+    local out = {}
+    local function emit(t, bytes) out[#out + 1] = {t, bytes} end
+    local function delta()
+        local total = 0
+        while p <= last do
+            local b = e:byte(p)
+            p = p + 1
+            if b == 0xF8 then total = total + 240 else return total + b end
+        end
+        return total
+    end
+    local function skip_continuations()
+        local total = 0
+        while p <= last and e:byte(p) == 0xF8 do
+            p = p + 1
+            total = total + 240
+            if p <= last and e:byte(p) ~= 0xF8 then total = total + e:byte(p); p = p + 1 end
+        end
+        return total
+    end
+    local usec = floor(60000000 / bpm)
+    emit(0, "\255\81\3" .. string.char(floor(usec / 65536) % 256, floor(usec / 256) % 256, usec % 256))
+    tick = delta()
+    local status = 0
+    local ended = false
+    while p <= last do
+        tick = tick + skip_continuations()
+        if p > last then break end
+        local b = e:byte(p)
+        if b == 0xFC then ended = true; break end
+        if b == 0xF0 then
+            local a, c = e:byte(p + 1), e:byte(p + 2)
+            if not a or not c then return nil end
+            if a == 0x7F and c == 0 then
+                local x, y = e:byte(p + 3), e:byte(p + 4)
+                if not x or not y then return nil end
+                p = p + 6
+                local t = floor(bpm * (x + y / 128))
+                if t < 1 then t = 1 end
+                local us = floor(60000000 / t)
+                emit(tick, "\255\81\3" .. string.char(floor(us / 65536) % 256, floor(us / 256) % 256, us % 256))
+            else
+                p = p + 1
+                while p <= last and e:byte(p) ~= 0xF7 do p = p + 1 end
+                p = p + 1
+            end
+        else
+            if b >= 0x80 then status = b; p = p + 1 end
+            local hi, ch = status - status % 16, status % 16
+            if hi == 0x80 or hi == 0x90 then
+                local n, v = e:byte(p), e:byte(p + 1)
+                if not v then return nil end
+                p = p + 2
+                emit(tick, string.char(status, n % 128, v % 128))
+            elseif hi == 0xA0 then
+                local v = e:byte(p)
+                if not v then return nil end
+                p = p + 1
+                emit(tick, string.char(0xB0 + ch, 7, v % 128))
+            elseif hi == 0xB0 then
+                p = p + 2
+            elseif hi == 0xC0 then
+                local inst = e:byte(p)
+                if not inst then return nil end
+                p = p + 1
+                emit(tick, string.char(0xC0 + ch, program[inst] or 0))
+            elseif hi == 0xD0 then
+                p = p + 1
+            elseif hi == 0xE0 then
+                local lo, hi2 = e:byte(p), e:byte(p + 1)
+                if not hi2 then return nil end
+                p = p + 2
+                emit(tick, string.char(status, lo % 128, hi2 % 128))
+            else
+                return nil
+            end
+        end
+        tick = tick + delta()
+    end
+    if not ended then return nil end
+    local track = {}
+    local prev = 0
+    for _, ev in ipairs(out) do
+        track[#track + 1] = vlq(ev[1] - prev) .. ev[2]
+        prev = ev[1]
+    end
+    track[#track + 1] = vlq(tick > prev and tick - prev or 0) .. "\255\47\0"
+    local body = table.concat(track)
+    return "MThd" .. be32(6) .. "\0\0\0\1" .. string.char(floor(ppq / 256), ppq % 256)
+        .. "MTrk" .. be32(#body) .. body
+end
+
 local function hexdump(e, limit)
     local out = {}
     local n = math.min(#e, limit or 512)
@@ -434,7 +569,7 @@ end
 function engine.get_resources(game_path)
     local cat = catalog(game_path)
     if not cat then return {} end
-    local backgrounds, sprites, anims, sounds, data = {}, {}, {}, {}, {}
+    local backgrounds, sprites, anims, sounds, music, data = {}, {}, {}, {}, {}, {}
     for _, r in ipairs(cat.list) do
         local head = read(cat.path, r.offset, math.min(r.size, 12))
         if head and #head >= 4 and head:sub(1, 2) == "EH" then
@@ -454,6 +589,9 @@ function engine.get_resources(game_path)
                         else sprites[#sprites + 1] = node end
                     end
                 end
+            elseif typ == 3 then
+                music[#music + 1] = {id = string.format("mus:%04d", r.id), type = "midi",
+                    name = string.format("Music %04d (%d bytes)", r.id, r.size)}
             elseif typ == 4 then
                 sounds[#sounds + 1] = {id = string.format("snd:%04d", r.id), type = "sound",
                     name = string.format("Sound %04d (%d bytes)", r.id, r.size)}
@@ -490,6 +628,9 @@ function engine.get_resources(game_path)
     end
     if #sounds > 0 then
         resources[#resources + 1] = {id = "sounds", name = "Sounds", type = "category", children = sounds}
+    end
+    if #music > 0 then
+        resources[#resources + 1] = {id = "music", name = "Music", type = "category", children = music}
     end
     local texts = {id = "text", name = "Text", type = "category", children = {}}
     if load_text(game_path) then
@@ -574,6 +715,12 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local snd = sound_create_encoded(voc)
         if not snd then return {type = "text", text = "Unsupported VOC data"} end
         return {type = "sound", sound = snd, description = string.format("Resource %d: %d bytes VOC", num, #voc)}
+    elseif kind == "mus" then
+        local e = load_entry(cat, num)
+        local smf = music_to_midi(e)
+        if not smf then return {type = "text", text = "Unsupported music data " .. num} end
+        return {type = "midi", midi = midi_create_raw(smf),
+            description = string.format("Resource %d: converted sequence (%d bytes MIDI)", num, #smf)}
     elseif kind == "data" then
         local e = load_entry(cat, num)
         if not e then return nil end

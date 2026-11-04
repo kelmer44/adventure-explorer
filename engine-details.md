@@ -1482,8 +1482,8 @@ Open the game folder containing `RESOURCE`, `COLORS`, `ROOMS`, `TEXT` and `INTER
 The files have no extension; the folder also holds `CODE.1`, `CODE.2`, `RES1`, `NPC`,
 `OBJECTS` and the sound-driver stubs `A`, `S` and `V`.
 
-`RESOURCE` holds 1,509 `EH` resources: 1,369 images, 72 Creative Voice File sounds and
-68 data blocks. Images are listed as **Backgrounds** (single images of 30,000 pixels or
+`RESOURCE` holds 1,509 `EH` resources: 1,369 images, 72 Creative Voice File sounds,
+30 music sequences and 38 data blocks. Images are listed as **Backgrounds** (single images of 30,000 pixels or
 more), **Sprites & Animations** (multi-frame sets previewed at 120 ms per frame) and
 **Sprites** (everything else), grouped in blocks of 100. Pixels are 8-bit indexed with
 colour 254 transparent (255 means opaque) and use PackBits, LZSS or raw storage.
@@ -1500,9 +1500,16 @@ and which one a given scene uses is not reconstructed.
 custom font codes for the inverted question and exclamation marks and the n with tilde
 are converted) and the opening narration from `CODE.1`.
 
-**Other data** shows type 2, 3 and 5 resources (tables, scripts and music/driver data)
-as hex dumps. Not decoded: `RES1` bitmap fonts, `ROOMS`/`INTERACT`/`NPC`/`OBJECTS` game
-data, room composition, music, and animation timing or scripts.
+**Music** lists the 30 type-3 resources, converted on load to standard MIDI files
+(ticks per quarter 240, header tempo, tempo-scale events honoured) and played through
+the app's OPL/Java MIDI selector. Instrument numbers are taken from the first word of
+each song's 58-byte instrument record and treated as General MIDI programs; that
+mapping is inferred (the game's own Roland/CMS/Tandy drivers are not present), so
+timbres are approximate. The record's remaining FM-style parameters are not used.
+
+**Other data** shows the type 2 and 5 resources (tables) as hex dumps. Not decoded:
+`RES1` bitmap fonts, `ROOMS`/`INTERACT`/`NPC`/`OBJECTS` game data, room composition,
+and animation timing or scripts.
 
 Validate with `lua scripts/tests/veil.lua [/path/to/VEIL]`.
 

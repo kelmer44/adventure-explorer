@@ -52,6 +52,21 @@ assert(not image_header('XX\1\7\0\1\0\1\1\255\1\0'))
 local d, pix = decode_image(hdr(1, 1, 1, 255, 1) .. '\7abcdefgh')
 assert(d and #pix == 8 and pix[8] == 104)
 assert(not decode_image(hdr(1, 1, 1, 255, 2) .. 'xxxxxxxx'))
+local music_to_midi = up(engine.load_resource, 'music_to_midi')
+local function le32(n) return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, 0) end
+-- One instrument (GM program 40), events: initial delta 0, program change,
+-- note on, F8 + 5 tick delta, note off, tempo x2.0, end.
+local events = '\0' .. '\192\0\0' .. '\144\60\100\248\5' .. '\128\60\0\0' .. '\240\127\0\2\0\247\0' .. '\252'
+local rec = string.char(40, 0) .. string.rep('\0', 56)
+local song = 'EH\3\24\0' .. string.char(240, 4, 0, 0, 0, 0) .. le32(#events) .. le32(0)
+    .. string.char(0, 0, 1, 0, 0, 0) .. string.char(120, 0) .. string.char(0, 1, 0, 0, 0, 1) .. rec .. events
+song = song:sub(1, 5) .. song:sub(6, 28) .. string.char(1) .. rec .. events
+local smf = music_to_midi(song)
+assert(smf and smf:sub(1, 4) == 'MThd' and smf:sub(13, 14) == '\0\240')
+assert(smf:find('\192\40', 1, true) and smf:find('\144\60\100', 1, true))
+assert(smf:find('\128\60\0', 1, true))
+assert(not music_to_midi(song:sub(1, -2)))
+assert(not music_to_midi('EH\1' .. song:sub(4)))
 print('Veil of Darkness format regressions passed')
 if not arg[1] then return end
 
@@ -66,7 +81,7 @@ function file_open(p) return io.open(p, 'rb') end
 function file_read(f, o, n) assert(f:seek('set', o)); return f:read(n) end
 function file_close(f) f:close() end
 function file_size(f) return f:seek('end') end
-local nimage, nanim, nsound = 0, 0, 0
+local nimage, nanim, nsound, nmidi = 0, 0, 0, 0
 function image_create_indexed(w, hh, pixels, pal, trans)
     assert(#pixels == w * hh, 'pixel count ' .. #pixels .. ' vs ' .. w * hh)
     assert(#pal == 768)
@@ -75,6 +90,10 @@ function image_create_indexed(w, hh, pixels, pal, trans)
     return nimage
 end
 function animation_create(handles, delay) assert(#handles > 1); nanim = nanim + 1; return nanim end
+function midi_create_raw(data)
+    assert(data:sub(1, 4) == 'MThd' and data:find('MTrk', 1, true) == 15 and data:sub(-3) == '\255\47\0')
+    nmidi = nmidi + 1; return nmidi
+end
 function sound_create_encoded(data) assert(data:sub(1, 19) == 'Creative Voice File'); nsound = nsound + 1; return nsound end
 
 assert(engine.detect(arg[1]), 'detect failed')
@@ -96,7 +115,8 @@ local function walk(nodes)
 end
 walk(tree)
 for typ, n in pairs(counts) do print(typ .. ': ' .. n) end
-print('images ' .. nimage .. ' animations ' .. nanim .. ' sounds ' .. nsound)
+print('midi ' .. nmidi .. ' images ' .. nimage .. ' animations ' .. nanim .. ' sounds ' .. nsound)
+assert(counts.midi == 30 and counts.data == 38 and nmidi == 30)
 assert(counts.sound == 72 and counts.palette == 31 and counts.text == 3)
 assert((counts.image or 0) + (counts.animation or 0) == 1369)
 local text = engine.load_resource(arg[1], 'text:dialogue').text

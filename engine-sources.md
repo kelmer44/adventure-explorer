@@ -1487,7 +1487,18 @@ outdoor island terrain remain outside the implemented previews.
   literal). The loader's colour remap table (`0x1501a` / `0x15050`) is optional and
   not used by the data.
 - Type 4: pad, u32 size, Creative Voice File (8-bit PCM, about 10 kHz). Type 2 keeps
-  its 7-byte header at the end of the resource; types 2, 3 and 5 are not decoded.
+  its 7-byte header at the end of the resource; types 2 and 5 are not decoded.
+- Type 3 = music (sequencer at `CODE.2` 0x17569, loader 0x172fc). Header of 24 bytes at
+  offset 5: u8 ticks per quarter (240), u32 event length at +6, u16 tempo BPM at +0x10,
+  u8 instrument count at +0x17; then count x 58-byte records (first word looks like a
+  General MIDI program: 0, 15, 46, 50, 66, 86, 97...), then events. Event stream: u8
+  initial delta, then status, data, delta. 8x/9x two data bytes (9x velocity 0 = off),
+  Ax one byte (channel volume), Bx two (ignored), Cx one (instrument record index),
+  Dx one, Ex two (pitch bend, lsb + msb<<7). Delta byte F8 adds 240 ticks and
+  continues (F8 can also appear where a status is expected). F0 7F 00 x y F7 sets the
+  tempo to base BPM * (x + y/128); any other F0 ... F7 is skipped; FC ends the song.
+  Data bytes < 0x80 reuse the running status. All 30 songs parse to exactly their
+  length. The timer runs at ticks/beat * BPM / 60 Hz. Channels 0-8 only.
 - `COLORS`: u8 colour count (144) + 16 x 144 six-bit RGB triples. The VGA palette is
   set A at indices 0-143 plus set B slots 0-111 at 144-255. Confirmed from a DOSBox-X
   indexed PNG capture of the bedroom scene (A = set 0, B = set 1; every used index

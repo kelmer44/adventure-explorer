@@ -90,7 +90,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Touché: Adventures of the Fifth Musketeer](engine-details.md#touche) | 1995 | `touche` | Backgrounds, Palettes, Sprite Sheets, Icons, Sound Effects, Music (MIDI), Text, Speech | ✅ Working |
 | [Trick or Treat](engine-details.md#tot) | 1997 | `tot` | Backgrounds, Palettes, Objects, Animations, Conversation Text, Sound Effects, Music (MIDI) | ✅ Working |
 | [Universe](engine-details.md#universe) | 1994 | `universe` | Backgrounds, Palettes, Masks, Text | ✅ Working |
-| [Veil of Darkness / El Velo de la Sombra](engine-details.md#veil) | 1993 | `veil` | Backgrounds, Sprites, Animation Previews, Palettes, Sounds (VOC), Text, Data | ✅ Working* |
+| [Veil of Darkness / El Velo de la Sombra](engine-details.md#veil) | 1993 | `veil` | Backgrounds, Sprites, Animation Previews, Palettes, Sounds (VOC), Music (→ MIDI), Text, Data | ✅ Working* |
 | [Visionaire Engine (Daedalic games)](engine-details.md#visionaire) | 2005-15 | `visionaire` | Backgrounds (PNG), Game Data | ✅ Working* |
 | [Wayne's World / The Dark Half (Capstone, Genus GXL)](engine-details.md#gxl) | 1993 | `gxl` | Images, Sound, Music, Text, Fonts, Masks | ✅ Working |
 | [Woodruff and the Schnibble of Azimuth](engine-details.md#gob) | 1994/95 | `gob` | Composed Backgrounds, Sprites, Palettes, Sound, Music, VMD Animation Clips and Soundtracks | ✅ Working* |

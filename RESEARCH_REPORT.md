@@ -4346,5 +4346,7 @@ All 1,369 images, 72 VOC sounds, 16 palettes and the text tables load through na
 Lua and LuaJ. Rendered screens (UI frame, title, portraits, isometric village art) were
 inspected with set 0 + set 1 (palette layout confirmed against a DOSBox-X capture:
 indices 0-143 from one COLORS set, 144-255 from another). Open questions: per-scene palette assignment,
-type 2/3/5 resources (likely music and animation scripts), `ROOMS` room composition
-and the `RES1` bitmap fonts.
+type 2/5 resources, `ROOMS` room composition and the `RES1` bitmap fonts. Type 3
+resources are music: a MIDI-like event stream (see `engine-sources.md`) converted to
+standard MIDI; all 30 parse to their exact length and render through the OPL player.
+GM program mapping from the instrument records is inferred, not verified.
