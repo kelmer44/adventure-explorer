@@ -1466,3 +1466,39 @@ Implementation: `scripts/engines/twine/engine.lua`, `Lba2ModelDecoder.kt`,
 Test data: supplied `~/Desktop/ags/LBA/LBA1` and `LBA2`. No proprietary data is
 included. Animation playback, FLA/SMK video, LBA1 model previews and assembly of
 outdoor island terrain remain outside the implemented previews.
+
+### VEIL OF DARKNESS / EL VELO DE LA SOMBRA
+
+`scripts/engines/veil/engine.lua`, reverse engineered from the Spanish DOS release
+(`ags/VEIL`): data files plus a disassembly of the Turbo C overlay `CODE.2`
+(resource loader at image offset 0x13c3b, type-1 image loader at 0x1526f, LZSS at
+0x15d52). No ScummVM or other reference source exists for this engine.
+
+- `RESOURCE`: u32 offset table (first value = table size + 2 bytes of padding, so
+  `floor(first / 4)` entries). Entry 0 is a secondary index (u16 header, then 1,133
+  u32 absolute offsets) for resources stored after the table; entry 376 ends where the
+  first of them starts. Resource id = table entry number, 377+ for the secondary list.
+- `EH` header: `EH`, u8 type, then per type. Type 1 image: pad, u16 frame count, u8
+  rows per frame, u8 width/8, u8 transparent index (0xFF = none), u8 method, pad,
+  data. Loader fields `[di]`, `[di+2]`, `[di+3]`, `[di+4]`, `[di+5]` map to these.
+  Frame buffer = rows x width bytes. A 320x200 screen is 200 frames of one row.
+  Methods: 0 raw, 1 PackBits, 3 LZSS (Okumura: 4096 ring, 0xFE fill of the first
+  0xFEE bytes, write start 0xFEE, 12-bit position, 4-bit length + 3, flag bit set =
+  literal). The loader's colour remap table (`0x1501a` / `0x15050`) is optional and
+  not used by the data.
+- Type 4: pad, u32 size, Creative Voice File (8-bit PCM, about 10 kHz). Type 2 keeps
+  its 7-byte header at the end of the resource; types 2, 3 and 5 are not decoded.
+- `COLORS`: u8 colour count (144) + 16 x 144 six-bit RGB triples. The VGA palette is
+  set A at indices 0-143 plus set B slots 0-111 at 144-255. Confirmed from a DOSBox-X
+  indexed PNG capture of the bedroom scene (A = set 0, B = set 1; every used index
+  matched exactly). The game also appears to dim/theme scenes by switching sets; the
+  per-scene choice of A/B is not reconstructed (default 0 + 1).
+- `TEXT`: u32 table (455 entries); entries 1-453 are NUL-terminated strings, entry 454
+  begins a 98,956-byte block indexed by entry 0 (u8 pad + 1,368 u32 absolute offsets).
+  Every non-zero byte is XOR 0xDA. Codes 0x18 / 0x19 / 0x1A are the Spanish inverted
+  question mark, inverted exclamation mark and n with tilde; 0x7F is a marker.
+- `RES1`: 25 bitmap fonts (u32 size, u16, u16 glyph count, u16 glyph offsets), indexed
+  by its entry 0; not decoded.
+- `scripts/tests/veil.lua` covers synthetic LZSS/PackBits/header cases and, with a game
+  path, all 1,369 images, 72 sounds, 16 palettes and text under native Lua. The same
+  resources were scanned through the Kotlin/LuaJ developer CLI with no failures.

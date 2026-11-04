@@ -75,6 +75,7 @@ coverage and known limitations are described where available. See also
 | [TsAGE: Ringworld / Blue Force](#tsage) | `tsage` |
 | [Una Aventura de Cine](#alcachofa) | `alcachofa` |
 | [Universe](#universe) | `universe` |
+| [Veil of Darkness](#veil) | `veil` |
 | [Visionaire](#visionaire) | `visionaire` |
 | [Wayne's World / The Dark Half (Genus GXL)](#gxl) | `gxl` |
 
@@ -1469,6 +1470,41 @@ followed by zero-terminated code page 437 text.
 Not decoded yet: the `.MCV`/`.MCB` sprite banks (the header is a count followed by
 width, height and offset records, but the pixel encoding is unknown) and the
 `BACK*.COM` files. The archive holds no digital audio.
+
+<a id="veil"></a>
+
+## Veil of Darkness / El Velo de la Sombra
+
+**Engine ID:** `veil`
+
+Open the game folder containing `RESOURCE`, `COLORS`, `ROOMS`, `TEXT` and `INTERACT`
+(the Spanish DOS release, "El Velo de la Sombra", Event Horizon Software / SSI 1993).
+The files have no extension; the folder also holds `CODE.1`, `CODE.2`, `RES1`, `NPC`,
+`OBJECTS` and the sound-driver stubs `A`, `S` and `V`.
+
+`RESOURCE` holds 1,509 `EH` resources: 1,369 images, 72 Creative Voice File sounds and
+68 data blocks. Images are listed as **Backgrounds** (single images of 30,000 pixels or
+more), **Sprites & Animations** (multi-frame sets previewed at 120 ms per frame) and
+**Sprites** (everything else), grouped in blocks of 100. Pixels are 8-bit indexed with
+colour 254 transparent (255 means opaque) and use PackBits, LZSS or raw storage.
+
+`COLORS` holds 16 sets of 144 six-bit colours. The game's 256-colour VGA palette joins
+two sets: indices 0-143 come from one set and indices 144-255 from the first 112 colours
+of another (verified against a DOSBox-X capture of the bedroom scene: set 0 + set 1).
+The default is set 0 + set 1, which renders the titles, village, portraits and UI
+naturally. The **Palettes** category also lists every set 0-15 paired with set 1 and
+every set used on its own (31 entries); the other sets are lighting/theme variants,
+and which one a given scene uses is not reconstructed.
+
+**Text** exposes 453 interface strings, 1,368 dialogue lines (both XOR 0xDA; the game's
+custom font codes for the inverted question and exclamation marks and the n with tilde
+are converted) and the opening narration from `CODE.1`.
+
+**Other data** shows type 2, 3 and 5 resources (tables, scripts and music/driver data)
+as hex dumps. Not decoded: `RES1` bitmap fonts, `ROOMS`/`INTERACT`/`NPC`/`OBJECTS` game
+data, room composition, music, and animation timing or scripts.
+
+Validate with `lua scripts/tests/veil.lua [/path/to/VEIL]`.
 
 <a id="visionaire"></a>
 

@@ -4327,3 +4327,24 @@ out-of-range frame/PCX/palette/text/sound records. Commands:
 `lua scripts/tests/dreamweb.lua` and `DREAMWEB_TEST_PATH=... ./gradlew --offline
 test --tests '*Dreamweb*'`. Installed floppy/CD alternate releases remain
 unverified, and packed RNCA installer volumes are not supported.
+
+# Veil of Darkness (El Velo de la Sombra) extraction (2026-11-04)
+
+Event Horizon's own engine; no public reference source. The resource loader and image
+decoders were read from `CODE.2` and checked against every resource.
+
+## Resource structure
+
+`RESOURCE` is a u32 offset table plus a secondary index (entry 0) for 1,133 more
+resources; every resource begins `EH` + type byte. Image types decode to exactly
+frames x rows x width bytes for all 1,369 images. See `engine-sources.md` for field
+offsets, the LZSS parameters and the `COLORS`/`TEXT` layouts.
+
+## Verification
+
+All 1,369 images, 72 VOC sounds, 16 palettes and the text tables load through native
+Lua and LuaJ. Rendered screens (UI frame, title, portraits, isometric village art) were
+inspected with set 0 + set 1 (palette layout confirmed against a DOSBox-X capture:
+indices 0-143 from one COLORS set, 144-255 from another). Open questions: per-scene palette assignment,
+type 2/3/5 resources (likely music and animation scripts), `ROOMS` room composition
+and the `RES1` bitmap fonts.
