@@ -508,10 +508,24 @@ Open the game folder containing both `TESORO.TRE` and `TESORO.DAT`; the engine r
 them directly.
 
 El Tesoro de la Isla Alcachofa reads `TESORO.TRE` / `TESORO.DAT` directly: 2,012 images
-from the level, player and font banks, 112 image sequence previews, 2,346 PCM WAV clips,
-plus scripts and readable object metadata. Shadow masks display as grayscale. Previews
-use stored image order at 100 ms; game script timing, movement and scene compositing are
-not interpreted.
+from the level, player and font banks (transparent where the sprite has no pixels),
+136 step animations, 52 room composites, 2,346 PCM WAV clips, dialogue scripts and
+object metadata.
+
+- **Step animations** follow the bank's step table: image index, draw offset, movement and
+  per-step duration in milliseconds. Each run of steps with images is one preview; holds
+  are capped at 1 s and steps parked far off screen are omitted. Runs that need an
+  oversized canvas (the credits scroll) are not listed.
+- **Room composites** place each level's sprite objects as the game does (screen
+  x = object x + step offset + 320, y = 240 - object y - step offset), deepest first.
+  Sprites whose mode byte is 0 start hidden; fades such as `FONDONEGRO` are shown by default
+  and can be toggled. Each level's information page lists rooms and objects with kind,
+  position, depth, banks and data bytes.
+- **Speech**: each `ID.WAV` is labelled with its line from `OBJETOS/ANIMS/CONVERS/ICONS.TXT`,
+  and `.dlg` scripts show the spoken text next to each `ID, speaker` line. Game text is
+  DOS CP850.
+
+Script execution, walking, hotspot logic and exact object animation state are not interpreted.
 
 <a id="fable"></a>
 

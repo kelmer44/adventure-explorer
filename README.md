@@ -45,7 +45,7 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 | [Drascula: The Vampire Strikes Back](engine-details.md#drascula) | 1996 | `drascula` | Backgrounds, Object Sprites | ✅ Working |
 | [DreamWeb](engine-details.md#dreamweb) | 1994 | `dreamweb` | Tiled Backgrounds, Sprites/UI, Fonts, Object Animations, PCX Titles, Palettes, PCM Sound/Music, CD Speech, Text, Data | ✅ Working* |
 | [El Sulfato Atomico](engine-details.md#sulfato) | 1998 | `sulfato` | Backgrounds, Sprite Sheets, Palettes, FLC Animation Previews, Speech, Sound, Room Data | ✅ Working* |
-| [El Tesoro de la Isla Alcachofa](engine-details.md#tesoro) | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Animation Previews, Shadow Masks, Speech, Scripts | ✅ Working* |
+| [El Tesoro de la Isla Alcachofa](engine-details.md#tesoro) | 2000 | `tesoro` | RGB565 Backgrounds, Sprites, Step Animations, Room Composites, Shadow Masks, Speech Text, Scripts | ✅ Working* |
 | [Fascination](engine-details.md#gob) | 1991 | `gob` | Backgrounds, Sprites, Palettes, AdLib Music, IMD Animation Clips | ✅ Working* |
 | [Fable](engine-details.md#fable) | 1996 | `fable` | Backgrounds, Sprite Frames, Frame Bank Previews, Palettes, Dialogue, Speech, PCM Sound | ✅ Working* |
 | [Fievel Goes West / An American Tail](engine-details.md#capstone) | 1993 | `capstone` | Pictures, Palettes, Sprites & Animation Previews, Scene Data | ✅ Working* |
@@ -248,12 +248,13 @@ return engine
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `image_create_indexed(w, h, pixels, palette [, transparent])` | handle | Create image from indexed pixels + palette; pixels equal to `transparent` become fully transparent |
-| `image_create_rgb(w, h, rgb_data)` | handle | Create image from RGB triplets |
+| `image_create_rgb(w, h, rgb_data [, alpha_data])` | handle | Create image from RGB triplets; the optional `alpha_data` (w×h values, 0–255) makes it transparent |
 | `image_load_png(data)` | handle | Load image from PNG binary data |
 
 - `pixels`: Lua table (1-indexed), values 0–255 (color indices). A `transparent` value outside 0–255, such as 256, marks transparency without giving up a palette colour
 - `palette`: Lua table (1-indexed), 768 entries (R,G,B triplets, 0–255)
 - `rgb_data`: Lua table (1-indexed), w×h×3 entries (R,G,B, 0–255)
+- `alpha_data`: optional Lua table (1-indexed), w×h entries (0 transparent – 255 opaque)
 
 #### Animation
 

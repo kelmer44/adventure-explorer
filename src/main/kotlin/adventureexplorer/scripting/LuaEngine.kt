@@ -37,7 +37,7 @@ import javax.imageio.ImageIO
  *   file_read(handle, offset, length) -> string (binary)
  *   list_files(path) -> table of filenames
  *   image_create_indexed(w, h, pixel_table, palette_table [, transparent_index]) -> image_handle
- *   image_create_rgb(w, h, rgb_table) -> image_handle
+ *   image_create_rgb(w, h, rgb_table [, alpha_table]) -> image_handle
  *   sound_create_pcm(sample_rate, bits, channels, signed, data) -> sound_handle
  *   sound_create_gob_adl(data) -> sound_handle
  *   sound_create_lastexpress(data) -> sound_handle   (The Last Express .SND ADPCM)
@@ -317,7 +317,7 @@ class LuaEngine {
             }
         }
 
-        // image_create_rgb(width, height, rgb_table) -> handle
+        // image_create_rgb(width, height, rgb_table [, alpha_table]) -> handle
         // rgb_table: 1-indexed, w*h*3 entries (R,G,B values 0-255)
         globals["image_create_rgb"] = object : VarArgFunction() {
             override fun invoke(args: Varargs): Varargs {
@@ -325,14 +325,18 @@ class LuaEngine {
                 val height = args.checkint(2)
                 val rgbTable = args.checktable(3)
 
-                val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+                // Optional 4th argument: w*h alpha values (0-255) for a transparent image.
+                val alphaTable = if (args.narg() >= 4 && args.arg(4).istable()) args.checktable(4) else null
+                val image = BufferedImage(width, height,
+                    if (alphaTable != null) BufferedImage.TYPE_INT_ARGB else BufferedImage.TYPE_INT_RGB)
                 val totalPixels = width * height
                 val rgbArray = IntArray(totalPixels)
                 for (i in 0 until totalPixels) {
                     val r = rgbTable.rawget(i * 3 + 1).optint(0).coerceIn(0, 255)
                     val g = rgbTable.rawget(i * 3 + 2).optint(0).coerceIn(0, 255)
                     val b = rgbTable.rawget(i * 3 + 3).optint(0).coerceIn(0, 255)
-                    rgbArray[i] = (r shl 16) or (g shl 8) or b
+                    val a = if (alphaTable != null) alphaTable.rawget(i + 1).optint(255).coerceIn(0, 255) else 0
+                    rgbArray[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
                 }
                 image.setRGB(0, 0, width, height, rgbArray, 0, width)
 

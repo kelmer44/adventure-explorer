@@ -18,7 +18,15 @@ relative to the END of the previous span. Types 1/3 are literal/solid colour;
 type 2 is a shadow mask. LVL banks are sequential, with count at magic +8.
 See `engine-sources.md` and `scripts/tests/tesoro.lua` for exact layouts.
 
-Original script timing and scene compositing remain unsupported. The historical
+Update 2026-11-07 (from the ScummVM `tesoro` engine): ANM step records are
+`s16 imageX, imageY, x, y; u16 duration(ms); s16 imageIndex; hit rect; u16 type; u16 extraLen`;
+step x/y are relative to step 0. LVL = magic, u32 rooms, u32 banks, u32 ?, banks, then per room a
+0x28 record (objects u16 at +0x20, depth extent at +0x22) and 0x20-byte object records
+(x,y s32; sort s16 at +8; banks u8 at +11; name[12]; kind u32 at +0x18; extra size at +0x1c;
+extra data then bank indices). Kind 3 data = first step, mode. Texts are CP850. The engine now
+plays step animations and builds room composites; script execution is still unsupported.
+
+Original script execution remains unsupported. The historical
 investigation below is retained, but its blocked status, resource names/offsets
 and container-layout claims are superseded by this update.
 
