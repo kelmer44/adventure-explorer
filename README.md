@@ -17,6 +17,63 @@ A universal resource browser for classic adventure games. Think **ScummRevisited
 - **Animation playback**: Frame-by-frame navigation, play/pause, adjustable speed
 - **Export**: Save resources as PNG or WAV — individual frames, animation sequences, or sound files
 
+## Running from a Binary Release
+
+Download the latest build from the [Releases page](https://github.com/kelmer44/adventure-explorer/releases/tag/latest). Each release contains:
+
+| File | What it is |
+|------|------------|
+| `*.msi` | Windows installer |
+| `*.dmg` | macOS disk image |
+| `engine-scripts.zip` | The Lua engine scripts (a single `engines/` folder) |
+
+> **The installers do NOT include the engine scripts.** Without them the app starts but cannot detect any game ("Scripts directory not found"). You must download `engine-scripts.zip` and extract it into a `scripts` folder, as described below. The installer does not create this folder for you.
+
+The app looks for `scripts/engines/` in two places, in this order:
+
+1. `scripts/engines/` in the **working directory** the app was started from
+2. `scripts/engines/` next to the application's JAR, i.e. the `app` folder inside the installation (this is the one to use for installed builds)
+
+### Windows (.msi)
+
+1. Download the `.msi` **and** `engine-scripts.zip` from the [Releases page](https://github.com/kelmer44/adventure-explorer/releases/tag/latest)
+2. Run the `.msi` installer and follow the prompts. By default it installs to `C:\Program Files\Adventure Explorer\`
+3. Open the installation folder and go into its `app` subfolder: `C:\Program Files\Adventure Explorer\app\`
+4. Create a new folder named `scripts` there (creating it in Program Files needs administrator confirmation)
+5. Extract `engine-scripts.zip` into that `scripts` folder, so the result is:
+
+   ```
+   C:\Program Files\Adventure Explorer\app\scripts\engines\<engine_id>\engine.lua
+   ```
+
+   Check that you did not end up with `scripts\engine-scripts\engines\...` or `scripts\scripts\...` — `engines` must sit directly inside `scripts`.
+6. Launch from the Start Menu or desktop shortcut
+
+To update the scripts later, download the new `engine-scripts.zip` and extract it over the same folder; the app itself does not need reinstalling. If you would rather not write to Program Files, install to a user-writable folder (e.g. `C:\Users\<you>\AdventureExplorer`) when the installer lets you choose one, and use the same `app\scripts\engines` layout there.
+
+### macOS (.dmg)
+
+1. Download the `.dmg` and `engine-scripts.zip` from the [Releases page](https://github.com/kelmer44/adventure-explorer/releases/tag/latest)
+2. Open the `.dmg` and drag **Adventure Explorer** to your Applications folder
+3. Extract `engine-scripts.zip` so that the scripts end up at `Adventure Explorer.app/Contents/app/scripts/engines/` (right-click the app → Show Package Contents → `Contents` → `app`, then create a `scripts` folder and extract into it)
+4. Launch from Applications — if macOS blocks it, right-click → Open → Open
+
+### Fat JAR
+
+If you have a standalone `.jar` file:
+
+```bash
+java -jar adventure-explorer.jar
+```
+
+Extract `engine-scripts.zip` so that `scripts/engines/` is in the **working directory** (the folder you run the command from), or next to the JAR file.
+
+### Requirements
+
+- **Java 17+** runtime is required for the JAR distribution
+- Native packages (`.dmg` / `.msi`) bundle their own JVM — no separate Java install needed
+- The `scripts/engines/` folder must be accessible at runtime — this is where engine Lua scripts live
+
 ## Supported Engines
 
 65 game engines are currently supported via Lua scripts — no recompilation needed.
@@ -124,38 +181,6 @@ gradle wrapper
 # Windows .msi
 ./gradlew packageMsi
 ```
-
-## Running from a Binary Release
-
-If you have a pre-built release (`.dmg`, `.msi`, or fat JAR), follow these steps:
-
-### macOS (.dmg)
-
-1. Open the `.dmg` file and drag **Adventure Explorer** to your Applications folder
-2. Make sure the `scripts/` folder (containing engine Lua scripts) is located next to the application, or inside the app bundle's `Resources/` directory
-3. Launch from Applications — if macOS blocks it, right-click → Open → Open
-
-### Windows (.msi)
-
-1. Run the `.msi` installer and follow the prompts
-2. The `scripts/` folder is bundled inside the installation directory automatically
-3. Launch from the Start Menu or desktop shortcut
-
-### Fat JAR
-
-If you have a standalone `.jar` file:
-
-```bash
-java -jar adventure-explorer.jar
-```
-
-The `scripts/` folder must be in the **working directory** (the folder you run the command from), or next to the JAR file.
-
-### Requirements
-
-- **Java 17+** runtime is required for the JAR distribution
-- Native packages (`.dmg` / `.msi`) bundle their own JVM — no separate Java install needed
-- The `scripts/engines/` folder must be accessible at runtime — this is where engine Lua scripts live
 
 ## Usage
 
