@@ -4397,5 +4397,11 @@ GM program mapping from the instrument records is inferred, not verified.
 - **Aztec `Warp\*.JP6`**: `JPEG6   CRYO99XG`, u32 size[8], six 512x512 JPEG faces from byte 48.
   Walls 0,5,1,4 left to right, 2 = sky, 3 = floor, verified by edge matching.
 
+- **Text**: Atlantis `SPRLIST\*.TXT`, `INITDIAL.TXT`, `SCENAR\*.CON` are CRLF CP437 text. Aztec `Data\game\*`
+  (`.dlg .msg .dem .dei .min .leg .crd .def .var .mus .amb`, `.scp` except `Aztec.scp`) are CRLF Windows-1252;
+  `Aztec.dlg` sections `[HR058_01]` match `dialog\hr058_01.APC` one to one (694 of 694).
+- LuaJ pitfall: `string.lower` on non-UTF-8 high bytes re-encodes them and shifts offsets; match case-insensitively
+  with character classes instead.
+
 ## Verification
 All 377 Atlantis panoramas decode (2048x768); Aztec panoramas render seamlessly; APC plays on both discs.

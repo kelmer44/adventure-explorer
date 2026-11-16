@@ -1521,10 +1521,14 @@ directly: a table of 3,940 records on disc 1, then uncompressed files in table o
 - **Audio:** the 1,125 `WAV\*.APC` files (IMA ADPCM, 11-44 kHz mono/stereo), grouped into Music and
   ambience (800 KB and up), Dialogue (`ATA####`), Cinematic sounds and Sound effects.
 - **Images:** the 640x480 15-bit Targa files in `IMAGES\` and `PUZZLES\`.
+- **Text:** credits, chapter titles, error and menu layouts and `INITDIAL.TXT` (**Text**), the 42
+  `SCENAR\*.CON` scenario scripts (**Scenario scripts**) and the `SPW*/SPF*` sprite lists (**Sprite lists**),
+  converted from code page 437 to UTF-8. The spoken dialogue has no text file on disc 1; it lives in the
+  `.UBB` videos.
 
 Not decoded: `UBB_VUE\*.HNM` and `DIALOG\*.UBB` videos, `SPRITE\` and `.SPF` sprites, `.SYC` lip-sync
-tables, `WAM\*.WAM` node graphs and hotspots, `SCENAR\*.CON` scripts. Validate with
-`ATLANTIS_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
+tables, `WAM\*.WAM` node graphs and hotspots (the scenario scripts are shown as text only). Validate with
+`CRYO_ATLANTIS_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
 
 <a id="aztec"></a>
 
@@ -1541,10 +1545,14 @@ Open the CD root (the folder containing `Data` and `Aztec.exe`), or the `Data` f
 - **Audio:** `music` (81), `Sound` (50) and `dialog` (694) `.APC` files, plus the `.APC`/`.WAV` sounds in
   `Special\*` puzzle folders.
 - **Pictures:** `doczone` encyclopedia JPEGs, `Spr` backgrounds and the puzzle backgrounds in `Special`.
+- **Text:** 15 Latin-1 files from `game\` (Windows-1252, shown as UTF-8): dialogue subtitles (`Aztec.dlg`,
+  1,136 `[ID]` sections), interface messages, encyclopedia entries and index, diary, zones, credits,
+  definitions, variables and the dialogue/visit scripts. Selecting a voice line in **Dialogue** also shows
+  its transcript from `Aztec.dlg` (the section has the same name as the `.APC`).
 
-Not decoded: `.SPR`/`.SPW`/`.SPZ` sprites, `.crf` fonts, `fmv\*.hnm` videos, game scripts and tables.
+Not decoded: `.SPR`/`.SPW`/`.SPZ` sprites, `.crf` fonts, `fmv\*.hnm` videos, and the binary `Aztec.scp` and `.wa2` tables.
 The four 640 MiB `file\File.*` files are padding. Validate with
-`AZTEC_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
+`CRYO_AZTEC_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
 
 <a id="veil"></a>
 

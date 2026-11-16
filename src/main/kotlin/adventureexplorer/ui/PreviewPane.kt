@@ -2,6 +2,7 @@ package adventureexplorer.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.runtime.*
@@ -633,12 +634,13 @@ private fun SoundPreview(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = description ?: "Sound",
-                fontSize = 12.sp,
-                color = Color(0xFFAAAAAA),
-                modifier = Modifier.weight(1f)
-            )
+            SelectionContainer(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = description ?: "Sound",
+                    fontSize = 12.sp,
+                    color = Color(0xFFAAAAAA)
+                )
+            }
         }
 
         Divider(color = Color(0xFF333333))
@@ -874,25 +876,30 @@ private fun MidiPreview(
 private fun TextPreview(text: String, description: String?) {
     val scrollState = rememberScrollState()
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        // Compose Desktop text is only selectable (and copyable) inside a SelectionContainer.
         if (description != null) {
-            Text(
-                text = description,
-                fontSize = 12.sp,
-                color = Color(0xFFAAAAAA),
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+            SelectionContainer {
+                Text(
+                    text = description,
+                    fontSize = 12.sp,
+                    color = Color(0xFFAAAAAA),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
         }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            Text(
-                text = text,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFFE0E0E0),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(end = 16.dp)
-            )
+            SelectionContainer(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    text = text,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFE0E0E0),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(end = 16.dp)
+                )
+            }
             VerticalScrollbar(
                 adapter = rememberScrollbarAdapter(scrollState),
                 modifier = Modifier

@@ -1529,5 +1529,5 @@ outdoor island terrain remain outside the implemented previews.
 HNM6 warp images (`image/codecs/hnm.cpp`, `wam_parser.cpp`, `omni3d.cpp`) and `audio/decoders/apc.cpp`;
 neither Atlantis nor Aztec is supported by ScummVM. The `BigFile 1.00` table and the Aztec `JP6` cube
 map layout were reverse engineered from the retail CDs.
-- `CryoDecodersTest` covers synthetic APC and cube-map cases and, with `ATLANTIS_TEST_PATH` /
-  `AZTEC_TEST_PATH`, all 377 Atlantis panoramas and a sample of audio and images on both discs.
+- `CryoDecodersTest` covers synthetic APC and cube-map cases and, with `CRYO_ATLANTIS_TEST_PATH` /
+  `CRYO_AZTEC_TEST_PATH`, all 377 Atlantis panoramas and a sample of audio and images on both discs.

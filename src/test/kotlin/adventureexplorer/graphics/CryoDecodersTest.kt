@@ -67,8 +67,8 @@ class CryoDecodersTest {
         nodes.flatMap { if (it.isCategory) leaves(it.children) else listOf(it) }
 
     @Test fun `Atlantis BigFile lists and decodes panoramas, audio and Targa images`() {
-        val path = System.getenv("ATLANTIS_TEST_PATH")
-        assumeTrue("Set ATLANTIS_TEST_PATH to the Atlantis: The Lost Tales CD 1 folder", path != null)
+        val path = System.getenv("CRYO_ATLANTIS_TEST_PATH")
+        assumeTrue("Set CRYO_ATLANTIS_TEST_PATH to the Atlantis: The Lost Tales CD 1 folder", path != null)
         val manager = ScriptManager()
         try {
             val game = manager.detectGame(path!!)!!
@@ -91,6 +91,10 @@ class CryoDecodersTest {
                 assertTrue(s.durationMs > 0)
                 manager.releaseDecodedResources()
             }
+            val credits = all.first { it.name == "CREDITS" }
+            val text = manager.loadResource(path, credits.id)!!.textContent!!
+            assertTrue(text, text.contains("Dirección del proyecto") && !text.contains("\r"))
+            assertTrue(all.count { it.type == "text" } > 90)
             val tga = all.first { it.id.startsWith("tga:") }
             val image = manager.loadResource(path, tga.id)!!.image!!
             assertEquals(640, image.width); assertEquals(480, image.height)
@@ -98,8 +102,8 @@ class CryoDecodersTest {
     }
 
     @Test fun `Aztec lists and decodes cube panoramas, audio and pictures`() {
-        val path = System.getenv("AZTEC_TEST_PATH")
-        assumeTrue("Set AZTEC_TEST_PATH to the Aztec CD folder", path != null)
+        val path = System.getenv("CRYO_AZTEC_TEST_PATH")
+        assumeTrue("Set CRYO_AZTEC_TEST_PATH to the Aztec CD folder", path != null)
         val manager = ScriptManager()
         try {
             val game = manager.detectGame(path!!)!!
@@ -119,6 +123,13 @@ class CryoDecodersTest {
                 assertTrue(s.durationMs > 0)
                 manager.releaseDecodedResources()
             }
+            val texts = all.filter { it.type == "text" }
+            assertEquals(15, texts.size)
+            val dlg = manager.loadResource(path, texts.first { it.name == "Dialogue subtitles" }.id)!!.textContent!!
+            assertTrue(dlg.take(60), dlg.startsWith("[HR058_01]\nSé que una concha"))
+            val line = all.first { it.id.endsWith("dialog/h1027_01.APC") }
+            val described = manager.loadResource(path, line.id)!!.description!!
+            assertTrue(described, described.contains("Estoy ocupado preparándome para un largo viaje"))
             val pic = all.first { it.id.startsWith("img:doczone") }
             assertNotNull(manager.loadResource(path, pic.id)!!.image)
         } finally { manager.close() }

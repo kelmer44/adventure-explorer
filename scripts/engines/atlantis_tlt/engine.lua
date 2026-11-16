@@ -24,8 +24,15 @@
 -- WAV\*.SYC (lip-sync tables), UBB_VUE\*.HNM and DIALOG\*.UBB (videos), SPRITE\* and
 -- DIALOG\*.SPF (sprites), WAM\*.WAM (node graphs and hotspots), SCENAR\*.CON (scripts),
 -- IMAGES\*.TGA and PUZZLES\*.TGA (640x480 15-bit Targa).
+--
+-- Text: SPRLIST\*.TXT (credits, chapter titles, error and menu layouts; /spr= and /fin lines are
+-- sprite-list commands), DIALOG\INITDIAL.TXT (per-character dialogue set-up) and SCENAR\*.CON
+-- (scenario scripts, one command per line). All are CRLF text in code page 437/850 (this Spanish
+-- release uses only the letters shared by both). The spoken dialogue itself is in the .UBB videos.
 local engine = {id = "atlantis_tlt", name = "Atlantis: The Lost Tales", version = "1.0",
     description = "Atlantis: The Lost Tales / Les Terres Perdues (1997, Cryo Interactive)"}
+
+local cp437 = require("cp437").to_utf8
 
 local MAX_FILES = 20000
 local MAX_TOC = 4 * 1024 * 1024
@@ -145,6 +152,7 @@ local GROUPS = {
 
 function engine.get_resources(game_path)
     local panoramas, images = {}, {}
+    local texts, lists, scripts = {}, {}, {}
     local audio = {}
     for _, g in ipairs(GROUPS) do audio[g.id] = {} end
     local multi = false
@@ -161,6 +169,12 @@ function engine.get_resources(game_path)
                 local g = audio_group(e)
                 local list = audio[g]
                 list[#list + 1] = {id = "apc:" .. id, name = prefix .. stem(e.name), type = "sound"}
+            elseif up:match("^SPRLIST\\SP[WF].*%.TXT$") then
+                lists[#lists + 1] = {id = "txt:" .. id, name = prefix .. stem(e.name), type = "text"}
+            elseif up:match("%.TXT$") and (up:match("^SPRLIST\\") or up:match("^DIALOG\\")) then
+                texts[#texts + 1] = {id = "txt:" .. id, name = prefix .. stem(e.name), type = "text"}
+            elseif up:match("^SCENAR\\.*%.CON$") then
+                scripts[#scripts + 1] = {id = "txt:" .. id, name = prefix .. stem(e.name), type = "text"}
             elseif up:match("%.TGA$") and (up:match("^IMAGES\\") or up:match("^PUZZLES\\")) then
                 images[#images + 1] = {id = "tga:" .. id, name = prefix .. stem(e.name), type = "image"}
             end
@@ -178,6 +192,15 @@ function engine.get_resources(game_path)
     end
     if #sounds > 0 then
         tree[#tree + 1] = {id = "audio", name = "Audio", type = "category", children = sounds}
+    end
+    if #texts > 0 then
+        tree[#tree + 1] = {id = "text", name = "Text", type = "category", children = texts}
+    end
+    if #scripts > 0 then
+        tree[#tree + 1] = {id = "scripts", name = "Scenario scripts", type = "category", children = scripts}
+    end
+    if #lists > 0 then
+        tree[#tree + 1] = {id = "spritelists", name = "Sprite lists", type = "category", children = lists}
     end
     if #images > 0 then
         tree[#tree + 1] = {id = "images", name = "Images", type = "category", children = images}
@@ -240,6 +263,8 @@ function engine.load_resource(game_path, resource_id)
         local snd = sound_create_cryo_apc(data)
         if not snd then return {type = "text", text = title .. ": not a valid APC file"} end
         return {type = "sound", sound = snd, description = title .. " (Cryo APC, " .. #data .. " bytes)"}
+    elseif kind == "txt" then
+        return {type = "text", text = cp437((data:gsub("\r\n", "\n"))), description = entry.name}
     elseif kind == "tga" then
         local img, w, h = decode_tga(data)
         if not img then return {type = "text", text = title .. ": " .. tostring(w)} end
