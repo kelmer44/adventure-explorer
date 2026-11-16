@@ -1193,11 +1193,27 @@ Keep all volumes together.
 SCI supports the tested Spanish Gabriel Knight 1 release (`VERSION` 1.0, April 6, 1995).
 Open its folder containing `RESOURCE.MAP` and `RESOURCE.000`. All 1,789 mapped resources
 decompress; previews cover 152 backgrounds, 825 sprite/animation resources, 11 fonts and
-seven palettes, including embedded picture palettes. Sounds, messages and scripts
-currently show metadata only.
+seven palettes, including embedded picture palettes. Messages and scripts currently
+show metadata only.
 
-Run `lua scripts/tests/sci.lua /path/to/GK` for a complete resource scan, or `lua
-scripts/tests/sci.lua` for synthetic map/header regression tests.
+Sound resources (type 4) are decoded for SCI0, SCI1, SCI1.1 and SCI2: songs are converted
+to a standard MIDI file (one tick = 1/60 s), so they offer the usual choice between the
+OPL (AdLib) emulation and the Java MIDI synthesizer, and export as `.mid` or `.wav`.
+SCI1+ sounds hold one track per sound device; the converter uses the General MIDI track
+when there is one (Larry 6, King's Quest 6, Space Quest 5, Gabriel Knight), otherwise the
+Roland MT-32 track, otherwise the AdLib track. MT-32 and AdLib tracks use Sierra's
+MT-32 instrument numbers, which are mapped to the nearest General MIDI program, so those
+songs sound close to the original but not identical. SCI0 sounds hold one stream for all
+channels; the Roland MT-32 channels are used (AdLib channels if there are none). Loop
+and cue signals and driver controllers are dropped. Sounds with a digital sample (Sound
+Blaster effects in SCI1 games) play as 8-bit PCM. The resource tree shows each sound as
+music, sample or text, so sounds with no tracks at all (empty placeholders) stay text.
+Digital speech (`Audio` resources) is not decoded yet.
+
+Run `lua scripts/tests/sci.lua /path/to/GK` for a complete resource scan (including every
+sound), or `lua scripts/tests/sci.lua` for synthetic map, header and sound regression tests.
+Set `SCI_TEST_PATH` to a game folder to run `SciMusicTest`, which loads a song through the
+real host, renders it through OPL and exports it.
 
 <a id="agos"></a>
 

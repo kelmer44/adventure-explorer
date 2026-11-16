@@ -82,6 +82,89 @@ engine.get_resources('bad')
 assert(get_info('bad').ver == 'sci1')
 print('SCI synthetic format/map regressions passed')
 
+-- Sound (type 4): SCI1 tracks per device, SCI0 channel masks, digital samples.
+local function str(...) return string.char(...) end
+function midi_create_raw(bytes) return {midi = bytes} end
+function sound_create_pcm(rate, bits, channels, signed, data) return {rate = rate, bits = bits, pcm = data} end
+local sound_content = up(engine.load_resource, 'sci_sound_content')
+local SMF_HEAD = 'MThd' .. str(0, 0, 0, 6, 0, 0, 0, 1, 0, 60) .. 'MTrk'
+local function smf(events)
+    local track = str(0, 255, 81, 3, 15, 66, 64) .. events
+    return SMF_HEAD .. str(0, 0, 0, #track) .. track
+end
+-- SCI1: [F0 prio ... FF] header, one track of one channel; the channel header
+-- (number, polyphony) sits at the entry's offset and the events follow it.
+local function sci1(track_type, channel_number, body)
+    local head = str(0xF0, 100, 0, 0, 0, 0, 0, 0xFF)
+    local off = #head + 1 + 6 + 1 + 1
+    local chan = str(channel_number, 1) .. body
+    return head .. str(track_type) .. str(0, 0, off % 256, 0, #chan % 256, 0) .. str(0xFF, 0xFF) .. chan
+end
+local events1 = str(0, 0xC1, 5, 0, 0xB1, 7, 100, 0, 0x91, 60, 100, 0xF8, 10, 0x81, 60, 64, 0, 0xFC)
+local c = sound_content(sci1(0x07, 1, events1), 'sci11')
+assert(c.kind == 'midi', c.reason)
+-- 250 ticks (F8 + 10) is VLQ 81 7A; the song ends on its last event.
+assert(c.smf == smf(str(0, 0xC1, 5, 0, 0xB1, 7, 100, 0, 0x91, 60, 100, 0x81, 0x7A, 0x81, 60, 64, 0, 255, 47, 0)))
+-- MT-32 tracks hold MT-32 instruments: 3 (Elec Piano 1) -> GM 4, but drums stay.
+c = sound_content(sci1(0x0C, 1, str(0, 0xC1, 3, 0, 0xC9, 3, 0, 0xFC)), 'sci11')
+assert(c.kind == 'midi' and c.smf:find(str(0, 0xC1, 4, 0, 0xC9, 3), 1, true), 'MT-32 instrument mapping')
+-- Channel 15 program changes and driver controllers are not music; running status works.
+c = sound_content(sci1(0x07, 1, str(0, 0xCF, 0x7F, 0, 0xB1, 0x60, 5, 0, 0x4B, 8, 0, 0x91, 60, 100, 4, 62, 90, 0, 0xFC)), 'sci1')
+assert(c.kind == 'midi' and not c.smf:find(str(0xCF), 1, true) and not c.smf:find(str(0x60), 1, true))
+-- the second note arrives by running status and is written out with its own status
+assert(c.smf:find(str(0, 0x91, 60, 100, 4, 0x91, 62, 90, 0, 255, 47, 0), 1, true), 'running status expanded')
+-- GM track beats MT-32 and AdLib; digital channels (FE) are skipped, not played
+local both = str(0xF0, 100, 0, 0, 0, 0, 0, 0xFF)
+local ev = str(0, 0x91, 60, 100, 0, 0xFC)
+local function entry(off, size) return str(0, 0, off % 256, 0, size % 256, 0) end
+local tail_off = #both + (1 + 6 + 1) * 3 + 1
+local chan = str(1, 1) .. ev
+local multi = both .. str(0x00) .. entry(tail_off, #chan) .. str(0xFF) .. str(0x0C) .. entry(tail_off, #chan)
+    .. str(0xFF) .. str(0x07) .. entry(tail_off, #chan) .. str(0xFF, 0xFF) .. chan
+assert(sound_content(multi, 'sci11').desc:find('General MIDI', 1, true))
+-- digital sample: header u16 rate, u16 length, u16 loop start, u16 loop end
+local pcm = str(128, 130, 140, 150)
+local dchan = str(0xFE, 0) .. str(0x7C, 0x15, 4, 0, 0, 0, 4, 0) .. pcm
+local d = sound_content(sci1(0x00, 0xFE, dchan:sub(3)), 'sci1')
+assert(d.kind == 'sound' and d.rate == 5500 and d.pcm == pcm)
+-- empty sounds have no tracks at all
+local none = sound_content(str(0xF0, 50, 0, 0, 0, 0, 0, 0xFF, 0xFF) .. string.rep(str(0), 27), 'sci11')
+assert(none.kind == 'none' and none.reason == 'empty sound')
+-- SCI0: byte 0, 16 x (voices, device mask), then one stream for all channels
+local head0 = str(0)
+for ch = 0, 15 do head0 = head0 .. str(1, ch == 1 and 0x01 or ch == 2 and 0x02 or 0x04) end
+local stream0 = str(0, 0x91, 60, 100, 0, 0x92, 62, 100, 5, 0x81, 60, 0, 0, 0xFC)
+c = sound_content(head0 .. stream0, 'sci0')
+assert(c.kind == 'midi' and c.desc:find('Roland', 1, true))
+assert(c.smf:find(str(0x91, 60, 100), 1, true) and not c.smf:find(str(0x92), 1, true), 'only Roland channels')
+-- no Roland channel: fall back to AdLib channels
+head0 = str(0)
+for ch = 0, 15 do head0 = head0 .. str(1, ch == 2 and 0x02 or 0x04) end
+c = sound_content(head0 .. stream0, 'sci0')
+assert(c.desc:find('AdLib', 1, true) and c.smf:find(str(0x92, 62, 100), 1, true) and not c.smf:find(str(0x91), 1, true))
+-- the tree lists sounds as MIDI / sample / text according to their content
+do
+    local songs = {sci1(0x07, 1, events1), sci1(0x00, 0xFE, dchan:sub(3)),
+        str(0xF0, 50, 0, 0, 0, 0, 0, 0xFF, 0xFF) .. string.rep(str(0), 27)}
+    local blocks, entries, offset = {}, {}, 0
+    for i, song in ipairs(songs) do
+        entries[#entries + 1] = {i, offset}
+        local block = string.char(132) .. le16(i) .. le16(#song + 4) .. le16(#song) .. le16(0) .. song
+        blocks[#blocks + 1] = block
+        offset = offset + #block
+    end
+    fs['snd/RESOURCE.MAP'] = map({{4, entries}})
+    fs['snd/RESOURCE.000'] = table.concat(blocks)
+    assert(engine.detect('snd'))
+    local group = engine.get_resources('snd')[1]
+    assert(group.id == 'type_4' and #group.children == 3)
+    assert(group.children[1].type == 'midi' and group.children[2].type == 'sound' and group.children[3].type == 'text')
+    assert(engine.load_resource('snd', 'r_4_1').type == 'midi')
+    assert(engine.load_resource('snd', 'r_4_2').sound.rate == 5500)
+    assert(engine.load_resource('snd', 'r_4_3').text:find('empty sound', 1, true))
+end
+print('SCI synthetic sound regressions passed')
+
 if not arg[1] then return end
 function file_exists(p) local f = io.open(p, 'rb'); if f then f:close(); return true end; return false end
 function file_open(p) return io.open(p, 'rb') end
@@ -113,6 +196,22 @@ for _, r in ipairs(info.resources) do
         if not ok then failures[#failures + 1] = id .. ': ' .. tostring(err) end
     end
 end
+-- every sound resolves to MIDI, a digital sample or an explained text; none may raise
+local sounds = {midi = 0, sound = 0, text = 0}
+local node_kinds = {}
+for _, group in ipairs(tree) do
+    if group.id == 'type_4' then for _, node in ipairs(group.children) do node_kinds[node.id] = node.type end end
+end
+for _, r in ipairs(info.resources) do
+    if r.type == 4 and not sample then
+        local id = 'r_4_' .. r.number
+        local ok, result = pcall(engine.load_resource, path, id)
+        if not ok then failures[#failures + 1] = id .. ': ' .. tostring(result)
+        elseif result.type ~= node_kinds[id] then failures[#failures + 1] = id .. ': tree type ' .. tostring(node_kinds[id]) .. ' but loaded ' .. result.type
+        else sounds[result.type] = (sounds[result.type] or 0) + 1 end
+    end
+end
+print(string.format('Sounds: %d MIDI, %d samples, %d unsupported', sounds.midi, sounds.sound, sounds.text))
 for _, t in ipairs({0, 1, 7, 8, 11}) do print('Type ' .. t .. ': ' .. (counts[t] or 0) .. ' previews') end
 for _, err in ipairs(failures) do print(err) end
 assert(#failures == 0, #failures .. ' resource failures')

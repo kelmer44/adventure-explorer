@@ -785,6 +785,39 @@ while not done:
 | 11      | palette   | Same                                 |
 | ...     | ...       | ...                                  |
 
+## 3.5.1 Sound Resource Format (type 4)
+
+Decoded from installed games (Larry 3/5/6, Space Quest 4/5, King's Quest 6, Gabriel Knight 1).
+All integers little-endian; offsets below are 0-based from the start of the resource.
+
+**SCI0 / SCI01** (single event stream):
+
+| Offset | Size | Meaning |
+|--------|------|---------|
+| 0x00   | 1    | flags (digital data) |
+| 0x01   | 32   | 16 channel headers: voices, device mask (bit 0 Roland MT-32, bit 1 AdLib, others PC speaker / CMS / Tandy) |
+| 0x21   | n    | events for all 16 channels |
+
+**SCI1 / SCI1.1 / SCI2** (one track per sound device):
+
+```
+[F0 priority 00 00 00 00 00 FF]                    optional 8-byte header
+{ [track type] { [u16 00] [u16 offset] [u16 size] }* [FF] }*  [FF]
+```
+
+At each channel `offset` a 2-byte channel header (channel number, polyphony) precedes the
+events; `size` covers the header. Track types: `00` AdLib, `07` General MIDI, `09` Game
+Blaster, `0C` Roland MT-32, `12` PC speaker, `13` Tandy / PS-1. Channel number `FE` is a digital
+sample: u16 rate, u16 length, u16 loop start, u16 loop end, then unsigned 8-bit PCM. A sound
+with only `FF FF` after the header is empty.
+
+**Events** (both layouts): `[delta] [status] [data...]`, delta = zero or more `F8` bytes (240 ticks
+each) then one byte; running status is allowed; `FC` ends the stream; one tick is 1/60 second, so a
+standard MIDI file uses division 60 at 1,000,000 us per quarter note. Program change on channel 15
+is a loop (`7F`) or cue signal and controllers `4B`-`62` are driver commands; neither is MIDI.
+Programs on MT-32 and AdLib tracks are Sierra MT-32 instrument numbers, General MIDI tracks use
+General MIDI programs.
+
 ## 3.6 Version Detection Algorithm
 
 ScummVM determines the SCI version by analyzing the resource map structure:

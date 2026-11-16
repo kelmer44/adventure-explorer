@@ -134,7 +134,7 @@ Extract `engine-scripts.zip` so that `scripts/engines/` is in the **working dire
 | [SCUMM V4 EGA/VGA (tested: Monkey Island)](engine-details.md#scumm) | 1990-91 | `scumm` | Backgrounds, Room Composites, EGA/VGA Palettes, Object & Actor Sprites, Costume Animations, Music (AdLib via OPL2 emulation, Roland → MIDI), AdLib Sound Effects, Fonts | ✅ Working* |
 | [SCUMM V5-V8 (Monkey Island 1-3, Atlantis, The Dig, Day of the Tentacle…)](engine-details.md#scumm) | 1990-97 | `scumm` | Backgrounds, Room Composites, Palettes, Object & Actor Sprites, Costume Animations, Fonts (NUT), Music (interactive iMUSE player with hooks and transitions; AdLib via OPL2 emulation or Java MIDI; digital iMUSE), Sound Effects, Speech | ✅ Working |
 | [Shadow of the Comet](engine-details.md#comet) | 1993 | `comet` | Backgrounds, Palettes, Sprites, Animations, Sound | ✅ Working |
-| [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts | ✅ Working |
+| [Sierra SCI (SCI0 EGA, SCI1 VGA, SCI1.1, SCI2/SCI32 — tested: Gabriel Knight 1, Larry 1 VGA, Larry 3, Larry 6, Larry 7, King's Quest 6, Laura Bow 2)](engine-details.md#sci) | 1988-96 | `sci` | Backgrounds, Sprites, Cursors, Fonts, Palettes, Texts, Music (→ MIDI, OPL or Java synth), Digital Sound Effects | ✅ Working* |
 | [Simon the Sorcerer 1 & 2](engine-details.md#agos) | 1993/95 | `agos` | Backgrounds, Sprites, Animations, Inventory Icons, SFX, Speech, Music | ✅ Working |
 | [Star Trek: 25th Anniversary / Judgment Rites (DOS)](engine-details.md#startrek) | 1992/93 | `startrek` | Backgrounds, Sprites, Animation Previews, Priority Masks, Palettes, Text, VOC Sound, XMIDI Music, Data | ✅ Working* |
 | [The Beverly Hillbillies](engine-details.md#capstone) | 1993 | `capstone` | Backgrounds, Sprites, Palettes, Dialogue, Music (XMI→MIDI), Data | ✅ Working* |
@@ -471,4 +471,11 @@ adventure-explorer/
 
 ## License
 
-MIT
+Adventure Explorer is free software: you can redistribute it and/or modify it under the terms of the
+**GNU General Public License, version 3 or (at your option) any later version** (see [`LICENSE`](LICENSE)).
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY.
+
+The program contains ports of, and is derived from, [ScummVM](https://www.scummvm.org) (GPL-2.0-or-later /
+GPL-3.0-or-later) and Nuked OPL3 (LGPL-2.1-or-later), and links libraries under other licences. Credits and
+the list of derived files are in [`THIRD_PARTY.md`](THIRD_PARTY.md). Engine scripts and decoders that port
+ScummVM code must keep their attribution and stay under the GPL.

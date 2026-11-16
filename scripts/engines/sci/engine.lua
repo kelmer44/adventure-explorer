@@ -13,7 +13,12 @@
 --
 -- Graphics: SCI0/SCI1 EGA + VGA views (sprites), vector pictures (EGA dithered
 -- and VGA), SCI1.1 bitmap pictures and views, fonts, cursors, palettes, texts.
--- The decompressors and renderers are ports of the ScummVM SCI engine.
+-- The decompressors, renderers and the sound/music handling are ports of, and
+-- derived from, the ScummVM SCI engine (engines/sci/resource, graphics and
+-- sound), Copyright (C) the ScummVM Team, https://www.scummvm.org, licensed
+-- under the GNU General Public License version 2 or later. This script is
+-- distributed under the GNU General Public License version 3 or later, either
+-- of which permits that; see LICENSE and THIRD_PARTY.md. WITHOUT ANY WARRANTY.
 -- ============================================================================
 
 local engine = {}
@@ -2193,6 +2198,239 @@ end
 -- Public engine API
 -- ============================================================================
 
+-- ============================================================================
+-- Sound (type 4) -> standard MIDI
+-- ============================================================================
+-- SCI0 / SCI01: byte 0 flags digital data, then 16 x (voices, device mask)
+--   channel headers (bytes 1..32) and one interleaved event stream from
+--   byte 33. A channel plays on the Roland MT-32 when mask bit 0 is set.
+-- SCI1 / SCI1.1 / SCI2: optional 8-byte header (F0, priority, ...), then
+--   tracks, one per sound device: [type] { [u16 0][u16 offset][u16 size] }*
+--   [FF]; the list ends with a second FF. Offsets are absolute; at each one a
+--   2-byte channel header (channel | flags, polyphony) precedes the events.
+--   Channel byte FE marks digital sample data.
+--   Track types: 00 AdLib, 07 General MIDI, 0C Roland MT-32, 09 Game Blaster,
+--   12 PC speaker, 13 Tandy / PS-1.
+-- Events: [delta] [status] [data], delta = F8 (+240) repeated then one byte,
+--   running status allowed, FC ends the stream. One tick is 1/60 second.
+--   Channel 15 program changes carry loop / cue signals, and controllers
+--   4B..62 are driver commands: neither is real MIDI and both are dropped.
+
+local SCI_MIDI_TICKS = 60  -- ticks per quarter note; with 1,000,000 us per quarter = 60 ticks/s
+
+-- Sierra instrument numbers follow the MT-32 timbre list; map them to the
+-- closest General MIDI program when a song has no General MIDI track.
+local MT32_TO_GM = {[0] =
+    0, 1, 2, 4, 5, 4, 5, 3, 16, 17, 18, 19, 19, 19, 20, 21,
+    6, 6, 6, 7, 7, 7, 8, 8, 62, 63, 62, 63, 38, 39, 38, 39,
+    88, 89, 52, 98, 97, 99, 89, 85, 98, 96, 68, 102, 86, 10, 14, 80,
+    48, 48, 49, 45, 40, 40, 42, 42, 43, 46, 46, 24, 25, 26, 27, 104,
+    32, 33, 34, 34, 36, 37, 35, 35, 73, 73, 72, 72, 74, 75, 64, 65,
+    66, 67, 71, 71, 68, 69, 70, 22, 56, 56, 57, 57, 60, 60, 58, 61,
+    61, 11, 11, 12, 112, 9, 14, 13, 12, 107, 111, 78, 78, 76, 121, 47,
+    117, 118, 118, 119, 116, 119, 119, 115, 112, 55, 124, 123, 94, 98, 121, 121,
+}
+
+local SCI_KEEP_CONTROLLERS = {}
+for _, c in ipairs({0, 1, 2, 6, 7, 10, 11, 32, 38, 64, 66, 67, 91, 93, 98, 99, 100, 101,
+                    120, 121, 123, 124, 125, 126, 127}) do
+    SCI_KEEP_CONTROLLERS[c] = true
+end
+
+local SCI_DEVICE_NAMES = {
+    [0x00] = "AdLib", [0x07] = "General MIDI", [0x09] = "Game Blaster",
+    [0x0C] = "Roland MT-32", [0x12] = "PC speaker", [0x13] = "Tandy / PS-1",
+}
+
+local function midi_vlq(n)
+    local bytes = {string.char(n % 128)}
+    n = floor(n / 128)
+    while n > 0 do
+        table.insert(bytes, 1, string.char(128 + n % 128))
+        n = floor(n / 128)
+    end
+    return table.concat(bytes)
+end
+
+local function midi_be32(n)
+    return string.char(floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
+end
+
+-- Decode one event stream (bytes first..last, 1-based) into out. Returns the
+-- tick of the last event. keep(channel) filters channels (SCI0 device masks);
+-- remap converts MT-32 instrument numbers to General MIDI programs.
+local function sci_decode_events(data, first, last, keep, remap, out)
+    local p, tick, status = first, 0, 0
+    last = math.min(last, #data)
+    while p <= last do
+        local delta = 0
+        while p <= last do
+            local b = data:byte(p)
+            p = p + 1
+            if b == 0xF8 then delta = delta + 240 else delta = delta + b; break end
+        end
+        tick = tick + delta
+        if p > last then break end
+        local b = data:byte(p)
+        if b >= 0x80 then status = b; p = p + 1 end
+        if status == 0xFC or status < 0x80 then break end
+        if status == 0xF0 then
+            while p <= last and data:byte(p) ~= 0xF7 do p = p + 1 end
+            p = p + 1
+        elseif status >= 0xF1 then
+            break
+        else
+            local hi, ch = status - status % 16, status % 16
+            local a = data:byte(p)
+            if not a or p > last then break end
+            if hi == 0xC0 or hi == 0xD0 then
+                p = p + 1
+                if hi == 0xC0 and ch ~= 15 and (not keep or keep(ch)) then
+                    local program = a % 128
+                    if remap and ch ~= 9 then program = MT32_TO_GM[program] or program end
+                    out[#out + 1] = {tick = tick, seq = #out, bytes = string.char(status, program)}
+                end
+            else
+                local c = data:byte(p + 1)
+                if not c or p + 1 > last then break end
+                p = p + 2
+                if not keep or keep(ch) then
+                    local ok = hi == 0x80 or hi == 0x90 or hi == 0xE0
+                    if hi == 0xB0 then ok = SCI_KEEP_CONTROLLERS[a] end
+                    if ok then
+                        out[#out + 1] = {tick = tick, seq = #out, bytes = string.char(status, a % 128, c % 128)}
+                    end
+                end
+            end
+        end
+    end
+    return tick
+end
+
+-- SCI1+ track list: {{type = n, channels = {{number, first, last}, ...}}, ...} or nil
+local function sci1_tracks(data)
+    local p = (data:byte(1) == 0xF0) and 9 or 1
+    local tracks = {}
+    while true do
+        local t = data:byte(p)
+        if not t then return nil end
+        p = p + 1
+        if t == 0xFF then break end
+        local track = {type = t, channels = {}}
+        while true do
+            local b = data:byte(p)
+            if not b then return nil end
+            if b == 0xFF then p = p + 1; break end
+            if p + 5 > #data then return nil end
+            local off, size = u16le(data, p + 2), u16le(data, p + 4)
+            if off + size > #data or size < 2 then return nil end
+            track.channels[#track.channels + 1] = {number = data:byte(off + 1), offset = off, first = off + 3, last = off + size}
+            p = p + 6
+        end
+        tracks[#tracks + 1] = track
+    end
+    return tracks
+end
+
+-- First digital sample channel of an SCI1+ sound: rate, 8-bit unsigned PCM
+local function sci_digital_sample(data)
+    local tracks = sci1_tracks(data)
+    for _, t in ipairs(tracks or {}) do
+        for _, c in ipairs(t.channels) do
+            if c.number == 0xFE and c.last - c.first + 1 >= 8 then
+                -- header: u16 rate, u16 length, u16 loop start, u16 loop end
+                local rate, len = u16le(data, c.first), u16le(data, c.first + 2)
+                local pcm = data:sub(c.first + 8, c.first + 7 + len)
+                if rate > 0 and #pcm > 0 then return rate, pcm end
+            end
+        end
+    end
+end
+
+-- Convert one SCI sound resource to a format-0 standard MIDI file.
+-- Returns smf, description or nil, reason.
+local function sci_sound_to_midi(data, ver)
+    local events, end_tick, desc = {}, 0, nil
+    local tracks = ver ~= "sci0" and sci1_tracks(data)
+    if tracks and #tracks == 0 then return nil, "empty sound" end
+    if tracks then
+        local playable = {}
+        for _, t in ipairs(tracks) do
+            local chans = {}
+            for _, c in ipairs(t.channels) do
+                if c.number ~= 0xFE then chans[#chans + 1] = c end
+            end
+            if #chans > 0 then playable[t.type] = playable[t.type] or {type = t.type, channels = chans} end
+        end
+        local chosen
+        for _, want in ipairs({0x07, 0x0C, 0x00}) do
+            if playable[want] then chosen = playable[want]; break end
+        end
+        if not chosen then
+            for _, t in ipairs(tracks) do
+                if playable[t.type] then chosen = playable[t.type]; break end
+            end
+        end
+        if not chosen then return nil, #tracks == 0 and "empty sound" or "no MIDI track" end
+        local remap = chosen.type ~= 0x07
+        for _, c in ipairs(chosen.channels) do
+            local last = sci_decode_events(data, c.first, c.last, nil, remap, events)
+            if last > end_tick then end_tick = last end
+        end
+        desc = string.format("%s track, %d channels", SCI_DEVICE_NAMES[chosen.type]
+            or string.format("device %02X", chosen.type), #chosen.channels)
+    else
+        if ver ~= "sci0" then return nil, "unrecognised track layout" end
+        if #data < 34 then return nil, "too short" end
+        -- device masks: prefer Roland (bit 0), then AdLib (bit 1), then everything
+        local function mask_of(ch) return data:byte(3 + ch * 2) end
+        local function channels_with(bit)
+            local set, n = {}, 0
+            for ch = 0, 15 do
+                if floor(mask_of(ch) / bit) % 2 == 1 then set[ch] = true; n = n + 1 end
+            end
+            return set, n
+        end
+        local set, n = channels_with(1)
+        local label = "Roland MT-32"
+        if n == 0 then set, n = channels_with(2); label = "AdLib" end
+        if n == 0 then
+            set, n = {}, 16
+            for ch = 0, 15 do set[ch] = true end
+            label = "all"
+        end
+        end_tick = sci_decode_events(data, 34, #data, function(ch) return set[ch] end, true, events)
+        desc = string.format("%s channels, %d channels", label, n)
+    end
+    if #events == 0 then return nil, "no notes" end
+    table.sort(events, function(x, y)
+        if x.tick ~= y.tick then return x.tick < y.tick end
+        return x.seq < y.seq
+    end)
+    local body = {"\0\255\81\3" .. string.char(floor(1000000 / 65536) % 256, floor(1000000 / 256) % 256, 1000000 % 256)}
+    local prev = 0
+    for _, e in ipairs(events) do
+        body[#body + 1] = midi_vlq(e.tick - prev) .. e.bytes
+        prev = e.tick
+    end
+    body[#body + 1] = midi_vlq(end_tick > prev and end_tick - prev or 0) .. "\255\47\0"
+    local track = table.concat(body)
+    local smf = "MThd" .. midi_be32(6) .. "\0\0\0\1" .. string.char(floor(SCI_MIDI_TICKS / 256), SCI_MIDI_TICKS % 256)
+        .. "MTrk" .. midi_be32(#track) .. track
+    return smf, string.format("%s, %.1f s", desc, math.max(end_tick, prev) / SCI_MIDI_TICKS)
+end
+
+-- What a sound resource contains: {kind = "midi", smf, desc}, {kind = "sound",
+-- rate, pcm} or {kind = "none", reason}. Sounds carrying a digital sample next to
+-- a tiny MIDI stub are the sample's effect.
+local function sci_sound_content(data, ver)
+    local smf, desc = sci_sound_to_midi(data, ver)
+    local rate, pcm = sci_digital_sample(data)
+    if rate and (not smf or #smf < 4096) then return {kind = "sound", rate = rate, pcm = pcm} end
+    if smf then return {kind = "midi", smf = smf, desc = desc} end
+    return {kind = "none", reason = desc or "unsupported"}
+end
+
 function engine.detect(game_path)
     if file_exists(game_path .. "/RESMAP.000") and file_exists(game_path .. "/RESSCI.000")
        and not file_exists(game_path .. "/RESOURCE.MAP") then
@@ -2245,6 +2483,11 @@ function engine.get_resources(game_path)
                 -- palettes are offered through the preview pane's palette list
                 local res_type = (t == 0 or t == 1 or t == 7 or t == 8) and "image" or "text"
                 if t == 11 then res_type = "palette" end
+                if t == 4 then
+                    local data = read_resource(game_path, info, r)
+                    local kind = data and sci_sound_content(data, info.ver).kind
+                    res_type = kind == "midi" and "midi" or kind == "sound" and "sound" or "text"
+                end
                 table.insert(kids, {
                     id = string.format("r_%d_%d", t, r.number),
                     name = string.format("%s %d", type_name:sub(1, -2), r.number),
@@ -2519,6 +2762,23 @@ function engine.load_resource(game_path, resource_id, palette_id)
         local r = render_cursor(data, rnum, info.numbering == "old")
         if r then return r end
         return { type = "text", text = string.format("Cursor %d: %d bytes", rnum, #data) }
+    end
+
+    -- SOUND resource (type 4): a MIDI song, or a digital sample (SCI1+)
+    if rtype == 4 then
+        local c = sci_sound_content(data, info.ver)
+        if c.kind == "sound" then
+            return {
+                type = "sound", sound = sound_create_pcm(c.rate, 8, 1, false, c.pcm),
+                description = string.format("Sound %d: digital sample, %d Hz 8-bit mono, %d bytes", rnum, c.rate, #c.pcm),
+            }
+        elseif c.kind == "midi" then
+            return {
+                type = "midi", midi = midi_create_raw(c.smf),
+                description = string.format("Sound %d: %s (%d bytes SCI, %d bytes MIDI)", rnum, c.desc, #data, #c.smf),
+            }
+        end
+        return { type = "text", text = string.format("Sound %d: %d bytes (%s)", rnum, #data, c.reason) }
     end
 
     -- TEXT resource (type 3)

@@ -140,6 +140,14 @@ outside this verified CD 1 coverage.
 Scummvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 games are located in ags/sci folder
 
+Sound (type 4) format was decoded from the installed games, following ScummVM's SCI sound
+resource handling: SCI0 33-byte channel header, SCI1+ per-device tracks of 6-byte channel
+entries, `F0` priority header, FE digital channels, F8 +240-tick delays, 1/60 s ticks and
+channel-15 loop/cue signals. Validation (2026-11-16): 1,418 converted songs from Larry 1 VGA,
+3, 5 and 6, Space Quest 1 VGA, 4 and 5, King's Quest 6 and Gabriel Knight parse as standard MIDI;
+digital-only sounds decode as PCM. The MT-32 to General MIDI table maps the MT-32 timbre list by
+instrument family; it is not a copy of ScummVM's table.
+
 ### HOLMES
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 Source code for some tools in ags/tools/holmes
