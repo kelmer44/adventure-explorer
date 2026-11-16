@@ -1521,3 +1521,13 @@ outdoor island terrain remain outside the implemented previews.
 - `scripts/tests/veil.lua` covers synthetic LZSS/PackBits/header cases and, with a game
   path, all 1,369 images, 72 sounds, 16 palettes and text under native Lua. The same
   resources were scanned through the Kotlin/LuaJ developer CLI with no failures.
+
+### ATLANTIS: THE LOST TALES / AZTEC (CRYO)
+
+`scripts/engines/atlantis_tlt/engine.lua`, `scripts/engines/aztec/engine.lua` and the Kotlin
+`CryoHnm6.kt`, `CryoJp6.kt`, `CryoApc.kt`. ScummVM `engines/cryomni3d` (Versailles 1685) documents the
+HNM6 warp images (`image/codecs/hnm.cpp`, `wam_parser.cpp`, `omni3d.cpp`) and `audio/decoders/apc.cpp`;
+neither Atlantis nor Aztec is supported by ScummVM. The `BigFile 1.00` table and the Aztec `JP6` cube
+map layout were reverse engineered from the retail CDs.
+- `CryoDecodersTest` covers synthetic APC and cube-map cases and, with `ATLANTIS_TEST_PATH` /
+  `AZTEC_TEST_PATH`, all 377 Atlantis panoramas and a sample of audio and images on both discs.

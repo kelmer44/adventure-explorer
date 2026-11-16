@@ -4383,3 +4383,19 @@ type 2/5 resources, `ROOMS` room composition and the `RES1` bitmap fonts. Type 3
 resources are music: a MIDI-like event stream (see `engine-sources.md`) converted to
 standard MIDI; all 30 parse to their exact length and render through the OPL player.
 GM program mapping from the instrument records is inferred, not verified.
+
+# Cryo Atlantis: The Lost Tales and Aztec extraction (2026-11-16)
+
+## Formats
+- **Atlantis `BIGCDn.BIG`**: `BigFile 1.00`, u32 count at 0x10, data length at 0x14, header+table
+  length at 0x18 (= start of the data area). From 0x20, per file: u32 nameLen, u32 pointer, 3 x u32
+  size, u32 0, u32 data offset, u32 pointer, NUL-terminated name. Files are contiguous and stored raw.
+  Disc 1: 3,940 files (377 CYCLO panoramas, 1,125 APC, 794 SYC, 764 HNM, 641 SPW...).
+- **Atlantis `CYCLO\*.HNM`**: HNM6 with a single `IW` (warp) key frame, 2048x768, stored upside-down.
+- **APC** (both games): `CRYO_APC1.20`, 32-byte header (rate, initial samples, stereo flag), IMA
+  nibbles high first; predictor truncated, never clipped.
+- **Aztec `Warp\*.JP6`**: `JPEG6   CRYO99XG`, u32 size[8], six 512x512 JPEG faces from byte 48.
+  Walls 0,5,1,4 left to right, 2 = sky, 3 = floor, verified by edge matching.
+
+## Verification
+All 377 Atlantis panoramas decode (2048x768); Aztec panoramas render seamlessly; APC plays on both discs.

@@ -145,6 +145,8 @@ Extract `engine-scripts.zip` so that `scripts/engines/` is in the **working dire
 | [The Neverhood](engine-details.md#neverhood) | 1996 | `neverhood` | Bitmaps, Animations, Palettes, Sounds, Music, Text, Data, Videos | ✅ Working |
 | [Toonstruck](engine-details.md#toonstruck) | 1996 | `toonstruck` | Backgrounds, Masks, Sprites & Animations, Palettes, Dialogue, Speech, Sound, Music, Data | ✅ Working* |
 | [Touché: Adventures of the Fifth Musketeer](engine-details.md#touche) | 1995 | `touche` | Backgrounds, Palettes, Sprite Sheets, Icons, Sound Effects, Music (MIDI), Text, Speech | ✅ Working |
+| [Atlantis: The Lost Tales](engine-details.md#atlantis_tlt) | 1997 | `atlantis_tlt` | 360° Panoramas (HNM6 warp), Audio (APC), Images (TGA) | ✅ Working* |
+| [Aztec: The Curse in the Heart of the City of Gold](engine-details.md#aztec) | 1999 | `aztec` | 360° Panoramas (cube map → equirectangular), Cube Faces, Audio (APC/WAV), Pictures (JPEG) | ✅ Working* |
 | [Trick or Treat](engine-details.md#tot) | 1997 | `tot` | Backgrounds, Palettes, Objects, Animations, Conversation Text, Sound Effects, Music (MIDI) | ✅ Working |
 | [Universe](engine-details.md#universe) | 1994 | `universe` | Backgrounds, Palettes, Masks, Text | ✅ Working |
 | [Veil of Darkness / El Velo de la Sombra](engine-details.md#veil) | 1993 | `veil` | Backgrounds, Sprites, Animation Previews, Palettes, Sounds (VOC), Music (→ MIDI), Text, Data | ✅ Working* |
@@ -429,6 +431,8 @@ adventure-explorer/
 │       ├── tsage/engine.lua      # Ringworld & Blue Force (Tsunami/TsAGE)
 │       ├── touche/engine.lua     # Touché
 │       ├── riddle/               # The Riddle of Master Lu (M4 / HAG)
+│       ├── atlantis_tlt/engine.lua # Atlantis: The Lost Tales (Cryo)
+│       ├── aztec/engine.lua     # Aztec: The Curse in the Heart of the City of Gold (Cryo)
 │       ├── veil/engine.lua      # Veil of Darkness / El Velo de la Sombra
 │       └── visionaire/           # Visionaire (Daedalic games)
 └── src/main/kotlin/adventureexplorer/

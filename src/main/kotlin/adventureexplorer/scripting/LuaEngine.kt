@@ -446,6 +446,18 @@ class LuaEngine {
             }
         }
 
+        // sound_create_cryo_apc(data) -> handle for a Cryo `CRYO_APC1.20` file, or nil
+        globals["sound_create_cryo_apc"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val str = data.checkstring()
+                val bytes = ByteArray(str.length()).also { str.copyInto(0, it, 0, it.size) }
+                val sound = adventureexplorer.audio.CryoApc.decode(bytes) ?: return NIL
+                val handle = nextSoundHandle++
+                sounds[handle] = sound
+                return valueOf(handle)
+            }
+        }
+
         // Decode one VOC, WAV or MP3 clip from an archive into playable PCM.
         globals["sound_create_encoded"] = object : OneArgFunction() {
             override fun call(data: LuaValue): LuaValue {
@@ -640,6 +652,32 @@ class LuaEngine {
                     images[handle] = image
                     valueOf(handle)
                 } catch (e: Exception) { NIL }
+            }
+        }
+
+        // image_create_cryo_hnm6(data) -> image handle for a Cryo HNM6 warp panorama
+        // (Versailles 1685 / Atlantis: The Lost Tales `.HNM`, 2048x768), or nil.
+        globals["image_create_cryo_hnm6"] = object : OneArgFunction() {
+            override fun call(data: LuaValue): LuaValue {
+                val ls = data.checkstring()
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                val image = adventureexplorer.graphics.CryoHnm6.decode(bytes) ?: return NIL
+                val handle = nextImageHandle++
+                images[handle] = image.toBufferedImage(flipVertical = true)
+                return valueOf(handle)
+            }
+        }
+
+        // image_create_cryo_jp6(data, mode) -> image handle for an Aztec `.JP6` cube-map panorama.
+        // mode: "panorama" (equirectangular 2048x1024), "net" (cube cross) or "0".."5" (one face).
+        globals["image_create_cryo_jp6"] = object : TwoArgFunction() {
+            override fun call(data: LuaValue, mode: LuaValue): LuaValue {
+                val ls = data.checkstring()
+                val bytes = ByteArray(ls.length()).also { ls.copyInto(0, it, 0, it.size) }
+                val image = adventureexplorer.graphics.CryoJp6.render(bytes, mode.optjstring("panorama")) ?: return NIL
+                val handle = nextImageHandle++
+                images[handle] = image
+                return valueOf(handle)
             }
         }
 

@@ -75,6 +75,8 @@ coverage and known limitations are described where available. See also
 | [TsAGE: Ringworld / Blue Force](#tsage) | `tsage` |
 | [Una Aventura de Cine](#alcachofa) | `alcachofa` |
 | [Universe](#universe) | `universe` |
+| [Atlantis: The Lost Tales](#atlantis_tlt) | `atlantis_tlt` |
+| [Aztec: The Curse in the Heart of the City of Gold](#aztec) | `aztec` |
 | [Veil of Darkness](#veil) | `veil` |
 | [Visionaire](#visionaire) | `visionaire` |
 | [Wayne's World / The Dark Half (Genus GXL)](#gxl) | `gxl` |
@@ -1500,6 +1502,49 @@ followed by zero-terminated code page 437 text.
 Not decoded yet: the `.MCV`/`.MCB` sprite banks (the header is a count followed by
 width, height and offset records, but the pixel encoding is unknown) and the
 `BACK*.COM` files. The archive holds no digital audio.
+
+<a id="atlantis_tlt"></a>
+
+## Atlantis: The Lost Tales (Cryo Interactive, 1997)
+
+**Engine ID:** `atlantis_tlt`
+
+Open the CD root (or the folder holding `BIGCD1.BIG`); any `BIGCDn.BIG` is recognised, so disc 2 and 3
+should work the same way but were not available to test. The `BigFile 1.00` container is read
+directly: a table of 3,940 records on disc 1, then uncompressed files in table order.
+
+- **Panoramas (360 degree):** the 377 `CYCLO\*.HNM` files are HNM6 "warp" images, 2048x768, the full
+  horizontal turn of each node (the same format as Versailles 1685). Decoded by the host function
+  `image_create_cryo_hnm6` (ported from ScummVM) and flipped upright. They are shown as the raw warp
+  strip: the horizon is not straight because the warp uses Cryo's own vertical projection, not an
+  equirectangular one. All 377 decode.
+- **Audio:** the 1,125 `WAV\*.APC` files (IMA ADPCM, 11-44 kHz mono/stereo), grouped into Music and
+  ambience (800 KB and up), Dialogue (`ATA####`), Cinematic sounds and Sound effects.
+- **Images:** the 640x480 15-bit Targa files in `IMAGES\` and `PUZZLES\`.
+
+Not decoded: `UBB_VUE\*.HNM` and `DIALOG\*.UBB` videos, `SPRITE\` and `.SPF` sprites, `.SYC` lip-sync
+tables, `WAM\*.WAM` node graphs and hotspots, `SCENAR\*.CON` scripts. Validate with
+`ATLANTIS_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
+
+<a id="aztec"></a>
+
+## Aztec: The Curse in the Heart of the City of Gold (Cryo Interactive, 1999)
+
+**Engine ID:** `aztec`
+
+Open the CD root (the folder containing `Data` and `Aztec.exe`), or the `Data` folder itself.
+
+- **Panoramas (360 degree):** the 198 `Data\Warp\*.JP6` files are cube maps stored as six 512x512 JPEGs.
+  They are projected to a 2048x1024 equirectangular picture (centre = front wall, bilinear sampling).
+  **Panorama cube faces** shows the same data as a cube cross. Face order and orientation were found by
+  matching edge colours, as ScummVM has no Aztec support.
+- **Audio:** `music` (81), `Sound` (50) and `dialog` (694) `.APC` files, plus the `.APC`/`.WAV` sounds in
+  `Special\*` puzzle folders.
+- **Pictures:** `doczone` encyclopedia JPEGs, `Spr` backgrounds and the puzzle backgrounds in `Special`.
+
+Not decoded: `.SPR`/`.SPW`/`.SPZ` sprites, `.crf` fonts, `fmv\*.hnm` videos, game scripts and tables.
+The four 640 MiB `file\File.*` files are padding. Validate with
+`AZTEC_TEST_PATH=/path ./gradlew test --tests '*CryoDecodersTest'`.
 
 <a id="veil"></a>
 

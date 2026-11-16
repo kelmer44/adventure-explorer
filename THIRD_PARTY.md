@@ -20,6 +20,8 @@ Copyright (C) the ScummVM Team. https://www.scummvm.org - https://github.com/scu
 | `audio/CmfOplDevice.kt` | register layout of `engines/igor/midi.cpp` (GPLv3+) |
 | `audio/ImuseBundleCodecs.kt` | `BundleCodecs::decompressCodec`, `engines/scumm/imuse_digi/dimuse_codecs.cpp` |
 | `audio/GobAdlDecoder.kt` | Gob `AdLib` class, `engines/gob/sound/adlib.cpp` (GPLv2+) |
+| `audio/CryoApc.kt` | Cryo APC decoder, `audio/decoders/apc.cpp` (GPLv2+) |
+| `graphics/CryoHnm6.kt` | HNM6 warp image decoder, `image/codecs/hnm.cpp` and `engines/cryomni3d/image/hnm.cpp` (GPLv2+) |
 | `audio/LastExpressAdpcm.kt`, `audio/GmfToMidiConverter.kt`, `video/CoktelVideoDecoder.kt`, `models/GrimModelDecoder.kt` | format references: Last Express mixer, AGOS GMF parser, Coktel video decoder, Grim model loader |
 
 ### Engine scripts (`scripts/engines/`)
