@@ -56,6 +56,15 @@ class SciMusicTest {
             assertArrayEquals(midi.midiData!!.bytes, opl.midiData!!.bytes)
             assertTrue("silent OPL output", opl.soundData!!.samples.any { it != 0.toByte() })
 
+            // OPL plays the song's AdLib track through Sierra's driver and patch.003, not the generic GM bank
+            val sci = opl.midiData!!.sciAdlib ?: error("${node.id} has no AdLib arrangement")
+            assertTrue(sci.patch.size == 1344 || sci.patch.size == 2690 || sci.patch.size == 5382)
+            val generic = adventureexplorer.audio.MidiOplRenderer.render(adventureexplorer.model.MidiData(midi.midiData!!.bytes))
+            assertFalse("same audio as the generic GM path", generic.samples.contentEquals(opl.soundData!!.samples))
+            AdlibPlayback.current = AdlibPlayback.MIDI // loading in OPL mode would render every song
+            val withAdlib = songs.count { manager.loadResource(path, it.id)?.midiData?.sciAdlib != null }
+            println("$withAdlib of ${songs.size} songs have an AdLib arrangement")
+
             val output = temporary.newFolder("export")
             val exported = ResourceExporter({ midi }).export(listOf(ResourceNode(node.id, node.name, "midi")), output)
             assertEquals(1, exported.exported)

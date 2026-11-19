@@ -47,6 +47,8 @@ import javax.imageio.ImageIO
  *   adlib_playback() -> "opl" or "midi" (the user's choice for music that can be played either way;
  *                       return playback_choice = true with such resources so the UI offers the switch)
  *   midi_create_raw(data) -> midi_handle          (data is already a standard MIDI file)
+ *   midi_create_sci(gm_midi, adlib_midi, patch, version [, header]) -> midi_handle  (Sierra SCI song: OPL plays the
+ *                       AdLib arrangement through Sierra's AdLib driver with the game's patch.003 bank)
  *   midi_create_from_cmf(data) -> midi_handle     (Creative Music Format)
  *   midi_create_from_xmi(data [, index]) -> midi_handle  (XMIDI, IFF-wrapped or bare EVNT)
  *   xmi_sequence_count(data) -> number of sequences in a multi-song XMIDI file
@@ -544,6 +546,28 @@ class LuaEngine {
             val handle = nextMidiHandle++
             midis[handle] = MidiData(bytes, cmfSource)
             return LuaValue.valueOf(handle)
+        }
+
+        // midi_create_sci(gm_midi, adlib_midi, patch, version [, header]) -> midi_handle
+        // A Sierra SCI song: gm_midi is the standard MIDI file (MIDI synthesizer playback and export); the
+        // AdLib arrangement adlib_midi, the game's patch.003 and the SCI0 header play through Sierra's
+        // AdLib driver on OPL. version: 0 = SCI1 and later, 1 = early SCI0, 2 = late SCI0.
+        globals["midi_create_sci"] = object : VarArgFunction() {
+            override fun invoke(args: Varargs): Varargs {
+                val smf = toBytes(args.arg(1)) ?: return NIL
+                val adlib = toBytes(args.arg(2)) ?: return NIL
+                val patch = toBytes(args.arg(3)) ?: return NIL
+                if (patch.size != 1344 && patch.size != 2690 && patch.size != 5382) return NIL
+                val version = when (args.arg(4).optint(0)) {
+                    1 -> adventureexplorer.audio.SciSoundVersion.SCI0_EARLY
+                    2 -> adventureexplorer.audio.SciSoundVersion.SCI0_LATE
+                    else -> adventureexplorer.audio.SciSoundVersion.SCI1
+                }
+                val header = if (args.arg(5).isnil()) ByteArray(0) else toBytes(args.arg(5)) ?: ByteArray(0)
+                val handle = nextMidiHandle++
+                midis[handle] = MidiData(smf, null, adventureexplorer.model.SciAdlibSong(adlib, patch, version, header))
+                return valueOf(handle)
+            }
         }
 
         // midi_create_raw(data) -> midi_handle

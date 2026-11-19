@@ -17,6 +17,7 @@ Copyright (C) the ScummVM Team. https://www.scummvm.org - https://github.com/scu
 | `audio/imuse/ImuseSequencer.kt`, `ImuseSong.kt`, `ImuseDevice.kt`, `JavaMidiDevice.kt` | iMUSE player, parts and SysEx handler: `engines/scumm/imuse/imuse_player.cpp`, `imuse_part.cpp`, `sysex_scumm.cpp` (GPLv2+), plus the timing and jump parts of `MidiParser` and the `MidiDriver` interface |
 | `audio/imuse/AdlibOplDevice.kt`, `audio/MidiOplRenderer.kt` | `MidiDriver_ADLIB`, `audio/adlib.cpp` (GPLv2+), and its General MIDI FM bank |
 | `audio/ScummAdPlayer.kt` | `Player_AD`, `engines/scumm/players/player_ad.cpp` (GPLv3+) |
+| `audio/SciAdlibDevice.kt` | Sierra SCI AdLib driver, `MidiDriver_AdLib`, `engines/sci/sound/drivers/adlib.cpp` (GPLv3+): voice allocation, velocity tables, frequency table, `patch.003` instrument bank layout |
 | `audio/CmfOplDevice.kt` | register layout of `engines/igor/midi.cpp` (GPLv3+) |
 | `audio/ImuseBundleCodecs.kt` | `BundleCodecs::decompressCodec`, `engines/scumm/imuse_digi/dimuse_codecs.cpp` |
 | `audio/GobAdlDecoder.kt` | Gob `AdLib` class, `engines/gob/sound/adlib.cpp` (GPLv2+) |
@@ -33,7 +34,7 @@ such script says so in its header or next to the ported function. Notably:
 
 | File | Derived from |
 |---|---|
-| `sci/engine.lua` | `engines/sci/resource/` (resource maps, volumes, `DecompressorLZW`, `DecompressorHuffman`, `DecompressorLZS`, DCL), `engines/sci/graphics/` (pictures, views, palettes, fonts, cursors) and the sound resource handling of `engines/sci/sound/` (track layout, device ids, event stream and timing). The MT-32 to General MIDI instrument table is original work from the Roland timbre list |
+| `sci/engine.lua` | `engines/sci/resource/` (resource maps, volumes, `DecompressorLZW`, `DecompressorHuffman`, `DecompressorLZS`, DCL), `engines/sci/graphics/` (pictures, views, palettes, fonts, cursors) and the sound handling of `engines/sci/sound/` and `engines/sci/resource/resource_audio.cpp` (track layout, device ids, event stream and timing, `MidiParser_SCI` start-up commands, `SciMusic::determineChannelMap` channel mapping). The MT-32 to General MIDI instrument table is original work from the Roland timbre list |
 | other `*/engine.lua`, `scumm/*.lua`, `shared/westwood.lua`, `sky/*.lua`, ... | the corresponding ScummVM engines; see each file |
 
 ScummVM data files (such as `lure.dat`) are not distributed with this program.

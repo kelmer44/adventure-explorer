@@ -148,6 +148,11 @@ channel-15 loop/cue signals. Validation (2026-11-16): 1,418 converted songs from
 digital-only sounds decode as PCM. The MT-32 to General MIDI table maps the MT-32 timbre list by
 instrument family; it is not a copy of ScummVM's table.
 
+AdLib music (2026-11-19): `SciAdlibDevice.kt` ports `engines/sci/sound/drivers/adlib.cpp`; the Lua
+builds what that driver receives following `sound/midiparser_sci.cpp` (`sendInitCommands`,
+`remapChannel`) and `sound/music.cpp` (`determineChannelMap`), with channel flags from
+`resource/resource_audio.cpp`. Local ScummVM checkouts used: ~/Desktop/source/scummvm.
+
 ### HOLMES
 Scummmvm source code (/scummvm-fork folder in the workspace or http://github.com/scummvm/scummvm)
 Source code for some tools in ags/tools/holmes

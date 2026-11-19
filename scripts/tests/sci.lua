@@ -85,6 +85,7 @@ print('SCI synthetic format/map regressions passed')
 -- Sound (type 4): SCI1 tracks per device, SCI0 channel masks, digital samples.
 local function str(...) return string.char(...) end
 function midi_create_raw(bytes) return {midi = bytes} end
+function midi_create_sci(gm, adlib, patch, version, header) return {midi = gm, adlib = adlib, patch = patch, version = version} end
 function sound_create_pcm(rate, bits, channels, signed, data) return {rate = rate, bits = bits, pcm = data} end
 local sound_content = up(engine.load_resource, 'sci_sound_content')
 local SMF_HEAD = 'MThd' .. str(0, 0, 0, 6, 0, 0, 0, 1, 0, 60) .. 'MTrk'
@@ -139,9 +140,46 @@ assert(c.kind == 'midi' and c.desc:find('Roland', 1, true))
 assert(c.smf:find(str(0x91, 60, 100), 1, true) and not c.smf:find(str(0x92), 1, true), 'only Roland channels')
 -- no Roland channel: fall back to AdLib channels
 head0 = str(0)
-for ch = 0, 15 do head0 = head0 .. str(1, ch == 2 and 0x02 or 0x04) end
+for ch = 0, 15 do head0 = head0 .. str(1, ch == 2 and 0x02 or ch == 1 and 0x04 or 0) end
 c = sound_content(head0 .. stream0, 'sci0')
-assert(c.desc:find('AdLib', 1, true) and c.smf:find(str(0x92, 62, 100), 1, true) and not c.smf:find(str(0x91), 1, true))
+assert(c.desc:find('AdLib', 1, true) and c.smf:find(str(0x91, 60, 100), 1, true) and not c.smf:find(str(0x92), 1, true))
+-- AdLib arrangement: the AdLib track (type 00) on the driver's device channels. SCI1 songs without
+-- a rhythm bank use the highest free device channel; with one (5382-byte patch) channels 0-8.
+local sci_adlib_song = up(sound_content, 'sci_adlib_song')
+local channel_map = up(sci_adlib_song, 'sci_adlib_channel_map')
+local adlib_events = str(0, 0xC1, 5, 0, 0xB1, 7, 100, 0, 0x91, 60, 100, 0xF8, 10, 0x81, 60, 64, 0, 0xFC)
+c = sound_content(sci1(0x00, 1, adlib_events), 'sci11', {patch = string.rep(str(0), 2690)})
+assert(c.adlib and c.adlib.version == 0 and c.adlib.header == '')
+assert(c.adlib.smf:find(str(0xBF, 75, 1), 1, true), 'voice count sent on the device channel')
+assert(c.adlib.smf:find(str(0xCF, 5), 1, true) and c.adlib.smf:find(str(0x9F, 60, 100), 1, true), 'events moved to device channel 15')
+assert(c.adlib.smf:find(str(0x8F, 60, 64), 1, true))
+c = sound_content(sci1(0x00, 1, adlib_events), 'sci11', {patch = string.rep(str(0), 5382)})
+assert(c.adlib.smf:find(str(0xB8, 75, 1), 1, true) and c.adlib.smf:find(str(0x98, 60, 100), 1, true), 'rhythm bank: channels 0-8')
+-- an unknown bank size, or no AdLib track, leaves OPL on the generic path
+assert(sound_content(sci1(0x00, 1, adlib_events), 'sci11', {patch = 'short'}).adlib == nil)
+assert(sound_content(sci1(0x07, 1, adlib_events), 'sci11', {patch = string.rep(str(0), 2690)}).adlib == nil)
+-- driver channel map: nine voices; non-essential channels (priority > 0) are dropped when they do not fit,
+-- the control channel is never mapped, the rhythm channel (flag 2) keeps its number
+local entries = {}
+for ch = 1, 9 do entries[#entries + 1] = {channel = ch, flags = 0, prio = 0, poly = 1} end
+entries[#entries + 1] = {channel = 10, flags = 0, prio = 5, poly = 1}
+entries[#entries + 1] = {channel = 15, flags = 0, prio = 0, poly = 1}
+local chmap, voices = channel_map(entries, false)
+assert(chmap[1] and chmap[9] and chmap[10] == nil and chmap[15] == nil, 'priority and control channel')
+entries = {{channel = 9, flags = 2, prio = 0, poly = 1}, {channel = 3, flags = 0, prio = 0, poly = 2}}
+chmap, voices = channel_map(entries, true)
+assert(chmap[9] == 9 and chmap[3] == 8 and voices[3] == 2, 'rhythm channel stays on 9, others use 0-8')
+-- SCI0 AdLib: header kept for the driver, only channels played by AdLib (0x04), no remapping
+head0 = str(0)
+for ch = 0, 15 do head0 = head0 .. str(1, ch == 1 and 0x04 or 0x01) end
+c = sound_content(head0 .. stream0, 'sci0', {patch = string.rep(str(0), 2690)})
+assert(c.adlib.version == 2 and #c.adlib.header == 0x21 and c.adlib.smf:find(str(0x91, 60, 100), 1, true))
+assert(not c.adlib.smf:find(str(0x92), 1, true))
+-- early SCI0: header is 0x11 bytes with one byte per channel (voices << 4 | device bits)
+local early0 = str(0)
+for ch = 0, 15 do early0 = early0 .. str(ch == 1 and 0x11 or 0x00) end
+c = sound_content(early0 .. stream0, 'sci0', {patch = string.rep(str(0), 2690), early = true})
+assert(c.kind == 'midi' and c.adlib.version == 1 and #c.adlib.header == 0x11 and c.smf:find(str(0x91, 60, 100), 1, true))
 -- the tree lists sounds as MIDI / sample / text according to their content
 do
     local songs = {sci1(0x07, 1, events1), sci1(0x00, 0xFE, dchan:sub(3)),

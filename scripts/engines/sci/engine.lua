@@ -13,6 +13,10 @@
 --
 -- Graphics: SCI0/SCI1 EGA + VGA views (sprites), vector pictures (EGA dithered
 -- and VGA), SCI1.1 bitmap pictures and views, fonts, cursors, palettes, texts.
+-- Music: sounds become standard MIDI (General MIDI track when the game has one);
+-- for OPL playback the AdLib track is prepared for Sierra's AdLib driver
+-- (SciAdlibDevice.kt), including its channel mapping and voice budget.
+--
 -- The decompressors, renderers and the sound/music handling are ports of, and
 -- derived from, the ScummVM SCI engine (engines/sci/resource, graphics and
 -- sound), Copyright (C) the ScummVM Team, https://www.scummvm.org, licensed
@@ -2213,8 +2217,8 @@ end
 --   12 PC speaker, 13 Tandy / PS-1.
 -- Events: [delta] [status] [data], delta = F8 (+240) repeated then one byte,
 --   running status allowed, FC ends the stream. One tick is 1/60 second.
---   Channel 15 program changes carry loop / cue signals, and controllers
---   4B..62 are driver commands: neither is real MIDI and both are dropped.
+--   Channel 15 is the control channel: its program changes carry loop / cue signals and it is
+--   never played. Controllers 4B..62 are driver commands, not MIDI. All of these are dropped.
 
 local SCI_MIDI_TICKS = 60  -- ticks per quarter note; with 1,000,000 us per quarter = 60 ticks/s
 
@@ -2294,7 +2298,7 @@ local function sci_decode_events(data, first, last, keep, remap, out)
                 local c = data:byte(p + 1)
                 if not c or p + 1 > last then break end
                 p = p + 2
-                if not keep or keep(ch) then
+                if ch ~= 15 and (not keep or keep(ch)) then  -- channel 15 is the control channel, never played
                     local ok = hi == 0x80 or hi == 0x90 or hi == 0xE0
                     if hi == 0xB0 then ok = SCI_KEEP_CONTROLLERS[a] end
                     if ok then
@@ -2347,9 +2351,253 @@ local function sci_digital_sample(data)
     end
 end
 
--- Convert one SCI sound resource to a format-0 standard MIDI file.
--- Returns smf, description or nil, reason.
-local function sci_sound_to_midi(data, ver)
+-- Format-0 standard MIDI file from events {tick, seq, bytes}, one tick = 1/60 s
+local function sci_build_smf(events, end_tick)
+    table.sort(events, function(x, y)
+        if x.tick ~= y.tick then return x.tick < y.tick end
+        return x.seq < y.seq
+    end)
+    local body = {"\0\255\81\3" .. string.char(floor(1000000 / 65536) % 256, floor(1000000 / 256) % 256, 1000000 % 256)}
+    local prev = 0
+    for _, e in ipairs(events) do
+        body[#body + 1] = midi_vlq(e.tick - prev) .. e.bytes
+        prev = e.tick
+    end
+    body[#body + 1] = midi_vlq(end_tick > prev and end_tick - prev or 0) .. "\255\47\0"
+    local track = table.concat(body)
+    local smf = "MThd" .. midi_be32(6) .. "\0\0\0\1" .. string.char(floor(SCI_MIDI_TICKS / 256), SCI_MIDI_TICKS % 256)
+        .. "MTrk" .. midi_be32(#track) .. track
+    return smf, math.max(end_tick, prev)
+end
+
+-- SCI0 header: early sounds hold one byte per channel (voices << 4 | device bits), late sounds two
+-- bytes (voices, device mask). Header length 0x11 / 0x21; events follow it.
+local function sci0_header_size(early) return early and 0x11 or 0x21 end
+local function sci0_flags(data, early, ch)
+    if early then return (data:byte(2 + ch) or 0) % 8 end
+    return data:byte(3 + ch * 2) or 0
+end
+-- Channels played by a device: its mask bit, plus the rhythm channel (9) when the device has one.
+local function sci0_channels(data, early, bit, rhythm)
+    local set, n = {}, 0
+    for ch = 0, 15 do
+        local flagged = floor(sci0_flags(data, early, ch) / bit) % 2 == 1
+        if flagged or (ch == 9 and rhythm) then set[ch] = true end
+        if flagged and ch ~= 15 then n = n + 1 end
+    end
+    return set, n
+end
+
+-- Channel mapping of one song on the AdLib driver: SCI1+ maps song channels onto the device channels
+-- (nine voices in all, priorities decide which channels are dropped; the rhythm bank leaves channels
+-- 0-8 to melodic parts). Port of ScummVM SciMusic::determineChannelMap for a single song.
+-- entries: {channel, flags, prio, poly}. Returns {[song channel] = device channel}, {[song channel] = voices}.
+local function sci_adlib_channel_map(entries, rhythm)
+    local first, last = 0, rhythm and 8 or 15
+    local chan = {}
+    for _, e in ipairs(entries) do
+        local c = chan[e.channel]
+        if not c then
+            c = {prio = e.prio, voices = e.poly, dont_map = false, dont_remap = false, mute = false}
+            chan[e.channel] = c
+        end
+        if e.flags % 2 == 1 then c.dont_map = true end
+        if floor(e.flags / 2) % 2 == 1 then c.dont_remap = true end
+        if floor(e.flags / 4) % 2 == 1 then c.mute = true end
+    end
+    local map, prio_of, voices_of, remap_of = {}, {}, {}, {}
+    local free = 9
+    local function evict(i)
+        free = free + (voices_of[i] or 0)
+        map[i] = nil; prio_of[i] = 0; voices_of[i] = 0; remap_of[i] = false
+    end
+    local function swap(i, j)
+        map[i], map[j] = map[j], map[i]
+        prio_of[i], prio_of[j] = prio_of[j] or 0, prio_of[i] or 0
+        voices_of[i], voices_of[j] = voices_of[j] or 0, voices_of[i] or 0
+        remap_of[i], remap_of[j] = remap_of[j] or false, remap_of[i] or false
+    end
+    local function lowest()
+        local max, ch = 0, nil
+        for i = 0, 15 do
+            if (prio_of[i] or 0) > max then max = prio_of[i]; ch = i end
+        end
+        return ch
+    end
+    local function place(c)
+        local ch = chan[c]
+        if c == 15 or ch.dont_map or ch.mute then return true end
+        local dont_remap = ch.dont_remap
+        local dev
+        if dont_remap and map[c] == nil then dev = c end
+        if dev == nil then
+            for j = 0, 15 do
+                if map[j] == c then dev = j; break end
+                if map[j] == nil and j >= first and j <= last then dev = j end
+            end
+        end
+        local prio = ch.prio
+        if prio > 0 then prio = 16 - prio end  -- non-essential: the lower the number, the more important
+        if dev == nil and prio > 0 then return true end
+        if dev == nil then
+            dev = lowest()
+            if dev ~= nil then evict(dev) end
+        end
+        if dev == nil then return false end
+        if map[dev] == c then return true end
+        local needed = ch.voices
+        if free < needed then
+            if prio > 0 then return true end
+            repeat
+                local j = lowest()
+                if j == nil then return false end
+                evict(j)
+            until free >= needed
+        end
+        map[dev] = c; voices_of[dev] = needed; prio_of[dev] = prio; remap_of[dev] = dont_remap
+        free = free - needed
+        if not dont_remap or dev == c then return true end
+        if not remap_of[c] then swap(dev, c); return true end
+        if prio > 0 then evict(dev); return true end
+        if (prio_of[c] or 0) > 0 then evict(c); swap(dev, c); return true end
+        return false
+    end
+    for _, e in ipairs(entries) do
+        if not place(e.channel) then map = {}; break end
+    end
+    local chmap, voices = {}, {}
+    for dev = 0, 15 do
+        if map[dev] then chmap[map[dev]] = dev; voices[map[dev]] = voices_of[dev] end
+    end
+    for c, ch in pairs(chan) do
+        if ch.dont_map and c ~= 15 then chmap[c] = c; voices[c] = ch.voices end
+    end
+    return chmap, voices
+end
+
+-- Controllers the AdLib driver acts on: volume, pan, hold pedal, voice count, all notes off, and
+-- (SCI0 only) velocity control.
+local SCI_ADLIB_CONTROLLERS = {[7] = true, [10] = true, [64] = true, [75] = true, [123] = true}
+
+-- Decode an event stream for the AdLib driver: events are moved to their device channel (chmap, nil =
+-- channel not played), other events are kept as the driver sees them.
+local function sci_decode_adlib(data, first, last, chmap, sci0, out, used)
+    local p, tick, status = first, 0, 0
+    last = math.min(last, #data)
+    while p <= last do
+        local delta = 0
+        while p <= last do
+            local b = data:byte(p)
+            p = p + 1
+            if b == 0xF8 then delta = delta + 240 else delta = delta + b; break end
+        end
+        tick = tick + delta
+        if p > last then break end
+        local b = data:byte(p)
+        if b >= 0x80 then status = b; p = p + 1 end
+        if status == 0xFC or status < 0x80 then break end
+        if status == 0xF0 then
+            while p <= last and data:byte(p) ~= 0xF7 do p = p + 1 end
+            p = p + 1
+        elseif status >= 0xF1 then
+            break
+        else
+            local hi, ch = status - status % 16, status % 16
+            local a = data:byte(p)
+            if not a or p > last then break end
+            local dev = chmap[ch]
+            if dev ~= nil then used[ch] = true end
+            if hi == 0xC0 or hi == 0xD0 then
+                p = p + 1
+                if hi == 0xC0 and dev ~= nil then
+                    out[#out + 1] = {tick = tick, seq = #out, bytes = string.char(0xC0 + dev, a % 128)}
+                end
+            else
+                local c = data:byte(p + 1)
+                if not c or p + 1 > last then break end
+                p = p + 2
+                if dev ~= nil then
+                    local ok = hi == 0x80 or hi == 0x90 or hi == 0xE0
+                    if hi == 0xB0 then ok = SCI_ADLIB_CONTROLLERS[a] or (sci0 and a == 78) end
+                    if ok then
+                        out[#out + 1] = {tick = tick, seq = #out, bytes = string.char(hi + dev, a % 128, c % 128)}
+                    end
+                end
+            end
+        end
+    end
+    return tick
+end
+
+-- Start-up commands the interpreter sends before a song: hold off, the channel's voice count,
+-- program 0, volume 127, pan centre, pitch centre. Placed ahead of the song's own events.
+local function sci_adlib_init(events, chmap, voices, used, sci0)
+    local k = -1000
+    local function add(bytes) events[#events + 1] = {tick = 0, seq = k, bytes = bytes}; k = k + 1 end
+    for c = 0, 15 do
+        local dev = chmap[c]
+        if dev ~= nil and used[c] then
+            add(string.char(0xB0 + dev, 64, 0))
+            if not sci0 then
+                add(string.char(0xB0 + dev, 75, voices[c] or 0))
+                add(string.char(0xC0 + dev, 0))
+            end
+            add(string.char(0xB0 + dev, 7, 127))
+            add(string.char(0xB0 + dev, 10, 64))
+            add(string.char(0xE0 + dev, 0, 64))
+        end
+    end
+end
+
+-- The AdLib arrangement of a sound for Sierra's AdLib driver: smf (device channels, voice counts,
+-- driver controllers), the SCI0 header, and the driver version (0 SCI1+, 1 early SCI0, 2 late SCI0).
+-- patch is the game's instrument bank (patch 3); nil when the sound has no AdLib track.
+local function sci_adlib_song(data, ver, early, patch)
+    if not patch or (#patch ~= 1344 and #patch ~= 2690 and #patch ~= 5382) then return nil end
+    local events, used, end_tick = {}, {}, 0
+    if ver == "sci0" then
+        if #data < sci0_header_size(early) + 1 then return nil end
+        local set, n = sci0_channels(data, early, early and 1 or 4, false)
+        if n == 0 then return nil end
+        local chmap = {}
+        for ch = 0, 14 do if set[ch] then chmap[ch] = ch end end
+        end_tick = sci_decode_adlib(data, sci0_header_size(early) + 1, #data, chmap, true, events, used)
+        sci_adlib_init(events, chmap, {}, used, true)
+        local smf = sci_build_smf(events, end_tick)
+        return {smf = smf, header = data:sub(1, sci0_header_size(early)), version = early and 1 or 2}
+    end
+    local tracks = sci1_tracks(data)
+    local chosen
+    for _, t in ipairs(tracks or {}) do
+        if t.type == 0x00 then
+            local chans = {}
+            for _, c in ipairs(t.channels) do
+                if c.number ~= 0xFE then chans[#chans + 1] = c end
+            end
+            if #chans > 0 then chosen = chans; break end
+        end
+    end
+    if not chosen then return nil end
+    local entries = {}
+    for _, c in ipairs(chosen) do
+        local poly = data:byte(c.offset + 2)
+        entries[#entries + 1] = {channel = c.number % 16, flags = floor(c.number / 16), prio = floor(poly / 16),
+            poly = poly % 16, channel_entry = c}
+    end
+    local chmap, voices = sci_adlib_channel_map(entries, #patch == 5382)
+    for _, e in ipairs(entries) do
+        local last = sci_decode_adlib(data, e.channel_entry.first, e.channel_entry.last, chmap, false, events, used)
+        if last > end_tick then end_tick = last end
+    end
+    if #events == 0 then return nil end
+    sci_adlib_init(events, chmap, voices, used, false)
+    local smf = sci_build_smf(events, end_tick)
+    return {smf = smf, header = "", version = 0}
+end
+
+-- Convert one SCI sound resource to a format-0 standard MIDI file (General MIDI where the game has
+-- such a track). early: early SCI0 header layout. Returns smf, description or nil, reason.
+local function sci_sound_to_midi(data, ver, early)
     local events, end_tick, desc = {}, 0, nil
     local tracks = ver ~= "sci0" and sci1_tracks(data)
     if tracks and #tracks == 0 then return nil, "empty sound" end
@@ -2381,54 +2629,58 @@ local function sci_sound_to_midi(data, ver)
             or string.format("device %02X", chosen.type), #chosen.channels)
     else
         if ver ~= "sci0" then return nil, "unrecognised track layout" end
-        if #data < 34 then return nil, "too short" end
-        -- device masks: prefer Roland (bit 0), then AdLib (bit 1), then everything
-        local function mask_of(ch) return data:byte(3 + ch * 2) end
-        local function channels_with(bit)
-            local set, n = {}, 0
-            for ch = 0, 15 do
-                if floor(mask_of(ch) / bit) % 2 == 1 then set[ch] = true; n = n + 1 end
-            end
-            return set, n
-        end
-        local set, n = channels_with(1)
+        if #data < sci0_header_size(early) + 1 then return nil, "too short" end
+        -- the Roland MT-32 channels (with the rhythm channel); AdLib channels when there are none
+        local set, n = sci0_channels(data, early, 1, true)
         local label = "Roland MT-32"
-        if n == 0 then set, n = channels_with(2); label = "AdLib" end
+        if n == 0 then set, n = sci0_channels(data, early, early and 1 or 4, false); label = "AdLib" end
         if n == 0 then
             set, n = {}, 16
             for ch = 0, 15 do set[ch] = true end
             label = "all"
         end
-        end_tick = sci_decode_events(data, 34, #data, function(ch) return set[ch] end, true, events)
+        end_tick = sci_decode_events(data, sci0_header_size(early) + 1, #data, function(ch) return set[ch] end, true, events)
         desc = string.format("%s channels, %d channels", label, n)
     end
-    if #events == 0 then return nil, "no notes" end
-    table.sort(events, function(x, y)
-        if x.tick ~= y.tick then return x.tick < y.tick end
-        return x.seq < y.seq
-    end)
-    local body = {"\0\255\81\3" .. string.char(floor(1000000 / 65536) % 256, floor(1000000 / 256) % 256, 1000000 % 256)}
-    local prev = 0
-    for _, e in ipairs(events) do
-        body[#body + 1] = midi_vlq(e.tick - prev) .. e.bytes
-        prev = e.tick
-    end
-    body[#body + 1] = midi_vlq(end_tick > prev and end_tick - prev or 0) .. "\255\47\0"
-    local track = table.concat(body)
-    local smf = "MThd" .. midi_be32(6) .. "\0\0\0\1" .. string.char(floor(SCI_MIDI_TICKS / 256), SCI_MIDI_TICKS % 256)
-        .. "MTrk" .. midi_be32(#track) .. track
-    return smf, string.format("%s, %.1f s", desc, math.max(end_tick, prev) / SCI_MIDI_TICKS)
+    if #events == 0 then return nil, "control signals only, nothing to play" end
+    local smf, total = sci_build_smf(events, end_tick)
+    return smf, string.format("%s, %.1f s", desc, total / SCI_MIDI_TICKS)
 end
 
--- What a sound resource contains: {kind = "midi", smf, desc}, {kind = "sound",
--- rate, pcm} or {kind = "none", reason}. Sounds carrying a digital sample next to
--- a tiny MIDI stub are the sample's effect.
-local function sci_sound_content(data, ver)
-    local smf, desc = sci_sound_to_midi(data, ver)
+-- What a sound resource contains: {kind = "midi", smf, desc, adlib}, {kind = "sound", rate, pcm} or
+-- {kind = "none", reason}. Sounds carrying a digital sample next to a tiny MIDI stub are the sample's
+-- effect. ctx: {early = early SCI0 header, patch = the game's AdLib instrument bank}.
+local function sci_sound_content(data, ver, ctx)
+    ctx = ctx or {}
+    local smf, desc = sci_sound_to_midi(data, ver, ctx.early)
     local rate, pcm = sci_digital_sample(data)
     if rate and (not smf or #smf < 4096) then return {kind = "sound", rate = rate, pcm = pcm} end
-    if smf then return {kind = "midi", smf = smf, desc = desc} end
+    if smf then
+        return {kind = "midi", smf = smf, desc = desc, adlib = sci_adlib_song(data, ver, ctx.early, ctx.patch)}
+    end
     return {kind = "none", reason = desc or "unsupported"}
+end
+
+-- Early SCI0 sounds have a shorter header (see ScummVM ResourceManager::detectEarlySound); sound 1 shows which.
+local function sci0_is_early(game_path, info)
+    if info.sci0_early == nil then
+        local early = true
+        local r = find_resource(info, 4, 1)
+        local d = r and read_resource(game_path, info, r)
+        if d and #d >= 0x22 and u16le(d, 0x20) == 0 and d:byte(0x22) == 0 then early = false end
+        info.sci0_early = early
+    end
+    return info.sci0_early
+end
+
+-- The game's AdLib instrument bank (patch 3), when it is one of the known sizes
+local function sci_adlib_patch(game_path, info)
+    if info.adlib_patch == nil then
+        local r = find_resource(info, 9, 3)
+        local d = r and read_resource(game_path, info, r)
+        info.adlib_patch = (d and (#d == 1344 or #d == 2690 or #d == 5382)) and d or false
+    end
+    return info.adlib_patch or nil
 end
 
 function engine.detect(game_path)
@@ -2485,7 +2737,8 @@ function engine.get_resources(game_path)
                 if t == 11 then res_type = "palette" end
                 if t == 4 then
                     local data = read_resource(game_path, info, r)
-                    local kind = data and sci_sound_content(data, info.ver).kind
+                    local early = info.ver == "sci0" and sci0_is_early(game_path, info)
+                    local kind = data and sci_sound_content(data, info.ver, {early = early}).kind
                     res_type = kind == "midi" and "midi" or kind == "sound" and "sound" or "text"
                 end
                 table.insert(kids, {
@@ -2766,16 +3019,22 @@ function engine.load_resource(game_path, resource_id, palette_id)
 
     -- SOUND resource (type 4): a MIDI song, or a digital sample (SCI1+)
     if rtype == 4 then
-        local c = sci_sound_content(data, info.ver)
+        local patch = sci_adlib_patch(game_path, info)
+        local c = sci_sound_content(data, info.ver, {
+            early = info.ver == "sci0" and sci0_is_early(game_path, info), patch = patch})
         if c.kind == "sound" then
             return {
                 type = "sound", sound = sound_create_pcm(c.rate, 8, 1, false, c.pcm),
                 description = string.format("Sound %d: digital sample, %d Hz 8-bit mono, %d bytes", rnum, c.rate, #c.pcm),
             }
         elseif c.kind == "midi" then
+            -- OPL playback runs the song's AdLib track through Sierra's AdLib driver and instrument
+            -- bank; MIDI playback and export use the General MIDI conversion
+            local handle = c.adlib and midi_create_sci(c.smf, c.adlib.smf, patch, c.adlib.version, c.adlib.header)
             return {
-                type = "midi", midi = midi_create_raw(c.smf),
-                description = string.format("Sound %d: %s (%d bytes SCI, %d bytes MIDI)", rnum, c.desc, #data, #c.smf),
+                type = "midi", midi = handle or midi_create_raw(c.smf),
+                description = string.format("Sound %d: %s (%d bytes SCI, %d bytes MIDI)%s", rnum, c.desc, #data, #c.smf,
+                    handle and "; OPL plays the AdLib track" or ""),
             }
         end
         return { type = "text", text = string.format("Sound %d: %d bytes (%s)", rnum, #data, c.reason) }

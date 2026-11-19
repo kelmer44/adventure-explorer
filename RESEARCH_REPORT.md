@@ -795,7 +795,7 @@ All integers little-endian; offsets below are 0-based from the start of the reso
 | Offset | Size | Meaning |
 |--------|------|---------|
 | 0x00   | 1    | flags (digital data) |
-| 0x01   | 32   | 16 channel headers: voices, device mask (bit 0 Roland MT-32, bit 1 AdLib, others PC speaker / CMS / Tandy) |
+| 0x01   | 32   | 16 channel headers: voices, device mask (bit 0 Roland MT-32, bit 2 AdLib, others PCjr / PC speaker / Casio) |
 | 0x21   | n    | events for all 16 channels |
 
 **SCI1 / SCI1.1 / SCI2** (one track per sound device):
@@ -810,6 +810,23 @@ events; `size` covers the header. Track types: `00` AdLib, `07` General MIDI, `0
 Blaster, `0C` Roland MT-32, `12` PC speaker, `13` Tandy / PS-1. Channel number `FE` is a digital
 sample: u16 rate, u16 length, u16 loop start, u16 loop end, then unsigned 8-bit PCM. A sound
 with only `FF FF` after the header is empty.
+
+Early SCI0 sounds have a 0x11-byte header: one byte per channel (voices << 4 | device bits: bit 0 AdLib or
+Roland, bit 1 PCjr, bit 2 PC speaker, bit 3 control / rhythm). ScummVM tells the two apart by sound 1:
+a 0 word at 0x1F and a 0 byte at 0x21 mean the late layout.
+
+SCI1+ channel header: byte 0 = channel (low nibble) | flags (1 never remap-and-always-play, 2 keep the
+channel number: rhythm channel, 4 start muted), byte 1 = voices (low nibble) | priority (high nibble,
+0 = essential). Channel 15 is the control channel and is never played.
+
+**AdLib driver** (`ADL.DRV`, patch 3 = instrument bank): 28 bytes per instrument (two 13-byte
+operators + two waveform bytes); 1344 bytes = 48 instruments (SCI0, also embedded in early `ADL.DRV`),
+2690 = 96 (SCI1), 5382 = 190 + a 62-byte rhythm key map (SCI1.1). Nine voices; controller 0x4B on a
+channel sets its voice count, 0x4E is velocity control (SCI0), 0x7B all notes off; velocity goes
+through two 64-entry tables; frequency = 48-entry table (4 steps per semitone). At song start the
+interpreter maps the song's channels onto the device (highest free device channel first, channels 0-8
+when a rhythm bank exists, priority and the nine-voice budget decide what is dropped) and sends each
+mapped channel hold off, voice count, program 0, volume 127, pan centre, pitch centre.
 
 **Events** (both layouts): `[delta] [status] [data...]`, delta = zero or more `F8` bytes (240 ticks
 each) then one byte; running status is allowed; `FC` ends the stream; one tick is 1/60 second, so a

@@ -1198,18 +1198,28 @@ decompress; previews cover 152 backgrounds, 825 sprite/animation resources, 11 f
 seven palettes, including embedded picture palettes. Messages and scripts currently
 show metadata only.
 
-Sound resources (type 4) are decoded for SCI0, SCI1, SCI1.1 and SCI2: songs are converted
-to a standard MIDI file (one tick = 1/60 s), so they offer the usual choice between the
-OPL (AdLib) emulation and the Java MIDI synthesizer, and export as `.mid` or `.wav`.
-SCI1+ sounds hold one track per sound device; the converter uses the General MIDI track
-when there is one (Larry 6, King's Quest 6, Space Quest 5, Gabriel Knight), otherwise the
-Roland MT-32 track, otherwise the AdLib track. MT-32 and AdLib tracks use Sierra's
-MT-32 instrument numbers, which are mapped to the nearest General MIDI program, so those
-songs sound close to the original but not identical. SCI0 sounds hold one stream for all
-channels; the Roland MT-32 channels are used (AdLib channels if there are none). Loop
-and cue signals and driver controllers are dropped. Sounds with a digital sample (Sound
-Blaster effects in SCI1 games) play as 8-bit PCM. The resource tree shows each sound as
-music, sample or text, so sounds with no tracks at all (empty placeholders) stay text.
+Sound resources (type 4) are decoded for SCI0, SCI1, SCI1.1 and SCI2 and play two ways, chosen with
+the usual output switch (the app-wide OPL / Java MIDI setting):
+
+- **OPL (default)** plays the song's AdLib track the way the game's `ADL.DRV` does: Sierra's
+  instrument bank (`patch.003`) on the OPL2 emulation, with the driver's nine voices, per-channel voice
+  counts and priorities (channels that do not fit are dropped, as on a real card), velocity and volume
+  tables, quarter-semitone pitch steps and the rhythm-channel key map of SCI1.1 games. It should sound
+  like the game does under DOSBox with an AdLib / Sound Blaster. Mono, like the original card.
+- **Java MIDI** plays a General MIDI conversion (one tick = 1/60 s): the General MIDI track when
+  the game has one (Larry 6, King's Quest 6, Space Quest 5, Gabriel Knight), otherwise the Roland MT-32
+  track, otherwise the AdLib track. MT-32 and AdLib tracks use Sierra's MT-32 instrument numbers, mapped
+  to the nearest General MIDI program, so those songs sound close but not identical. `.mid` export uses
+  this conversion; `.wav` export follows the selected output.
+
+SCI1+ sounds hold one track per sound device; SCI0 sounds hold one stream for all channels (Roland
+MT-32 channels for MIDI, the channels flagged for AdLib for OPL; early SCI0 sounds have a shorter
+header, which is handled but untested). Sounds with no AdLib track, or whose AdLib track only has the
+control channel, play through the generic General MIDI FM bank instead. Not modelled: dynamic mute and
+voice-count changes in the middle of a song (the channel map is fixed when the song starts), loops
+and cues. Channel 15 (control channel) is never played, as in the interpreter. Sounds with a digital
+sample (Sound Blaster effects in SCI1 games) play as 8-bit PCM. The resource tree shows each sound as music,
+sample or text; sounds with nothing to play (no tracks, or control signals only) stay text.
 Digital speech (`Audio` resources) is not decoded yet.
 
 Run `lua scripts/tests/sci.lua /path/to/GK` for a complete resource scan (including every

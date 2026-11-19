@@ -20,9 +20,14 @@ object MidiOplRenderer {
     fun render(midi: MidiData): SoundData {
         val cmf = midi.cmfSource?.let { CmfToMidiConverter.oplData(it) }
         require(midi.cmfSource == null || cmf != null) { "Invalid CMF instrument data" }
-        val sequence = MidiSystem.getSequence((cmf?.midi ?: midi.bytes).inputStream())
+        val sci = midi.sciAdlib
+        val sequence = MidiSystem.getSequence((cmf?.midi ?: sci?.midi ?: midi.bytes).inputStream())
         val chip = Opl3(SAMPLE_RATE)
-        val device: OplMidiOutput = if (cmf != null) CmfOplDevice(chip, cmf.instruments) else StandardMidiOplDevice(chip)
+        val device: OplMidiOutput = when {
+            cmf != null -> CmfOplDevice(chip, cmf.instruments)
+            sci != null -> SciAdlibDevice(chip, sci.version, sci.patch).also { if (sci.header.isNotEmpty()) it.initTrack(sci.header) }
+            else -> StandardMidiOplDevice(chip)
+        }
         val out = ByteArrayOutputStream()
         val frame = IntArray(2)
         val buffer = ByteArray(4096)
